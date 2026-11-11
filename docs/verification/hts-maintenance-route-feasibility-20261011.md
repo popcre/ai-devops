@@ -1,3 +1,10 @@
+---
+summary: Evidence that no privileged toolkit-installation route was available to a restricted Codex session on edge-dev3 on 2026-10-11 (HTS install).
+kind: proof
+status: done
+read-when: Installing the toolkit on edge-dev3 from a restricted session
+---
+
 # HTS installation maintenance-route feasibility
 
 Observed October 11, 2026, 10:52 AM EDT on edge-dev3. Owner: Codex; existing issues popcre/ai-devops#335 and popcre/designflow-backend#94.

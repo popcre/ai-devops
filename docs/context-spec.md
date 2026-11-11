@@ -1,3 +1,10 @@
+---
+summary: Compact current contract for what Claude and Codex context loads - globals, AGENTS.md router, skills.
+kind: spec
+status: current
+read-when: Deciding where an instruction belongs in the context layout
+---
+
 # Current context contract
 
 Selective fresh-reader checks for complex plans/handoffs: read

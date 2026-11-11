@@ -1,3 +1,10 @@
+---
+summary: Measured StepFun review cost findings from a recording proxy, Oct 2026 (issue 1336).
+kind: proof
+status: done
+read-when: Judging StepFun review token cost
+---
+
 # StepFun review cost — measured findings (2026-10-07/08)
 
 Related: [issue #1336](https://github.com/popcre/ai-devops/issues/1336),

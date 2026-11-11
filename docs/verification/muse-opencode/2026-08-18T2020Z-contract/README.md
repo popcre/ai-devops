@@ -1,3 +1,10 @@
+---
+summary: Redacted probe of the Meta Model API and OpenCode contract for muse-spark-1.2-contributor (listing, streaming, tools, errors).
+kind: proof
+status: done
+read-when: Checking how the Muse Model API and OpenCode behaved at 1.2
+---
+
 # Muse Model API contract probe
 
 Checked on 2026-08-18 using a redacted account probe. No repository content, API key,

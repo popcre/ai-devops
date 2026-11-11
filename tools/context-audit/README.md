@@ -1,3 +1,10 @@
+---
+summary: How to run the read-only context audit that measures instruction and skill context owned by this repository
+kind: ops
+status: current
+read-when: measuring always-loaded instruction and skill size
+---
+
 # Context audit
 
 This read-only tool measures the instruction and skill context owned by this

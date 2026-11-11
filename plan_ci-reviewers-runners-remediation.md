@@ -1,3 +1,10 @@
+---
+summary: Remediation plan for CI, reviewer and runner problems from the 2026-10-02 transcript analysis; steps largely still open.
+kind: plan
+status: open
+read-when: Working on CI runner, reviewer and WarpBuild routing remediation
+---
+
 # Implementation plan — CI / reviewers / runners remediation (2026-10-02)
 
 Owner issue: **TBD — open before implementation.** One parent issue owns this

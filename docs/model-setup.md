@@ -1,3 +1,10 @@
+---
+summary: How to adapt model commands and roles to a machine and how scripts use them.
+kind: ops
+status: current
+read-when: Adapting model commands for a new machine
+---
+
 # Model Setup
 
 How to adapt the model **commands** to your machine. For the full list of

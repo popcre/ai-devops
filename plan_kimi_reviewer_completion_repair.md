@@ -1,3 +1,10 @@
+---
+summary: Plan to repair Kimi reviewer completion with upstream lock and installed canary matrix; all five steps complete.
+kind: plan
+status: done
+read-when: Checking the Kimi reviewer completion repair
+---
+
 # IMPLEMENTATION PLAN — Kimi reviewer completion repair (2026-08-21)
 
 Handoff: `HANDOFF.d/2026-08-21T1122Z-edge-dev-codex-reviewer-repair-plans.md` (retired; recoverable from git history)

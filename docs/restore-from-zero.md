@@ -1,3 +1,10 @@
+---
+summary: How to rebuild the AI coding workflow on a new Windows 11 or Ubuntu machine.
+kind: ops
+status: current
+read-when: Rebuilding a machine from nothing
+---
+
 # Restore From Zero
 
 How to rebuild this AI coding workflow on a new Windows 11 computer or Ubuntu

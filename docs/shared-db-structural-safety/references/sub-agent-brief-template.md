@@ -1,3 +1,10 @@
+---
+summary: Optional brief template for delegating shared-db structural work to a subagent.
+kind: ops
+status: current
+read-when: Writing a brief for a shared-db subagent
+---
+
 # Sub-agent brief template (shared-db)
 
 Optional delegation template; direct claim-first work needs no subagent.

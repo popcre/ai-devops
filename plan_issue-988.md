@@ -1,3 +1,10 @@
+---
+summary: Plan for issue 988 scheduled full verification failing; confirm new runner lane passes, harden one flaky fixture, close.
+kind: plan
+status: open
+read-when: Fixing the scheduled full verification failure (issue 988)
+---
+
 # Implementation plan — popcre/ai-devops#988: scheduled full verification failing
 
 Written 2026-11-04 3:54 PM EST by a read-only planning session (Claude). Handoff link: none yet — the implementing session must create its own `HANDOFF.d/<UTC>-<machine>-<agent>-988-scheduled-verify.md` linking to this plan (per `implementation-plan-writer` mechanics); this plan was written to a scratch location because the planning session was read-only.

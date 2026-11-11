@@ -1,3 +1,10 @@
+---
+summary: Forensic token-waste analysis of 1,312 local AI session logs with reviewer-critiqued remedies, dated 2026-09-04.
+kind: proof
+status: done
+read-when: Reviewing evidence on where AI token spend was wasted
+---
+
 # Token waste analysis — 2026-09-04
 
 Forensic analysis of local AI session logs to find spend that did **not**

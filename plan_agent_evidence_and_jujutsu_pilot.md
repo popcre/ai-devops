@@ -1,3 +1,10 @@
+---
+summary: Plan to reduce agent evidence churn and pilot Jujutsu (issue 903); pilot is no-go and some evidence steps stay conditional.
+kind: plan
+status: open
+read-when: Reducing agent evidence commits or revisiting Jujutsu
+---
+
 # Implementation plan — reduce agent evidence churn and pilot Jujutsu
 
 ## STATUS — read first

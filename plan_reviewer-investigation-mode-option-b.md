@@ -1,3 +1,10 @@
+---
+summary: Corrected plan for reviewer investigation mode Option B across GLM, Kimi and others (#253); superseded by coordination deletion
+kind: plan
+status: stale
+read-when: looking up the old reviewer investigate-mode design
+---
+
 # IMPLEMENTATION PLAN — reviewer investigation mode, Option B (corrected 2026-09-16)
 
 Plan owner: issue [#253](https://github.com/popcre/ai-devops/issues/253)

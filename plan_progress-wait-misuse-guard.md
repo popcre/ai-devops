@@ -1,3 +1,10 @@
+---
+summary: Plan for a guard against misusing progress waits; all steps done and merged via PR 142, handoff closed.
+kind: plan
+status: done
+read-when: Checking the progress-wait misuse guard history
+---
+
 # plan_progress-wait-misuse-guard.md
 
 **Created:** 2026-08-28 · **Branch:** `claude/reviewer-flake-89-progress-waits`

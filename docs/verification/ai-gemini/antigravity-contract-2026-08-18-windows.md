@@ -1,3 +1,10 @@
+---
+summary: Antigravity CLI 1.1.14 contract probe on Windows showing no read-only permission profile exists, so the ai-gemini wrapper was blocked.
+kind: proof
+status: done
+read-when: Revisiting whether ai-gemini can be built on the Antigravity CLI
+---
+
 # Antigravity CLI contract and safety-boundary result
 
 Date: 2026-08-18

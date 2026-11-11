@@ -1,3 +1,10 @@
+---
+summary: Measurement that gate reviewers have no prompt-cache prefix the wrapper can control.
+kind: proof
+status: done
+read-when: Judging reviewer prompt cache savings
+---
+
 # Gate reviewer prompt-cache measurement — 2026-08-25
 
 This is the measurement spike required by Step 3.1 of

@@ -1,3 +1,10 @@
+---
+summary: Plan for issue 1288 local-watch duty-pool claim - verdict is a permanent fixture, not a defect; keep it open and document it.
+kind: plan
+status: open
+read-when: Deciding what to do about issue 1288 watchdog claim
+---
+
 # Implementation plan — popcre/ai-devops#1288 (`local-watch-leader`: the watchdog duty-pool claim issue)
 
 ## Verdict (read first)

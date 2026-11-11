@@ -1,3 +1,10 @@
+---
+summary: Plan for GLM own-output recovery on issue 1791, with source prepared but final-head proof, review and install still open.
+kind: plan
+status: open
+read-when: Working on issue 1791 GLM output recovery
+---
+
 # GLM own-output recovery — implementation plan
 
 ## STATUS — read first

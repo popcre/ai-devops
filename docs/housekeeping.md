@@ -1,3 +1,10 @@
+---
+summary: Guide to ai-housekeeping, the read-only command listing artifacts that may need cleanup.
+kind: ops
+status: current
+read-when: Running ai-housekeeping or reading its report
+---
+
 # Housekeeping
 
 One command shows what might need cleaning up in this repository. It never

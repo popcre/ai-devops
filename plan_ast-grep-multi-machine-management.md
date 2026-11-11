@@ -1,3 +1,10 @@
+---
+summary: Plan for managed pinned ast-grep installs across Windows and Ubuntu (issue 187); all steps still open.
+kind: plan
+status: open
+read-when: Installing or managing ast-grep on machines
+---
+
 # Implementation plan — managed ast-grep across Windows and Ubuntu
 
 Plan owner: Codex planning session, 2026-08-30

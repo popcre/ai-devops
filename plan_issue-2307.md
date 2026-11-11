@@ -1,3 +1,10 @@
+---
+summary: Plan for issue 2307 doc drift in the closeout-checker architecture note; a docs-only reword remains.
+kind: plan
+status: open
+read-when: Fixing closeout-checker architecture doc drift (issue 2307)
+---
+
 # Implementation plan — popcre/ai-devops#2307 (doc drift in closeout-checker architecture note)
 
 Verdict (checked 2026-11-04 against main f2b4f5bd): **STILL REAL, docs-only, small.** Both findings reproduce on main. The code is safe (fails closed); only `docs/architecture.md` is wrong. Fix = reword two sentences. No code change.

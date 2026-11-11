@@ -1,3 +1,10 @@
+---
+summary: Plan for issue 511 live-proof ownership and session sizing; source rule merged via PR 520, installed-global proof pending.
+kind: plan
+status: open
+read-when: Reviewing live-proof session-sizing rules (issue 511)
+---
+
 # IMPLEMENTATION PLAN — live-proof ownership and completion (2026-09-16; session limits revoked)
 
 **Tracking issue:** [popcre/ai-devops #511](https://github.com/popcre/ai-devops/issues/511)

@@ -1,3 +1,10 @@
+---
+summary: Plan for issue 2314 vendored Supabase skills versus shared-db rules - partly fixed, precedence note and sync policy remain.
+kind: plan
+status: open
+read-when: Reconciling vendored Supabase skills with shared-db rules
+---
+
 # Implementation plan — popcre/ai-devops#2314 (vendored Supabase skills vs. shared-db rules)
 
 ## Verdict (checked on main `f2b4f5bd`, 2026-11-04 3:51 PM EST)

@@ -1,3 +1,10 @@
+---
+summary: Record of routing Claude Code CLI on hetz through the Headroom proxy on 2026-10-20.
+kind: ops
+status: current
+read-when: Wrapping or checking Headroom for Claude on hetz
+---
+
 # Headroom for Claude Code CLI on hetz — what was done, 2026-10-20
 
 **Scope.** Make every Claude Code CLI process on the hetz VPS (especially the

@@ -1,3 +1,10 @@
+---
+summary: Plan to make ai-glm permission deadlocks fail safely and quickly; all six steps done 2026-08-05.
+kind: plan
+status: done
+read-when: ai-glm permission deadlock handling history
+---
+
 # Implementation plan: make `ai-glm` permission deadlocks fail safely and immediately
 
 ## STATUS

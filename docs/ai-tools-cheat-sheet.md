@@ -1,3 +1,10 @@
+---
+summary: Cheat sheet of in-house ai-* commands such as ai-review with their usage lines.
+kind: living
+status: current
+read-when: Looking up which ai-* command to run and its flags
+---
+
 # In-house tool cheat sheet
 
 Exact usage lines, copied from each tool's own usage text on 2026-10-21. Read

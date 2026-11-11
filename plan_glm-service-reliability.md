@@ -1,3 +1,10 @@
+---
+summary: Plan making the Windows GLM service reliably available with supervision and recovery checks; all six steps complete 2026-08-10.
+kind: plan
+status: done
+read-when: Fixing the Windows GLM service or its doctor check
+---
+
 # Plan: make the Windows GLM service reliably available
 
 ## STATUS

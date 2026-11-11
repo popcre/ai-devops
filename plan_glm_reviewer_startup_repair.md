@@ -1,3 +1,10 @@
+---
+summary: Plan to repair GLM reviewer startup so start waits for readiness; live qualification and landing steps still pending.
+kind: plan
+status: open
+read-when: Repairing GLM reviewer start-versus-health behavior
+---
+
 # IMPLEMENTATION PLAN — GLM reviewer startup repair (2026-08-21)
 
 Handoff: `HANDOFF.d/2026-08-21T1122Z-edge-dev-codex-reviewer-repair-plans.md` (retired; recoverable from git history)

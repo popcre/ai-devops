@@ -1,3 +1,10 @@
+---
+summary: Deprecated legacy batch-file launcher for Windows dev-computer setup, replaced by the bootstrap and WinGet configuration.
+kind: ops
+status: stale
+read-when: Only to understand the legacy Windows setup launcher
+---
+
 # Windows development-computer setup (transitional launcher)
 
 > Deprecated: use `bin\bootstrap-windows-dev.ps1`, documented in

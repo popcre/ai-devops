@@ -1,3 +1,10 @@
+---
+summary: Plan to run watchdogs as local timed tasks with a multi-host claim lease; phases P0-P5 done
+kind: plan
+status: done
+read-when: working on local watchdogs or the duty-pool claim
+---
+
 # IMPLEMENTATION PLAN — watchdogs as local timed tasks (2026-10-01)
 
 Handoff registration: `HANDOFF.d/2026-10-01T2205Z-edge-dev-mimo-watchdog-local-timed-tasks.md` (retired 2026-10-13; P0–P5 done, duty-pool runbook `docs/watchdog-duty-pool.md` is the contract)

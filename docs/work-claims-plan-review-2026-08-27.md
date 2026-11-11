@@ -1,3 +1,10 @@
+---
+summary: Durable review record for the work-claims plan, including the evidence-based revision to a smaller advisory v1.
+kind: proof
+status: done
+read-when: Understanding why the work-claims design was narrowed
+---
+
 # Work-claims plan review record — 2026-08-27
 
 This is the durable review record for `plan_ai-devops-work-claims.md`. It records conclusions without copying private transcript content.

@@ -1,3 +1,10 @@
+---
+summary: Plan for a reversible trial of Entire alongside GitHub; the trial ended 2026-11-04 and Entire was not adopted (issue 2022).
+kind: plan
+status: done
+read-when: Only for history of the Entire trial; do not reopen
+---
+
 # Reversible Entire trial alongside GitHub
 
 ## October 31 controlling amendment — Entire testing and merge trial

@@ -1,3 +1,10 @@
+---
+summary: Plan to split the CI suite manifest so tool fixes merge in parallel (#1001); all steps done
+kind: plan
+status: done
+read-when: adding or changing CI suites in config/ci-suites
+---
+
 # Plan: split the CI suite manifest so tool fixes merge in parallel
 
 Handoff registration: `HANDOFF.d/2026-09-28T1755Z-edge-dev3-claude-plans-manifest-and-self-healing.md` (retired; recoverable from git history)

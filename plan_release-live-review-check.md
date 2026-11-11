@@ -1,3 +1,10 @@
+---
+summary: Plan for issue 1783 release live review check on Ubuntu and Windows before fleet install; all steps done 2026-10-19.
+kind: plan
+status: done
+read-when: Using the release live review check before fleet install
+---
+
 # Plan — release live review check (Ubuntu + Windows, before fleet install)
 
 Issue: [popcre/ai-devops#1783](https://github.com/popcre/ai-devops/issues/1783) (section 12a of [plan_review-output-contract.md](plan_review-output-contract.md)).

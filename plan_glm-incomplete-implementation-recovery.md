@@ -1,3 +1,10 @@
+---
+summary: Plan to export incomplete GLM implementation work safely as patch and report; all four steps done 2026-08-10.
+kind: plan
+status: done
+read-when: Debugging ai-glm incomplete-work export or outcomes
+---
+
 # Plan: preserve incomplete GLM implementation work safely
 
 ## STATUS

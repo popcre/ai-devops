@@ -1,3 +1,10 @@
+---
+summary: Verification record for the ai-review-credit-watch tick that reads reviewer allowances and balances, with install and live-run checklist (issue 1345).
+kind: proof
+status: done
+read-when: Working on reviewer credit or allowance watching
+---
+
 # Reviewer credit watch — issue #1345
 
 Parent: popcre/shared-db#3536. Owner: Codex reviewer-relief child.

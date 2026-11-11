@@ -1,3 +1,10 @@
+---
+summary: Plan to load fewer tools and skills before a chat starts via per-repo skill and MCP membership (#707); steps done
+kind: plan
+status: done
+read-when: checking per-repo skill or MCP scoping history
+---
+
 # Plan — Tool and skill scoping (load less before a chat starts)
 
 Tracking issue: [#707](https://github.com/popcre/ai-devops/issues/707).

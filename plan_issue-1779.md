@@ -1,3 +1,10 @@
+---
+summary: Plan for issue 1779 idle shared-db reservations - core checker fix done on main, only fleet tail and closing remain.
+kind: plan
+status: open
+read-when: Closing out issue 1779 shared-db reservation fix
+---
+
 # Implementation plan — popcre/ai-devops#1779 (wrapped sessions keep idle shared-db reservations)
 
 ## VERDICT (read first) — core fix DONE; only fleet tail remains

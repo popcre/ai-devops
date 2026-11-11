@@ -1,3 +1,10 @@
+---
+summary: Source preparation for Oracle offline alternate serialization v2 descriptor-only admission (theoracle 27/58).
+kind: spec
+status: current
+read-when: Working on Oracle alternate serialization v2
+---
+
 # Oracle conditional offline alternate serialization v2
 
 Owner: Oracle coordinator for u2giants/theoracle#27/#58. This is source preparation, not installation, current custody registration, an action grant, private processing, source qualification, or live acceptance. Version 1 source, receipts, authority expiry and spent markers stay unchanged. Consolidation requires actual v2 acceptance first.

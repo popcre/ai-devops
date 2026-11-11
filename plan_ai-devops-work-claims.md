@@ -1,3 +1,10 @@
+---
+summary: Plan for advisory collision-resistant work claims across AI sessions (issue 131), with a staged STATUS table.
+kind: plan
+status: open
+read-when: Working on ai-work-claim or duplicate-work prevention
+---
+
 # IMPLEMENTATION PLAN — collision-resistant ai-devops work claims (revised 2026-08-27)
 
 **Tracking issue:** [popcre/ai-devops#131](https://github.com/popcre/ai-devops/issues/131)

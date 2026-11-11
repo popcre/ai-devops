@@ -1,3 +1,10 @@
+---
+summary: Close-out plan for issue 2172 lean required checks stage C; live proof of a migration PR and status update remain.
+kind: plan
+status: open
+read-when: Finishing lean required checks stage C (issue 2172)
+---
+
 # Implementation plan — popcre/ai-devops#2172 (lean required checks: finish stage C and close)
 
 ## Verdict (read first)

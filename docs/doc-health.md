@@ -1,3 +1,10 @@
+---
+summary: Documentation for the advisory ai-doc-health tool that measures router size, headers, index and stale docs.
+kind: ops
+status: current
+read-when: Running or configuring documentation health checks
+---
+
 # Documentation health (`ai-doc-health`)
 
 `bin/ai-doc-health` measures the documentation rules that used to live only in
@@ -74,6 +81,25 @@ document. Never edit the index by hand; edit the header and run `--fix-index`.
 | `dup-in-repo` | two tracked documents with identical bytes |
 | `dup-across` | with `--siblings`, a document identical to one in a sibling repository; files under 600 bytes are pointers and are skipped, as are header-exempt files |
 | `status-stale` | status is open or current but no commit touched the file in `status_stale_days`; skipped in a shallow clone |
+
+## This repository's settings
+
+`.doc-health.json` here differs from the defaults for these reasons:
+
+- **Excluded, not headed:** `skills/**` and `templates/**` are installed onto
+  machines and carry their own front matter; `config/**` holds agent profiles
+  that the provider tools parse; `tests/**` holds fixtures and dated evidence
+  that suites read byte-for-byte; `.github/**`, `.claude/**`, `transcripts/**`
+  and `node_modules/**` are not documentation.
+- **Root allow list:** `bugs.md` is the active bug list this router and several
+  documents name; `IMPLEMENTATION-PLAN.md` is the file name the plan standard,
+  two skills, `bin/ai-review-simple` and a test expect at the root; `fix_*.md`
+  are older plans that tests and `config/repo-identities.tsv` reference by
+  root path. Moving any of them needs a code change first.
+- **Archive:** superseded root prompts and analyses live in `docs/archive/`,
+  with headers, so the index still lists them.
+- The advisory workflow is `.github/workflows/doc-health.yml`; it is never a
+  required check.
 
 ## Tests
 

@@ -1,3 +1,10 @@
+---
+summary: Contract that the only required check verification-closure runs just the secret scanner; full aggregate is advisory (owner ruling 2026-10-30).
+kind: spec
+status: current
+read-when: Changing or debugging the required verification-closure check
+---
+
 # ai-devops required-check closure
 
 ## Current contract — owner ruling October 30, 2026

@@ -1,3 +1,10 @@
+---
+summary: Archived reviewer rotation rules superseded by the advisory review model of 2026-10-29.
+kind: archive
+status: done
+read-when: Only for history of old reviewer rotation rules
+---
+
 # Reviewer rotation rules
 
 > **ARCHIVED 2026-10-29** (popcre/ai-devops#2072): superseded by the advisory

@@ -1,3 +1,10 @@
+---
+summary: Experimental optional fresh-reader comprehension check for complex plans, issue 2222; routine use is off.
+kind: spec
+status: current
+read-when: Explicitly asked to run a fresh-reader check on a plan
+---
+
 # Experimental fresh-reader check
 
 Owner: the implementing coordinator on [#2222](https://github.com/popcre/ai-devops/issues/2222).

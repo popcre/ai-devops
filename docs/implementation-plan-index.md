@@ -1,3 +1,10 @@
+---
+summary: Ownership index of every root plan file, split into active, completed and superseded plans.
+kind: living
+status: current
+read-when: Choosing which implementation plan to work on
+---
+
 # Implementation-plan index
 
 This is the current ownership index for every root `plan_*.md` file. Use the

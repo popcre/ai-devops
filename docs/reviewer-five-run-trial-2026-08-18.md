@@ -1,3 +1,10 @@
+---
+summary: Five-run Grok 4.6 trial measuring the review failure rate before further reviewer repair.
+kind: proof
+status: done
+read-when: Checking Grok review failure-rate evidence
+---
+
 # Grok 4.6 five-review failure-rate trial
 
 Date: 2026-08-18

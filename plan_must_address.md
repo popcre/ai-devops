@@ -1,3 +1,10 @@
+---
+summary: Review of the work-claims plan listing must-address findings with blocking and harmful items marked present or missing.
+kind: plan
+status: done
+read-when: Reading review findings on the work-claims plan (issue 131)
+---
+
 # Must address — review of `plan_ai-devops-work-claims.md`
 
 **Reviewer:** Claude (Opus 5), session `github-org-move-handoff-d576f2` on `edge-dev`

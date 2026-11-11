@@ -1,3 +1,10 @@
+---
+summary: Roadmap for efficient AI DevOps delivery (#650) with phases P0 onward still open
+kind: plan
+status: open
+read-when: working on delivery speed roadmap (#650) or Gemini inventory speed
+---
+
 # IMPLEMENTATION PLAN — efficient AI DevOps delivery (2026-09-20)
 
 ## STATUS — read first

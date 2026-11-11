@@ -1,3 +1,10 @@
+---
+summary: Design and safety status of the WinGet and DSC one-command Windows desktop bootstrap, with pending live gates.
+kind: ops
+status: current
+read-when: Bootstrapping a new Windows development computer
+---
+
 # Windows desired-state setup with WinGet and DSC
 
 ## Executive decision and current safety status

@@ -1,3 +1,10 @@
+---
+summary: Plan for shared reviewer evidence integrity with sealed packets, hostile fixtures and exact incident correlation
+kind: plan
+status: done
+read-when: checking reviewer evidence packet sealing or hostile-link guards
+---
+
 # IMPLEMENTATION PLAN — shared reviewer evidence integrity (2026-08-21)
 
 Handoff: `HANDOFF.d/2026-08-21T1122Z-edge-dev-codex-reviewer-repair-plans.md` (retired; recoverable from git history)

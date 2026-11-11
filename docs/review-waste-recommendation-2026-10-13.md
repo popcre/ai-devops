@@ -1,3 +1,10 @@
+---
+summary: Owner recommendation to cut wasted review traffic while keeping the reviews that found real problems.
+kind: proof
+status: done
+read-when: Reviewing the review-waste recommendation
+---
+
 # Recommendation — cut wasted review traffic without losing the 8% (2026-10-13)
 
 **Audience:** Albert (owner decision)  

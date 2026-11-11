@@ -1,3 +1,10 @@
+---
+summary: Archived prompt to triage six leftover Codex worktrees holding uncommitted changes.
+kind: archive
+status: done
+read-when: Only for history of the dirty Codex worktree triage
+---
+
 Paste this into a fresh Codex session.
 
 ---

@@ -1,3 +1,10 @@
+---
+summary: Operating manual for shared-db structural work, startup recovery, author locks, stages.
+kind: ops
+status: current
+read-when: Running shared-db structural work step by step
+---
+
 # Shared DB structural-work operating manual
 
 > **Reference only. Claim-first is the default; no orchestrator chat or marker

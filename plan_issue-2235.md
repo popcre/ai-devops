@@ -1,3 +1,10 @@
+---
+summary: Plan for issue 2235 installer globals - hermetic test, missing-template guard and tail-instead-of-sed fixes; all still real.
+kind: plan
+status: open
+read-when: Fixing installer globals test and guard (issue 2235)
+---
+
 # Implementation plan — popcre/ai-devops#2235 (installer globals: hermetic test, missing-template guard, no home creation, CRLF tail)
 
 ## VERDICT (checked 2026-11-04 against main `f2b4f5bd`)

@@ -1,3 +1,10 @@
+---
+summary: Plan for issue 2255 adding a deterministic test for the same-inode owner-repair branch in install-public-git.
+kind: plan
+status: open
+read-when: Adding the same-inode repair test (issue 2255)
+---
+
 # Plan — popcre/ai-devops#2255: deterministic test for the same-inode owner-repair branch
 
 **Verdict (2026-11-04, checked on main f2b4f5bd): STILL REAL, small.** PR #2254 (merged 2026-11-01) added a repair branch in

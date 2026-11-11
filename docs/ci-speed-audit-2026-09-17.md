@@ -1,3 +1,10 @@
+---
+summary: Dated 2026-09-17 audit of Verify workflow timings with speedup recommendations and their implementation status.
+kind: proof
+status: done
+read-when: Checking past CI speed findings before changing Verify
+---
+
 # CI speed audit — 2026-09-17
 
 For current follow-up work, read the [workflow efficiency plan](../plan_workflow-efficiency.md)

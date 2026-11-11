@@ -1,3 +1,10 @@
+---
+summary: Plan to harden and align the GLM, Grok and Kimi delegate wrappers; steps done, Grok debate ceiling superseded by issue 151.
+kind: plan
+status: done
+read-when: Delegate wrapper hardening history
+---
+
 # Plan: harden and align the GLM, Grok, and Kimi delegate wrappers
 
 ## STATUS

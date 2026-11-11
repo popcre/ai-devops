@@ -1,3 +1,10 @@
+---
+summary: Plan to make the Codex reviewer wrapper trustworthy (fail-closed, full change capture); all steps complete.
+kind: plan
+status: done
+read-when: Codex reviewer wrapper trust repair history
+---
+
 # IMPLEMENTATION PLAN — Codex reviewer trust repair (2026-08-21)
 
 Handoff: `HANDOFF.d/2026-08-21T1122Z-edge-dev-codex-reviewer-repair-plans.md` (retired; recoverable from git history)

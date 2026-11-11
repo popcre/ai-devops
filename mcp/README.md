@@ -1,3 +1,10 @@
+---
+summary: Placeholder README for a future MCP wrapper exposing toolkit scripts as typed tools; nothing implemented yet.
+kind: living
+status: current
+read-when: Considering an MCP server wrapper for the toolkit
+---
+
 # mcp/ — Future MCP Wrapper
 
 Placeholder for exposing the AI DevOps toolkit as an **MCP (Model Context

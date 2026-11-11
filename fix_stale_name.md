@@ -1,3 +1,10 @@
+---
+summary: Incident report on a renamed 1Password item breaking secret-launched MCP servers; fix merged, recall-ai fault left separate.
+kind: plan
+status: done
+read-when: MCP servers fail to start after a 1Password item rename
+---
+
 # fix_stale_name.md — a renamed 1Password item silently kills every secret-launched MCP server
 
 **Incident date:** 2026-08-24 · **Machines:** al8960ofc (Windows) + hetz (VPS) ·

@@ -1,3 +1,10 @@
+---
+summary: Plan for reviewer log repair checkpoints and maintenance rounds (#308), completed with live two-round proof
+kind: plan
+status: done
+read-when: checking reviewer log checkpoint or maintenance round history
+---
+
 # IMPLEMENTATION PLAN — Reviewer log repair checkpoints (2026-09-07)
 
 ## STATUS

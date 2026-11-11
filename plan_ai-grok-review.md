@@ -1,3 +1,10 @@
+---
+summary: Plan and design record for bin/ai-grok-review; marked complete with every step done 2026-08-05.
+kind: plan
+status: done
+read-when: Understanding the ai-grok-review wrapper design
+---
+
 # Implementation plan — `bin/ai-grok-review`
 
 **Repo:** `u2giants/ai-devops` · **Branch:** `main` (main-only, no branches) ·

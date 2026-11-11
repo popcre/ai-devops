@@ -1,3 +1,10 @@
+---
+summary: Archived plan for the reviewer observation week (fast-fail, skip list, non-blocking review); superseded by skinny review
+kind: plan
+status: stale
+read-when: looking up the 2026-10 observation week history
+---
+
 # Implementation plan — reviewer observation week (fast-fail, skip, non-blocking reviews)
 
 > **ARCHIVED 2026-10-29** (popcre/ai-devops#2072): superseded by the advisory

@@ -1,3 +1,10 @@
+---
+summary: Plan for the report-only ai-housekeeping inventory that makes stale branches, handoffs and artifacts visible and attributable
+kind: plan
+status: done
+read-when: auditing stale repo artifacts or ai-housekeeping
+---
+
 # Implementation plan: make stale artifacts visible and attributable
 
 Written 2026-08-14T2015Z on machine `al8960ofc` by a Claude Opus 5 session.

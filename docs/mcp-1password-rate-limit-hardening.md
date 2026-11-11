@@ -1,3 +1,10 @@
+---
+summary: Write-up of the 1Password MCP parallel initialization storm that locked the account and the hardening fix.
+kind: ops
+status: current
+read-when: Diagnosing 1Password MCP rate limits or lockouts
+---
+
 # 1Password MCP rate-limit hardening — the "parallel initialization storm"
 
 **Written 2026-07-23. Fresh-developer grade: every path, file, and identifier is

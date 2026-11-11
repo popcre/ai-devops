@@ -1,3 +1,10 @@
+---
+summary: Plan to repair the CI process (issue 2367) with phased steps, many done and some still closing or in progress.
+kind: plan
+status: open
+read-when: Working on CI process, ci-red, or required-check repair
+---
+
 # Implementation plan: CI process repair
 
 - **Owner issue:** [popcre/ai-devops#2367](https://github.com/popcre/ai-devops/issues/2367). Unproven outcomes stay as checklist items on that issue.

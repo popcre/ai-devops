@@ -1,3 +1,10 @@
+---
+summary: Plan for issue 1696 making Xiaomi MiMo a formal reviewer with Windows and Ubuntu wrappers; steps not started.
+kind: plan
+status: open
+read-when: Building MiMo reviewer wrappers (issue 1696)
+---
+
 # IMPLEMENTATION PLAN — Xiaomi MiMo as a formal AI reviewer (Windows + Ubuntu wrappers) (2026-10-13)
 
 Paired handoff: `HANDOFF.d/2026-10-13T1723Z-edge-dev3-claude-mimo-reviewer-plan.md` (retired; recoverable from git history)

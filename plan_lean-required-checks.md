@@ -1,3 +1,10 @@
+---
+summary: Plan to keep only data-safety checks as merge-blocking across repos; stages A, B, D, E done, stage C retirement partly done.
+kind: plan
+status: open
+read-when: Changing which CI checks are required to merge
+---
+
 # Plan — lean required checks (keep only data-safety gates)
 
 - **Parent issue:** popcre/ai-devops#2172. Model: popcre/ai-devops#2041 ([plan_skinny-review.md](plan_skinny-review.md)).

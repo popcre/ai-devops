@@ -1,3 +1,10 @@
+---
+summary: Plan for issue 2332 review finding on PR 2329 - per-provider skip handling in reviewer maintenance tests.
+kind: plan
+status: open
+read-when: Fixing reviewer maintenance test skips (issue 2332)
+---
+
 # Implementation plan — popcre/ai-devops#2332 (review finding on PR #2329)
 
 **Verdict (checked 2026-11-04 on main `f2b4f5bd`): STILL REAL, small.** Both findings reproduce on main:

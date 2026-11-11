@@ -1,3 +1,10 @@
+---
+summary: Analysis of whether AI review pays off by repository or by type of work, from archived transcripts.
+kind: proof
+status: done
+read-when: Revisiting where AI review is worth requiring
+---
+
 # Does AI review pay off by repository, or by type of work? (2026-10-29)
 
 **Question (Albert, 2026-10-29).** Was the 2026-10-13 decision right to require reviews only in shared-db? Should the rule instead depend on the type of work or the type of chat?

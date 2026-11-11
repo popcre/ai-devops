@@ -1,3 +1,10 @@
+---
+summary: Manual opt-in steps to bring an existing application repo into the AI DevOps workflow.
+kind: ops
+status: current
+read-when: Onboarding an application repo to the toolkit
+---
+
 # Repo Onboarding (future / manual)
 
 How to bring an existing application repo into the AI DevOps workflow. This is a

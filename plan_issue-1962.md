@@ -1,3 +1,10 @@
+---
+summary: Plan for issue 1962 Claude permissions denying sleep - already fixed on main by PR 1963; live proof and closing remain.
+kind: plan
+status: open
+read-when: Closing out issue 1962 sleep permission fix
+---
+
 # Plan — popcre/ai-devops#1962: Claude permissions deny every `sleep`
 
 ## VERDICT (read first): ALREADY FIXED ON MAIN — close the issue after one live-proof check

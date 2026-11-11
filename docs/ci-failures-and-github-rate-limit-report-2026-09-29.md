@@ -1,3 +1,10 @@
+---
+summary: Incident report on CI failures and GitHub rate limiting from 2026-09-15 to 2026-09-29 with root causes.
+kind: proof
+status: done
+read-when: Looking for root causes of September CI failures or rate limits
+---
+
 # CI failures and GitHub rate-limiting — incident report (2026-09-15 to 2026-09-29)
 
 **Date range covered:** 2026-09-15 through 2026-09-29 (America/New_York / EST dating for human-facing times).

@@ -1,3 +1,10 @@
+---
+summary: Records the 2026-09-11 owner ruling authorizing only the automatic shared-db production-promotion workflow (issue 2716).
+kind: spec
+status: current
+read-when: Checking authority for shared-db automatic production promotion
+---
+
 # Shared-db automatic production policy authority — issue #2716
 
 Recorded: 2026-09-11

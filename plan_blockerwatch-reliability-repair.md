@@ -1,3 +1,10 @@
+---
+summary: Plan to repair BlockerWatch reliability and self-auditing (issue 632); several steps open, registration steps superseded.
+kind: plan
+status: open
+read-when: Repairing BlockerWatch resume or wait reliability
+---
+
 # Implementation plan: make BlockerWatch reliable and self-auditing
 
 Written 2026-09-20 on `916-alien` by Codex from `origin/main`

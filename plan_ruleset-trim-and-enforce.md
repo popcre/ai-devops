@@ -1,3 +1,10 @@
+---
+summary: Plan to trim and enforce the always-loaded AI ruleset (#1881); live proof step 6.1 not passed
+kind: plan
+status: open
+read-when: editing global rules or checking ruleset trim proof
+---
+
 # Plan — trim and enforce the always-loaded AI ruleset
 
 Issue: [popcre/ai-devops#1881](https://github.com/popcre/ai-devops/issues/1881) ·

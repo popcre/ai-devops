@@ -1,3 +1,10 @@
+---
+summary: Measured Codex Windows containment qualification for issue 271 with the 2026-09-15 owner scope change.
+kind: proof
+status: done
+read-when: Checking Codex native Windows review containment evidence
+---
+
 # Codex Windows containment qualification — September 11, 2026
 
 Issue #271 remains **open** under #337. Repository reads now work. On September

@@ -1,3 +1,10 @@
+---
+summary: Plan to move ai-devops to the popcre GitHub organization; phases A-E done 2026-08-26 (issue 84).
+kind: plan
+status: done
+read-when: Understanding the move of ai-devops to the popcre organization
+---
+
 # fix_to_gh_org — move `ai-devops` to the `popcre` GitHub organization
 
 **Issue:** [#84](https://github.com/u2giants/ai-devops/issues/84)

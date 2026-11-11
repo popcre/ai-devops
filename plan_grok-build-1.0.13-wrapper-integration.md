@@ -1,3 +1,10 @@
+---
+summary: Plan for integrating Grok Build 1.0.13 into the ai-grok wrapper (issue 251); implementation steps done after three exact-head reviews.
+kind: plan
+status: done
+read-when: Checking Grok Build 1.0.13 wrapper integration history
+---
+
 # IMPLEMENTATION PLAN — Grok Build 1.0.13 wrapper integration
 
 Planning handoff: retired in [#264](https://github.com/popcre/ai-devops/pull/264) once this plan landed; its text is in the history of `HANDOFF.d/2026-09-04T0025Z-edge-dev-codex-grok-build-1-0-13.md`.

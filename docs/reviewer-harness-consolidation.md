@@ -1,3 +1,10 @@
+---
+summary: Explains how one shared plumbing could cover native harness and OpenCode reviewers (issues 1110, 1114).
+kind: spec
+status: stale
+read-when: Reading history of reviewer harness consolidation
+---
+
 # How one plumbing covers native harnesses and OpenCode
 
 **Parent issue:** [#1110](https://github.com/popcre/ai-devops/issues/1110) · **Child:** [#1114](https://github.com/popcre/ai-devops/issues/1114)  

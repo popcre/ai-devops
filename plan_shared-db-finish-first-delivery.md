@@ -1,3 +1,10 @@
+---
+summary: Plan to replace the shared-db orchestrator with finish-first delivery; superseded for implementation by the throughput repair plan
+kind: plan
+status: stale
+read-when: looking up the 2026-08 finish-first diagnosis history
+---
+
 # IMPLEMENTATION PLAN — replace the perpetual shared-db orchestrator with finish-first delivery (2026-08-18)
 
 > **SUPERSEDED FOR IMPLEMENTATION 2026-09-11.** The diagnosis and historical
@@ -8,7 +15,7 @@
 
 Paired handoff `2026-08-18T1404Z-edge-dev-codex-shared-db-finish-first-plan.md` (retired 2026-10-13; superseded for implementation by `plan_shared-db-complete-throughput-repair.md`).
 
-Evidence and diagnosis: [`shared-db_orchestrator_failure_analysis.md`](shared-db_orchestrator_failure_analysis.md)
+Evidence and diagnosis: [`shared-db_orchestrator_failure_analysis.md`](docs/archive/shared-db_orchestrator_failure_analysis.md)
 
 ## STATUS
 

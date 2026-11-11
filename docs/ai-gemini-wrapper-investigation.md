@@ -1,3 +1,10 @@
+---
+summary: 2026-08-18 investigation of whether the Antigravity CLI can support an ai-gemini reviewer wrapper, with verified capabilities.
+kind: proof
+status: done
+read-when: Revisiting Antigravity CLI or the ai-gemini wrapper design
+---
+
 # Antigravity CLI investigation for an `ai-gemini` reviewer
 
 Date: 2026-08-18

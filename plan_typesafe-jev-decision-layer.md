@@ -1,3 +1,10 @@
+---
+summary: Plan and decision record for TypeSafe Jev as a bounded decision layer; go/no-go per track not yet reached
+kind: plan
+status: open
+read-when: evaluating TypeSafe Jev decision layer or shadow tools
+---
+
 # Implementation plan: TypeSafe Jev as a bounded decision layer
 
 **Tracking issue:** not yet filed  

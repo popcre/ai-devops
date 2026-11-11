@@ -1,3 +1,10 @@
+---
+summary: Plan for CI fast-fail, reviewer timeout diagnosis and orphan session reap from the 2026-09-29 transcript audit; A2 and D1 steps still open.
+kind: plan
+status: open
+read-when: Continuing reviewer timeout or doctor orphan guard work
+---
+
 # IMPLEMENTATION PLAN — CI fast-fail + reviewer timeout diagnosis + orphan reap (2026-09-29)
 
 > **Revision 2026-09-29 (after owner challenge + StepFun re-rank).** The first draft

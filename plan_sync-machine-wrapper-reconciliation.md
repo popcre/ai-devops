@@ -1,3 +1,10 @@
+---
+summary: Plan to make dotfiles sync reconcile local AI wrappers through a commands-only machine tool catalog; all steps done
+kind: plan
+status: done
+read-when: checking machine-tools catalog or sync wrapper reconciliation
+---
+
 # IMPLEMENTATION PLAN — Make dotfiles sync reconcile local AI wrappers (revised 2026-08-13)
 
 ## STATUS

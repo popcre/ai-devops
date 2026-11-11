@@ -1,3 +1,10 @@
+---
+summary: Verification of the Muse Code 1.4.9 release hashes and installer pin against Meta's stable channel on 2026-10-16.
+kind: proof
+status: done
+read-when: Re-pinning or auditing the Muse Code release version and hashes
+---
+
 # Muse Code release verification — October 16, 2026
 
 Owner: Codex, scoped Muse installation repair. This record accompanies the pin correction.

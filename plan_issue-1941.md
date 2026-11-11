@@ -1,3 +1,10 @@
+---
+summary: Plan for issue 1941 slow ai-gh auth status on Windows - symptom partly mitigated on main, live diagnosis and fix still open.
+kind: plan
+status: open
+read-when: Fixing slow ai-gh auth status on Windows (issue 1941)
+---
+
 # Implementation plan — popcre/ai-devops#1941: `ai-gh auth status` slow on Windows; housekeeping / ai-pr-wait report GitHub unavailable
 
 ## VERDICT (read first)

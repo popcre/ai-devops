@@ -1,3 +1,10 @@
+---
+summary: Report and repair plan for the delegated reviewer system failures seen in the 2026-08-16 shared-db session; reduced repair shipped.
+kind: plan
+status: done
+read-when: Understanding the 2026-08 reviewer system failures and fixes
+---
+
 # Fix the delegated reviewer system
 
 Status: reduced repair implemented and independently verified on 2026-08-18;
@@ -18,7 +25,7 @@ of 2026-08-16/17 and the permanent fixes required.
 
 For the broader failure beyond delegated reviews, including concrete issues that
 crossed sessions or remained unfinished, read
-[`shared-db_orchestrator_failure_analysis.md`](shared-db_orchestrator_failure_analysis.md).
+[`shared-db_orchestrator_failure_analysis.md`](docs/archive/shared-db_orchestrator_failure_analysis.md).
 
 ## Executive conclusion
 

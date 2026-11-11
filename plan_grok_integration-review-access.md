@@ -1,3 +1,10 @@
+---
+summary: Plan for issue 249 giving Grok isolated integration-review access with a sandbox and fetch broker; planning record, phases 0-7 mostly open.
+kind: plan
+status: open
+read-when: Starting Grok integration-review access work (issue 249)
+---
+
 # IMPLEMENTATION PLAN — isolated Grok integration-review access
 
 Tracking issue: [popcre/ai-devops#249](https://github.com/popcre/ai-devops/issues/249)

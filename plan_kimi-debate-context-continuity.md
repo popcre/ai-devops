@@ -1,3 +1,10 @@
+---
+summary: Plan making Kimi K3 debates keep the right context and converge safely; all six steps complete 2026-08-10.
+kind: plan
+status: done
+read-when: Changing Kimi debate context handling
+---
+
 # Plan: make Kimi K3 debates preserve the right context and converge safely
 
 ## STATUS

@@ -1,3 +1,10 @@
+---
+summary: Plan for the skinny advisory AI review that replaced the old reviewer system (#2041); all stages done
+kind: plan
+status: done
+read-when: understanding the advisory review model and its stages
+---
+
 # Plan — skinny advisory AI review (replaces the old reviewer system)
 
 - **Parent issue:** popcre/ai-devops#2041. Each stage has its own child issue, listed in STATUS.

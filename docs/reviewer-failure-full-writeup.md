@@ -1,3 +1,10 @@
+---
+summary: Full investigation dossier on why AI reviewers kept failing, written 2026-09-29.
+kind: proof
+status: done
+read-when: Understanding past reviewer failure history
+---
+
 # Full write-up — why AI reviewers keep failing (2026-09-29)
 
 **Owner:** Albert Hazan  

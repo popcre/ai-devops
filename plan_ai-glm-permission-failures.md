@@ -1,3 +1,10 @@
+---
+summary: Plan for ai-glm implementation-mode permission failures (2026-08-12); fixes shipped, live re-run step cancelled.
+kind: plan
+status: done
+read-when: ai-glm implementation-mode permission failures
+---
+
 # IMPLEMENTATION PLAN: ai-glm implementation-mode permission failures (2026-08-12)
 
 ## STATUS

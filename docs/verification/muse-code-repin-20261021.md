@@ -1,3 +1,10 @@
+---
+summary: Verification of the Muse Code 1.4.11 Windows binary hash and pin on al8960ofc after Meta's auto-update, 2026-10-21.
+kind: proof
+status: done
+read-when: Re-pinning or auditing the Muse Code release version and hashes
+---
+
 # Muse Code release verification — October 21, 2026
 
 Owner: Claude, follow-up to PR #1923 (Windows re-pin after Meta's auto-update). Re-verified 2026-10-21 on al8960ofc.

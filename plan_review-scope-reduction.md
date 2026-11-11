@@ -1,3 +1,10 @@
+---
+summary: Plan to shrink AI review to shared-db work and a four-reviewer pool (#1714), all steps shipped
+kind: plan
+status: done
+read-when: checking why only four reviewers and shared-db review remained
+---
+
 # Plan — shrink AI review to shared-db work and a four-reviewer pool
 
 Owner issue: [popcre/ai-devops#1714](https://github.com/popcre/ai-devops/issues/1714)

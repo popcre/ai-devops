@@ -1,3 +1,10 @@
+---
+summary: Plan to remove unneeded GitHub API calls as part of the request-reduction programme (issue 658); installed proofs and acceptance remain open.
+kind: plan
+status: open
+read-when: Reducing GitHub API request traffic from toolkit scripts
+---
+
 # IMPLEMENTATION PLAN — cut unneeded GitHub traffic (2026-09-25)
 
 Companion execution plan under the programme

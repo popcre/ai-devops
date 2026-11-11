@@ -1,3 +1,10 @@
+---
+summary: Plan to delete the shared-db coordination layer (C by deletion); measurement step 10 still running
+kind: plan
+status: open
+read-when: working on shared-db coordination deletion or its stop rule
+---
+
 # IMPLEMENTATION PLAN — delete shared-db coordination layer (C by deletion) (2026-09-29)
 
 **Session handoff:** `HANDOFF.d/2026-09-29T1635Z-edge-dev-mimo-c-by-deletion.md` (retired 2026-10-13; decision record is this plan §8)  

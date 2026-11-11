@@ -1,3 +1,10 @@
+---
+summary: Reference for machine-local toolkit configuration files such as models.env and server.env.
+kind: living
+status: current
+read-when: Changing machine-local toolkit configuration
+---
+
 # Configuration
 
 All machine-local configuration for the toolkit. Canonical guide:

@@ -1,3 +1,10 @@
+---
+summary: Plan to repair Muse reviewer availability (stalled-turn fixtures, governance); all steps complete, issue 51 review approved.
+kind: plan
+status: done
+read-when: Checking the Muse reviewer availability repair
+---
+
 # IMPLEMENTATION PLAN — Muse reviewer availability repair (2026-08-21)
 
 Handoff: `HANDOFF.d/2026-08-21T1122Z-edge-dev-codex-reviewer-repair-plans.md` (retired; recoverable from git history)

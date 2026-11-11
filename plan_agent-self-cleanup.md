@@ -1,3 +1,10 @@
+---
+summary: Plan to stop AI agents leaving orphan processes and files behind; all five phases done and live-proved, later superseded in part.
+kind: plan
+status: done
+read-when: Agent leftover process or temp file cleanup history
+---
+
 # Implementation plan — AI agents clean up after themselves
 
 > **Superseded 2026-09-29 by [`plan_shared-db-coordination-deletion.md`](plan_shared-db-coordination-deletion.md):** steps below that require a leftover-proof issue instead leave a proof-gap checklist item on the **same** issue (e.g. `- [ ] live proof`). Do **not** open a leftover-proof issue. Mentions of leftover-proof issues in this file are historical.

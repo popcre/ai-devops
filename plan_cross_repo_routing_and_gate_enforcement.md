@@ -1,3 +1,10 @@
+---
+summary: Plan for cross-repository routing and task-gate enforcement (issues 335, 159); phases 0-4 done, phase 5 install and measurement in progress.
+kind: plan
+status: open
+read-when: Cross-repo task gate rollout and installation (issue 335)
+---
+
 # Cross-repository routing and task-gate enforcement plan
 
 **Owner issue:** [popcre/ai-devops#335](https://github.com/popcre/ai-devops/issues/335)

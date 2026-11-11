@@ -1,3 +1,10 @@
+---
+summary: Plan for bounded failure diagnostics and a non-generating quota preflight across Kimi, Grok and GLM (#312), completed
+kind: plan
+status: done
+read-when: reviewing reviewer failure diagnostics or quota preflight history
+---
+
 # Reviewer failure diagnostics and quota preflight
 
 Owner: reviewer infrastructure, [issue #312](https://github.com/popcre/ai-devops/issues/312).

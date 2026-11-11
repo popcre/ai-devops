@@ -1,3 +1,10 @@
+---
+summary: Plan for Xiaomi MiMo Desktop parity on Windows (wrapper, skills, MCP, docs); steps 1-11 done, landing open, partly superseded.
+kind: plan
+status: open
+read-when: Landing or checking MiMo Windows support
+---
+
 # IMPLEMENTATION PLAN — Xiaomi MiMo (MiMo Desktop / MiMoCode) parity in ai-devops (2026-09-23)
 
 Paired handoff: `HANDOFF.d/2026-09-23T1856Z-edge-dev-mimo-client-integration.md` (retired; recoverable from git history)

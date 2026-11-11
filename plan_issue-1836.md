@@ -1,3 +1,10 @@
+---
+summary: Plan for issue 1836 installed checkout moved by git pull - hook already built, live proof, stale-text cleanup and closing remain.
+kind: plan
+status: open
+read-when: Closing out issue 1836 reference-transaction hook proof
+---
+
 # Implementation plan — popcre/ai-devops#1836: installed toolkit checkout can be moved by a plain `git pull`
 
 > **VERDICT AT THE TOP: the build is already done. Only live proof, a stale-comment cleanup, and closing remain.**

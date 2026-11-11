@@ -1,3 +1,10 @@
+---
+summary: July 2026 observed coding-agent comparison of Grok 4.5, Kimi K3 and GLM 5.2 from shared-db work.
+kind: archive
+status: done
+read-when: Only for history of early model comparisons
+---
+
 # Grok 4.5, Kimi K3, and GLM 5.2 — observed coding-agent comparison
 
 **Report date:** 2026-07-26  
@@ -11,7 +18,7 @@
 > directory; relocating only wrapper state did not relocate Kimi state; and a
 > foreground wrapper could disappear before saving a later result. When Kimi actually
 > ran, its review quality remained strong. Track the permanent fix in
-> [`plan_kimi-windows-execution-reliability.md`](plan_kimi-windows-execution-reliability.md)
+> [`plan_kimi-windows-execution-reliability.md`](../../plan_kimi-windows-execution-reliability.md)
 > and [issue #31](https://github.com/u2giants/ai-devops/issues/31). Until that plan is
 > complete, treat **Kimi work quality** and **Kimi Windows availability** as separate
 > ratings, and run credentialed Kimi calls from the Full Access main task.

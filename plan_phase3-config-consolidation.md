@@ -1,3 +1,10 @@
+---
+summary: Plan for config consolidation phase 3 - dotfile sync fixes, Dropbox script stubs, restore-from-zero docs; most steps done.
+kind: plan
+status: open
+read-when: Continuing config consolidation phase 3
+---
+
 # Implementation plan — Config consolidation **Phase 3**
 
 ## ⏱ STATUS (read this first) — updated 2026-09-28

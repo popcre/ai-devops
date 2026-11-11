@@ -1,3 +1,10 @@
+---
+summary: Check showing Grok, Kimi and GLM all returned usable review verdicts within 15 minutes.
+kind: proof
+status: done
+read-when: Checking mixed-provider reviewer reliability evidence
+---
+
 # Mixed-provider reviewer check, 2026-08-18
 
 ## Result

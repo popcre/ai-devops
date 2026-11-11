@@ -1,3 +1,10 @@
+---
+summary: Historical record of the Claude Remote Control setup on hetz, decommissioned 2026-08-18, with verify and undo steps.
+kind: archive
+status: done
+read-when: Only for history of the retired hetz Remote Control setup
+---
+
 # Claude Code Remote Control on `hetz` — What Was Changed, How to Verify, How to Undo
 
 > **Decommissioned 2026-08-18.** The six Remote Control services and every

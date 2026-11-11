@@ -1,3 +1,10 @@
+---
+summary: Plain-English guide to branches, pull requests and safe habits for a non-programmer owner.
+kind: living
+status: current
+read-when: Explaining the branch and pull request workflow to Albert
+---
+
 # Branch Workflow (for a non-programmer)
 
 A plain-English guide for Albert. You don't need to know how code works to keep

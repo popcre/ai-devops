@@ -1,3 +1,10 @@
+---
+summary: "Operator packet that reads exact Oracle hosting metadata from Coolify on hetz for the Oracle coordinator (theoracle #27/#58)"
+kind: ops
+status: current
+read-when: diagnosing Oracle hosting metadata on hetz
+---
+
 # Exact Oracle metadata diagnosis packet
 
 Owner: Oracle coordinator on u2giants/theoracle #27/#58. This temporary public

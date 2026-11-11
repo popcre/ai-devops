@@ -1,3 +1,10 @@
+---
+summary: Plan to stop recurring reviewer failures on edge-dev3; steps 1-7 done, step 8 sustained acceptance not yet accepted (#1783)
+kind: plan
+status: open
+read-when: checking recurring reviewer failure repair acceptance
+---
+
 # Implementation plan — stop recurring reviewer failures on edge-dev3
 
 ## STATUS — read first; do not re-derive completed programmes

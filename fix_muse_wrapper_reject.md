@@ -1,3 +1,10 @@
+---
+summary: Plan to make ai-muse stale-turn rejection diagnosable and recoverable; steps 1-4 landed, final review and publish remain.
+kind: plan
+status: open
+read-when: Finishing the ai-muse stale-turn rejection repair
+---
+
 # Implementation plan — make `ai-muse`'s stale-turn rejection diagnosable and recoverable
 
 **Repository:** `u2giants/ai-devops` (public)

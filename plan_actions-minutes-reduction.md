@@ -1,3 +1,10 @@
+---
+summary: Plan to cut GitHub Actions minutes (issue 1464), cancelled 2026-10-07 because public-repo minutes cost nothing.
+kind: plan
+status: done
+read-when: Only for history of the Actions minutes reduction idea
+---
+
 # Implementation plan — cut GitHub Actions minutes (fewer runs, cancel stale runs, tiny checks on edge-dev3 first)
 
 Related handoff: `HANDOFF.d/2026-10-07T2335Z-edge-dev3-claude-actions-minutes-reduction.md` (retired; recoverable from git history). Do not rewrite root `HANDOFF.md`.

@@ -1,3 +1,10 @@
+---
+summary: Plan to make the DeepSeek reviewer wrapper safe (contained sessions, locked commits, verdict contract); all steps complete.
+kind: plan
+status: done
+read-when: DeepSeek reviewer wrapper safety repair history
+---
+
 # IMPLEMENTATION PLAN — DeepSeek reviewer safety repair (2026-08-21)
 
 Handoff: `HANDOFF.d/2026-08-21T1122Z-edge-dev-codex-reviewer-repair-plans.md` (retired; recoverable from git history)

@@ -1,3 +1,10 @@
+---
+summary: Plan for ZCode on Windows parity (#558) covering install, wrapper, MCP, hooks and docs; all steps landed
+kind: plan
+status: done
+read-when: checking ZCode Windows setup and wrapper
+---
+
 # IMPLEMENTATION PLAN — ZCode for Windows parity in ai-devops (2026-09-17)
 
 Planning issue: [popcre/ai-devops#558](https://github.com/popcre/ai-devops/issues/558)

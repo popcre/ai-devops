@@ -1,3 +1,10 @@
+---
+summary: Plan for reviewer cache-hit token reporting (#333); two earlier items were withdrawn on evidence and only reporting remains
+kind: plan
+status: open
+read-when: measuring reviewer cache hits or token reporting
+---
+
 # Implementation plan — reviewer cache-hit reporting (items 1 and 2 withdrawn)
 
 **Repository:** `u2giants/ai-devops` (public)

@@ -1,3 +1,10 @@
+---
+summary: How the self-hosted Windows CI runners windows-offline and windows-reviewer-safety are set up and used.
+kind: ops
+status: current
+read-when: Maintaining or debugging the Windows CI runners
+---
+
 # The self-hosted Windows runners
 
 **Added:** 2026-08-27, with PR
