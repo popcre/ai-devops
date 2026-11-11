@@ -382,7 +382,7 @@ change_set(){
 # --------------------------------------------------------------------------
 # Classification
 # --------------------------------------------------------------------------
-OBSERVED_CLASS=""; OBSERVED_RANK=0; CHANGED_PATHS=""; CHANGED_COUNT=0
+OBSERVED_CLASS=""; OBSERVED_RANK=0; ESCALATED_CLASS=""; CHANGED_PATHS=""; CHANGED_COUNT=0
 declare -a CONTRIBUTORS=()
 
 classify_paths(){
@@ -392,7 +392,7 @@ classify_paths(){
   valid_class "$fallback" || fail_closed "fallback_class '$fallback' is not a declared change class"
   rules="$(applicable_path_rules "$identity")"
 
-  OBSERVED_CLASS=""; OBSERVED_RANK=0; CONTRIBUTORS=(); CHANGED_COUNT=0; RAW_ARCHIVE_PATHS=""
+  OBSERVED_CLASS=""; OBSERVED_RANK=0; ESCALATED_CLASS=""; CONTRIBUTORS=(); CHANGED_COUNT=0; RAW_ARCHIVE_PATHS=""
   while IFS= read -r path; do
     [ -n "$path" ] || continue
     CHANGED_COUNT=$((CHANGED_COUNT + 1))
@@ -429,7 +429,7 @@ classify_paths(){
     done
     if [ -z "$best" ]; then best="$fallback"; best_rank="${TG_RANK[$fallback]}"; fi
     CONTRIBUTORS+=("$best	$path")
-    if [ "$best_rank" -gt "$OBSERVED_RANK" ]; then OBSERVED_CLASS="$best"; OBSERVED_RANK="$best_rank"; fi
+    if [ "$best_rank" -gt "$OBSERVED_RANK" ]; then OBSERVED_CLASS="$best"; OBSERVED_RANK="$best_rank"; ESCALATED_CLASS="$best"; fi
   done <<< "$paths"
 
   # private-evidence is sticky across a change set: one licensed path means the
@@ -1545,22 +1545,26 @@ sys.stdout.buffer.write(("\n".join(names) + "\n").encode("utf-8", "surrogateesca
 
   # 1. Scope drift: the work grew past what was declared.
   if [ "$OBSERVED_RANK" -gt "$declared_rank" ]; then
-    local detail line
+    local detail line escalated
+    # Name the class that actually outranks the declaration. OBSERVED_CLASS may
+    # have been pinned to private-evidence by a licensed path while the rank
+    # came from a higher tooling class; re-declaring that would not help.
+    escalated="${ESCALATED_CLASS:-$OBSERVED_CLASS}"
     detail=""
     for line in "${CONTRIBUTORS[@]}"; do
-      [ "${line%%	*}" = "$OBSERVED_CLASS" ] || continue
+      [ "${line%%	*}" = "$escalated" ] || continue
       detail="$detail  ${line#*	}"$'\n'
     done
     if [ "$protected" = true ]; then
       blocked "$(printf 'ai-task-gates: STOP before "%s".\n  declared: %s\n  observed: %s (protected)\nThese files escalated the task class:\n%sA protected class cannot be acknowledged or reviewer-approved away. Re-declare the task with `ai-task-gates start --class %s` and do what that class requires, or take these files out of the change set.' \
-        "$action" "$declared" "$OBSERVED_CLASS" "$detail" "$OBSERVED_CLASS")"
+        "$action" "$declared" "$escalated" "$detail" "$escalated")"
     fi
     if [ -z "$acknowledge" ]; then
       blocked "$(printf 'ai-task-gates: STOP before "%s".\n  declared: %s\n  observed: %s\nThese files escalated the task class:\n%sRe-declare with `ai-task-gates start --class %s`, or re-run with --acknowledge "<reason>" if the escalation is in scope.' \
-        "$action" "$declared" "$OBSERVED_CLASS" "$detail" "$OBSERVED_CLASS")"
+        "$action" "$declared" "$escalated" "$detail" "$escalated")"
     fi
-    state_record_override acknowledge "$action" "$acknowledge" "$OBSERVED_CLASS"
-    printf 'ai-task-gates: escalation to "%s" acknowledged: %s\n' "$OBSERVED_CLASS" "$acknowledge"
+    state_record_override acknowledge "$action" "$acknowledge" "$escalated"
+    printf 'ai-task-gates: escalation to "%s" acknowledged: %s\n' "$escalated" "$acknowledge"
   fi
 
   if [ "$action" = application-workflow ]; then
