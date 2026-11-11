@@ -19,6 +19,11 @@ Do:
   files, or verified session findings.
 - Keep `AGENTS.md` as the fast router: rules and pointers future sessions must
   see quickly.
+- In a repo with a `.doc-health.json`, run `ai-doc-health --repo .` before you
+  finish and fix every fault your session introduced: a new document gets its
+  four-line header (`summary`, `kind`, `status`, `read-when`) and the index is
+  regenerated with `ai-doc-health --repo . --fix-index` in the same commit. Never
+  hand-edit the generated index. Rules: `docs/doc-health.md` in ai-devops.
 - Put detail in the right topic doc instead of duplicating it everywhere.
 - Say explicitly when no docs need updating.
 

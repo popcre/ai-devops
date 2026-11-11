@@ -11,6 +11,15 @@ AGENTS.md MUST prevent future AI sessions from ingesting every .md file unnecess
 AGENTS.md MUST stay under 60 KB (hard ceiling 80 KB). It is loaded in full every session, so size is a permanent context-window tax.
 Sections that grow one entry per session -- quirks/idiosyncrasies, incident logs, pending-work boards -- MUST live in docs/ (docs/idiosyncrasies.md, docs/incident-log.md, docs/pending-work.md) with only a pointer and a one-line title index in AGENTS.md.
 
+DOCUMENT HEADERS, GENERATED INDEX AND UPKEEP (added 2026-11-11, popcre/designflow-backend issue 391)
+MUST leave a committed `.doc-health.json` and `.doc-reachability.json` at the repository root (formats: ai-devops `docs/doc-health.md` and `docs/doc-reachability.md`).
+MUST give every Markdown document that the config does not exempt this front matter, written from reading the document: `summary` (one sentence, at most 160 characters), `kind` (living | ops | plan | spec | proof | archive), `status` (current | open | done | stale), `read-when` (the task that needs this file).
+MUST generate the index with `ai-doc-health --repo . --fix-index` and MUST NOT hand-write or hand-edit it.
+MUST make the first lines of AGENTS.md say: "The complete document index is `docs/INDEX.md`, generated from document headers. Search it for your topic's keywords (or read it) before opening or searching any other document. Open a document only when its summary matches your task."
+MUST add the advisory `Documentation health` workflow (pull-request comment plus weekly keeper with one rolling issue), copied from a repository that already has it (for example popcre/designflow-backend `.github/workflows/doc-health.yml`); it MUST NOT become a required check.
+MUST finish with `ai-doc-health --repo .` exiting 0, or list each remaining fault with its owner.
+Where a `.doc-health.json` sets `router_max_bytes`, that tighter figure replaces the 60 KB ceiling above.
+
 ABSOLUTE RULES
 MUST derive documentation from the actual repository state.
 MUST inspect relevant code, config, scripts, workflows, migrations, deployment files, and existing docs before editing docs.

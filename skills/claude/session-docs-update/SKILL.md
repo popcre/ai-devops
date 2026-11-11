@@ -44,7 +44,8 @@ Hard rules:
 session, so its size is a permanent tax on every future session's context window.
 
 - **Check the byte size before you append** (`wc -c AGENTS.md`).
-- **Soft ceiling 60 KB. Hard ceiling 80 KB.**
+- **Soft ceiling 60 KB. Hard ceiling 80 KB.** A repo's `.doc-health.json` may set a
+  tighter `router_max_bytes` (DesignFlow: target 25 KB, fault above 30 KB); the tighter number wins.
 - If your addition would cross the soft ceiling, you must NOT simply append. Split the
   largest growing section into `docs/<topic>.md`, leave a pointer plus a one-line title
   index in `AGENTS.md`, and repoint any `§N` cross-references in other docs.
@@ -167,14 +168,22 @@ completeness gate above does not pass without it.
 
 ## Closers (always run after the doc update)
 
-0. **Doc-shape check** — run this in every repo you touched and report the numbers:
+0. **Doc-health check** — in every repo you touched that has a `.doc-health.json`,
+   run the upkeep tool and report its fault lines:
 
    ```bash
-   wc -c AGENTS.md HANDOFF.md
+   ai-doc-health --repo .
    ```
 
-   `AGENTS.md` over 60 KB → split its largest growing section into `docs/` before
-   you finish (see the size cap above). `HANDOFF.md` over ~1 KB, or line 1 lacking
+   Fix every fault your session introduced before you finish. A new document gets
+   its four-line header (`summary`, `kind`, `status`, `read-when`) and the index is
+   regenerated with `ai-doc-health --repo . --fix-index` in the same commit — never
+   edit the generated index by hand. Faults you did not cause (old handoffs, other
+   sessions' files) are reported, not fixed. Rules: `docs/doc-health.md` in ai-devops.
+   In a repo with no `.doc-health.json`, fall back to `wc -c AGENTS.md HANDOFF.md`.
+
+   `AGENTS.md` over the repo's `router_max_bytes` (or 60 KB where no config exists) →
+   split its largest growing section into `docs/` before you finish (see the size cap above). `HANDOFF.md` over ~1 KB, or line 1 lacking
    `handoff-pointer: v1`, → it is a legacy full document: `git mv` it verbatim into
    `HANDOFF.d/` and write the pointer, per the handoff gate above.
 
