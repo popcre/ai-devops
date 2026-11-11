@@ -1,3 +1,10 @@
+---
+summary: One-page map of every skill, what it does and the phrase that triggers it.
+kind: living
+status: current
+read-when: Looking up which skill to use
+---
+
 # Skills map — every skill, what it does, when to use it
 
 One-page reference. Say the trigger phrase naturally, or force a skill with

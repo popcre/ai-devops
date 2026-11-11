@@ -1,3 +1,10 @@
+---
+summary: Owner decision document on process bottlenecks, steps to delete and CI waiting, with evidence from Sept 2026.
+kind: proof
+status: done
+read-when: Reviewing past process bottleneck findings
+---
+
 # Process bottlenecks and improvements — decision document for the owner
 
 > **Owner ruling, 2026-10-07 EDT:** automatic one-child, one-phase and

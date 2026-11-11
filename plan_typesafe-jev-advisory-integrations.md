@@ -1,3 +1,10 @@
+---
+summary: Plan for TypeSafe Jev advisory integrations (#643), starting with issue duplicate triage in shadow mode; not started
+kind: plan
+status: open
+read-when: evaluating TypeSafe Jev advisory integrations
+---
+
 # IMPLEMENTATION PLAN — TypeSafe Jev advisory integrations (2026-09-20)
 
 **Tracking issue:** [#643](https://github.com/popcre/ai-devops/issues/643)

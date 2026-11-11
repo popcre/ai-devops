@@ -1,3 +1,10 @@
+---
+summary: Plan for issue 782 model-tier delegation routing sheet and client globals; steps 0-4 done, re-adopt and landing open.
+kind: plan
+status: open
+read-when: Working on model-tier delegation routing (issue 782)
+---
+
 # Plan — Model-tier delegation: frontier models plan, lower-tier models implement
 
 Parent issue: [popcre/ai-devops #782](https://github.com/popcre/ai-devops/issues/782)

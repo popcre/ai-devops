@@ -1,3 +1,10 @@
+---
+summary: Plan to reintegrate Gemini 3.8 Flash and Qwen 3.8 Max as reviewers; Gemini activated 2026-09-04, Qwen active on EDGE-DEV.
+kind: plan
+status: done
+read-when: Checking Gemini 3.8 Flash and Qwen 3.8 Max reintegration
+---
+
 # Reviewer 3.8 reintegration plan — 2026-09-03
 
 ## STATUS

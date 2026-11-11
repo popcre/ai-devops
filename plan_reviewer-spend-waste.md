@@ -1,3 +1,10 @@
+---
+summary: Plan of reviewer token-waste fixes (#1436) such as removing paid-key fallbacks and reusing passing reports
+kind: plan
+status: done
+read-when: "checking reviewer token-waste fixes (#1436, #1426)"
+---
+
 # IMPLEMENTATION PLAN — Reviewer token-waste fixes (2026-10-07)
 
 Parent issue: [#1436](https://github.com/popcre/ai-devops/issues/1436) ·

@@ -1,3 +1,10 @@
+---
+summary: Runbook and live state for WarpBuild Azure BYOC Windows CI runners (stacks, runner sets, setup steps), not yet on the required lane (issue 961).
+kind: living
+status: current
+read-when: Working on WarpBuild Azure Windows CI runners
+---
+
 # WarpBuild Azure BYOC Windows CI
 
 WarpBuild BYOC creates a fresh Windows Server 2022 VM in POP Creations' dedicated

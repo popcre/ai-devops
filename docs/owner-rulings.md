@@ -1,3 +1,10 @@
+---
+summary: Albert's dated standing rulings quoted verbatim, with the rule each one changed.
+kind: spec
+status: current
+read-when: Checking or adding an owner ruling
+---
+
 # Owner rulings (verbatim)
 
 Albert Hazan's dated standing rulings, quoted exactly. The global rule files

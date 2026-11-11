@@ -1,3 +1,10 @@
+---
+summary: Incident record of four production Cloud Build triggers disabled by a Terraform run on 2026-07-20 and the fix.
+kind: proof
+status: done
+read-when: Investigating Cloud Build production trigger changes
+---
+
 # Cloud Build production-trigger incident, 2026-07-20
 
 ## Outcome

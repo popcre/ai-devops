@@ -1,3 +1,10 @@
+---
+summary: Guide to using installed skills across Claude, Codex, ZCode and MiMo including TypeSafe.
+kind: ops
+status: current
+read-when: Using or installing skills on a client
+---
+
 # Skills usage guide
 
 ## TypeSafe on demand

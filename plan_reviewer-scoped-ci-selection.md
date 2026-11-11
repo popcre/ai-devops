@@ -1,3 +1,10 @@
+---
+summary: Plan to scope reviewer test runs so a new reviewer stops slowing every change (#1563); all steps done
+kind: plan
+status: done
+read-when: checking how reviewer suites are selected in CI
+---
+
 # Plan: scope reviewer test runs so each new reviewer stops slowing every change
 
 Issue: [#1563](https://github.com/popcre/ai-devops/issues/1563) (filed 2026-10-11).

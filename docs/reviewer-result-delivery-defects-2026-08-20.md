@@ -1,3 +1,10 @@
+---
+summary: Report of three ways active reviewers lost their results (ai-glm, ai-muse, ai-grok-review).
+kind: proof
+status: done
+read-when: Reviewing past reviewer result-loss defects
+---
+
 # Three active reviewers, three different ways of losing the result — 2026-08-20
 
 Grok concurrency, interruption, active-run visibility, progress, and evidence-correlation repair is specified in [`../plan_grok-review-concurrency-cancellation-observability.md`](../plan_grok-review-concurrency-cancellation-observability.md). Read its STATUS table first while [ai-devops issue #56](https://github.com/u2giants/ai-devops/issues/56) is open.

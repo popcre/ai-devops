@@ -1,3 +1,10 @@
+---
+summary: Plan to remove unneeded GitHub API calls as part of the request-reduction programme (issue 658); installed proofs and acceptance remain open.
+kind: plan
+status: open
+read-when: Reducing GitHub API request traffic from toolkit scripts
+---
+
 # IMPLEMENTATION PLAN — cut unneeded GitHub traffic (2026-09-25)
 
 Companion execution plan under the programme
@@ -7,8 +14,7 @@ the remaining source-reduction work: stop the GitHub calls that are not needed.
 It does not re-plan measurement (P1), quota buckets (P2), fleet coordination
 (P6), or programme acceptance (P8).
 
-Linked handoff (this session):
-[`HANDOFF.d/2026-09-25T1715Z-edge-dev-mimo-cut-unneeded-github-traffic.md`](HANDOFF.d/2026-09-25T1715Z-edge-dev-mimo-cut-unneeded-github-traffic.md).
+The session handoff `HANDOFF.d/2026-09-25T1715Z-edge-dev-mimo-cut-unneeded-github-traffic.md` was retired on 2026-11-11 under the successor rule: this plan carries all of it; git history keeps the text.
 
 ## STATUS — read first
 

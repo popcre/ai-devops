@@ -1,3 +1,10 @@
+---
+summary: Evidence log of Windows CI runner interruptions from 2026-08-29 to 2026-09-01 on the edge-dev self-hosted runners.
+kind: proof
+status: done
+read-when: Investigating Windows self-hosted runner interruptions or cancellations
+---
+
 # Windows CI runner interruptions — evidence log, 2026-08-29 to 2026-09-01
 
 Written during the Context7 / token-tooling session. This file records only what

@@ -1,3 +1,10 @@
+---
+summary: Close-out plan for issue 1881 trimming the always-loaded AI ruleset; poll-guard extension and phase 6.1 re-audit remain.
+kind: plan
+status: open
+read-when: Finishing the ruleset trim close-out (issue 1881)
+---
+
 # Implementation plan — popcre/ai-devops#1881 (trim and enforce the always-loaded AI ruleset: close out)
 
 ## Verdict (read first)

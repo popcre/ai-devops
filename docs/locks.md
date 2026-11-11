@@ -1,3 +1,10 @@
+---
+summary: Inventory of every lock used by bin scripts with recovery policy, from issue 1002.
+kind: living
+status: current
+read-when: Adding or debugging a lock in a bin script
+---
+
 # Lock inventory
 
 Every lock used by `bin/`, written for issue

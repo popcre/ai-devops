@@ -1,3 +1,10 @@
+---
+summary: Plan for issue 2280 review findings on a merged PR - capture status fail-closed in update.sh, plus tests.
+kind: plan
+status: open
+read-when: Fixing update.sh fail-closed status capture (issue 2280)
+---
+
 # Plan: popcre/ai-devops#2280 — updater "dirty checkout" guards fail open
 
 **Verdict (checked 2026-11-04 against main f2b4f5bd): STILL REAL.** Findings 1 and 2 of the review on merged PR #2279 reproduce on current main: `update.sh:102`, `:227`, `:239` still discard `public_git`'s exit status, and `tools/lib/install-public-git.py:161-163` still raises on a dirty tree. Worth doing under the skinny rulings: it is a small fix to a data-safety guard (protecting uncommitted local edits in the installed checkout), not a new check, waiter, or gate.

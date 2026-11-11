@@ -1,3 +1,10 @@
+---
+summary: Runbook for the watchdog duty pool, the machines that take turns running CI alarm timers with claim and lease failover.
+kind: ops
+status: current
+read-when: Operating or debugging the CI watchdog timers and duty pool
+---
+
 # Watchdog duty pool — runbook (how alarms stay alive)
 
 **Name:** watchdog duty pool (config key: `watch_hosts`).  

@@ -1,3 +1,10 @@
+---
+summary: Guide to repo-owned Codex skills, how to install them and how to invoke them.
+kind: ops
+status: current
+read-when: Installing or invoking Codex skills
+---
+
 # Codex skills usage guide
 
 For POP business meaning, say “use our Business Logic Library,” “add this business

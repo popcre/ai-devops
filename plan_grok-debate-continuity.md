@@ -1,3 +1,10 @@
+---
+summary: Plan to make Grok debates complete, resumable and cache-efficient through a shared debate template; all six steps complete 2026-08-10.
+kind: plan
+status: done
+read-when: Changing Grok debate or resume behavior
+---
+
 # Plan: make Grok debates complete, repeatable, and cache-efficient
 
 ## STATUS

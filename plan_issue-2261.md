@@ -1,3 +1,10 @@
+---
+summary: Plan for issue 2261 shared-db worktree reaper cwd review finding on PR 2259; three small fixes across two files.
+kind: plan
+status: open
+read-when: Fixing the shared-db worktree reaper cwd bug (issue 2261)
+---
+
 # Plan — popcre/ai-devops#2261 (review finding on PR #2259, shared-db worktree reaper cwd)
 
 **Verdict (checked 2026-11-04 on main `f2b4f5bd`): STILL REAL, small, worth doing under skinny.**

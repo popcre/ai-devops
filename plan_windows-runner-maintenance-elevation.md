@@ -1,3 +1,10 @@
+---
+summary: Plan for a protected Windows runner maintenance elevation (#262); all steps proven on both hosts
+kind: plan
+status: done
+read-when: checking Windows runner maintenance elevation setup
+---
+
 # Windows runner maintenance elevation plan
 
 Issue: [#262](https://github.com/popcre/ai-devops/issues/262)

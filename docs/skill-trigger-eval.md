@@ -1,3 +1,10 @@
+---
+summary: How tools skill-trigger-eval measures whether a skill description makes Claude invoke it.
+kind: ops
+status: current
+read-when: Measuring or tuning a skill description trigger rate
+---
+
 # Measuring whether a skill actually triggers
 
 A skill only helps if Claude *invokes* it. The `description:` in a skill's

@@ -1,3 +1,10 @@
+---
+summary: Plan for issue 46 restoring trustworthy Kimi reviews; all eight steps complete and requalified live 2026-08-23.
+kind: plan
+status: done
+read-when: Checking how Kimi review failures were repaired
+---
+
 # IMPLEMENTATION PLAN — restore trustworthy Kimi reviews (2026-08-20)
 
 Former paired handoff: `HANDOFF.d/2026-08-20T0213Z-edge-dev-codex-kimi-review-recovery-plan.md`

@@ -1,3 +1,10 @@
+---
+summary: Ledger of past incidents explaining why each shared-db structural rule exists.
+kind: spec
+status: current
+read-when: Asking why a shared-db safety rule exists
+---
+
 # Incident ledger — why each shared-db orchestration rule exists
 
 

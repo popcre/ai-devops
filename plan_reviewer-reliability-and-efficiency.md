@@ -1,3 +1,10 @@
+---
+summary: Plan for reviewer reliability and measured efficiency (#337) with a STATUS of child issues still open
+kind: plan
+status: open
+read-when: working on reviewer reliability, evidence identity or efficiency (#337)
+---
+
 # Implementation plan — reviewer reliability and measured efficiency
 
 ## Ultimate goal

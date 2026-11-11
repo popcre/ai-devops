@@ -1,3 +1,10 @@
+---
+summary: Pointer to the root plan for CI, reviewers and runners remediation dated 2026-10-02.
+kind: plan
+status: open
+read-when: Looking for the CI reviewers runners remediation plan
+---
+
 # CI / reviewers / runners remediation plan — 2026-10-02 (pointer)
 
 The comprehensive implementation plan lives at the repository root, matching

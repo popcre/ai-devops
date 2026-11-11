@@ -1,3 +1,10 @@
+---
+summary: Plan for ai-muse native muse-code engine parity (issue 542), with phases A-D landed through 2026-09-24.
+kind: plan
+status: done
+read-when: Understanding the ai-muse native engine rollout
+---
+
 # Plan — ai-muse native-engine parity: close every closable gap, add the native extras, switch the default to Muse Code
 
 Issue: [#542](https://github.com/popcre/ai-devops/issues/542) · Owner decision: Albert, 2026-09-17 · Plan written: 2026-09-17 (edge-dev, Claude)

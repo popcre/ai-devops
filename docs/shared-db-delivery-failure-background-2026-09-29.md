@@ -1,3 +1,10 @@
+---
+summary: Full narrative of what went wrong with shared-db delivery, behind the coordination-deletion plan.
+kind: proof
+status: done
+read-when: Understanding why shared-db delivery process was cut
+---
+
 # What went wrong with shared-db delivery — full background (2026-09-29)
 
 This is the complete narrative behind `plan_shared-db-coordination-deletion.md`. It exists so a future session (or reviewer) does not have to reconstruct the story from chat, and so nobody “fixes” the plan by adding process back without knowing what that process cost.

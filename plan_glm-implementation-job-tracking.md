@@ -1,3 +1,10 @@
+---
+summary: Plan making GLM implementation jobs visible, name-locked, abortable and recoverable; all five steps done 2026-08-10.
+kind: plan
+status: done
+read-when: Changing ai-glm implementation job records or abort logic
+---
+
 # Plan: make GLM implementation jobs visible, exclusive, abortable, and recoverable
 
 ## STATUS

@@ -1,3 +1,10 @@
+---
+summary: Plan for issue 2017 retiring the DesignFlow HTS multi-classify handoff file; now unblocked, deletion and close remain.
+kind: plan
+status: open
+read-when: Retiring the DesignFlow HTS handoff (issue 2017)
+---
+
 # Plan — popcre/ai-devops#2017: retire the verified DesignFlow HTS multi-classify handoff
 
 ## VERDICT (checked 2026-11-04, 3:51 PM EST) — STILL NEEDED, NOW UNBLOCKED

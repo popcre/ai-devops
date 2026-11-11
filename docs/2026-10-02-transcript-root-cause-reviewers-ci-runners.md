@@ -1,3 +1,10 @@
+---
+summary: 72-hour transcript root-cause report on reviewer, CI and runner problems for 2026-09-29 to 2026-10-02.
+kind: proof
+status: done
+read-when: Looking for why reviewer, CI or runner problems persisted in early October
+---
+
 # 72-hour transcript root-cause — Reviewers, CI, Runners (2026-10-02)
 
 **Window:** 2026-09-29 18:00 EDT through 2026-10-02 18:16 EDT.

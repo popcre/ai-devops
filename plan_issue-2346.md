@@ -1,3 +1,10 @@
+---
+summary: Plan for issue 2346 edge-dev3 heartbeat bypassing the GitHub call throttle; regression test and live proof remain.
+kind: plan
+status: open
+read-when: Fixing the edge-dev3 heartbeat throttle bypass (issue 2346)
+---
+
 # Implementation plan — popcre/ai-devops#2346 (edge-dev3 heartbeat bypasses the GitHub call throttle)
 
 ## STATUS (2026-11-04 3:52 PM EST)

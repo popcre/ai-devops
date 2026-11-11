@@ -1,3 +1,10 @@
+---
+summary: Plan covering review-packet forward-move tolerance, slow-evidence warning and an adversarial-cases standard (#608)
+kind: plan
+status: done
+read-when: checking review packet race handling or the adversarial-cases standard
+---
+
 # IMPLEMENTATION PLAN — review-packet forward-move tolerance, fast-evidence convention, adversarial-cases table (2026-09-18)
 
 | Step | Status | Evidence (artifact, not a bare claim) |

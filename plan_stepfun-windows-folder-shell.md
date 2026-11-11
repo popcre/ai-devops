@@ -1,3 +1,10 @@
+---
+summary: Plan for StepFun Windows folder and test shell access; the bash shim exclusivity spike and code review still open
+kind: plan
+status: open
+read-when: working on StepFun on Windows folder and shell access
+---
+
 # IMPLEMENTATION PLAN — StepFun Windows folder + test shell (2026-09-30 rev J)
 
 > Fresh session starts here. If any step conflicts with §1, the goal wins —

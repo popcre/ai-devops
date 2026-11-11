@@ -1,3 +1,10 @@
+---
+summary: Plan to stop AI sessions declaring work complete while authorized work remains; closed 2026-08-27.
+kind: plan
+status: done
+read-when: Completion-honesty rule enforcement history
+---
+
 # Implementation plan — stop AI sessions from declaring work complete while authorized work is still pending
 
 **CLOSED 2026-08-27.** No handoff is open for this plan; its handoff was

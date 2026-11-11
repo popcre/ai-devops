@@ -1,3 +1,10 @@
+---
+summary: Repository structure table and reference sections moved from AGENTS.md.
+kind: living
+status: current
+read-when: Finding where a repository path or tool lives
+---
+
 # Repository reference
 
 Moved from [`AGENTS.md`](../AGENTS.md) (#1881 phase 4). Load only the section the task needs.

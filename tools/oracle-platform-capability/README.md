@@ -1,3 +1,10 @@
+---
+summary: Metadata-only Oracle platform capability preparation operator for the Oracle coordinator (#27/#58), one-use claim contract
+kind: ops
+status: current
+read-when: preparing Oracle platform capability evidence
+---
+
 # Closed Oracle platform capability preparation
 
 Owner: Oracle coordinator on #27/#58. This PUBLIC metadata-only source operator

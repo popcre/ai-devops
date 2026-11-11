@@ -1,3 +1,10 @@
+---
+summary: Analysis of 342 Codex chat transcripts showing what Albert uses Codex for, built 2026-07-08.
+kind: proof
+status: done
+read-when: Reviewing how Codex has been used historically
+---
+
 # Codex chat analysis
 
 Built from `codex_chats/` after syncing `main` from GitHub on 2026-07-08.

@@ -1,3 +1,10 @@
+---
+summary: Archived prompt to reconcile PR 666 sealed code reviews with the main-branch 702 private-review rule.
+kind: archive
+status: done
+read-when: Only for history of the PR 666 and rule 702 reconciliation
+---
+
 Paste this into a fresh session. It is self-contained.
 
 ---

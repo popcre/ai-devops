@@ -1,3 +1,10 @@
+---
+summary: Plan to slim always-loaded instructions and add context-audit tooling and budgets; completed 2026-08-14.
+kind: plan
+status: done
+read-when: Context size budgets and instruction slimming history
+---
+
 # IMPLEMENTATION PLAN: context-engineering consolidation (2026-08-12)
 
 ## STATUS

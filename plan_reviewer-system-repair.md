@@ -1,3 +1,10 @@
+---
+summary: Plan to repair the delegated reviewer system (#34) using packet wiring and budgets; some steps gated or dropped
+kind: plan
+status: open
+read-when: checking the delegated reviewer repair plan and its gates
+---
+
 # Implementation plan — delegated reviewer system repair
 
 Tracking issue: [u2giants/ai-devops#34](https://github.com/u2giants/ai-devops/issues/34)

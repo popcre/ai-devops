@@ -1,3 +1,10 @@
+---
+summary: Plan for self-clearing stuck locks and a merge-queue settings drift check (#1002); all steps done with live proof
+kind: plan
+status: done
+read-when: checking ai-lock-doctor or merge-queue drift check
+---
+
 # Plan: self-clearing stuck locks and a live-settings drift check
 
 Handoff registration: `HANDOFF.d/2026-09-28T1755Z-edge-dev3-claude-plans-manifest-and-self-healing.md` (retired; recoverable from git history)

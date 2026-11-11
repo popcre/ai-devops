@@ -1,3 +1,10 @@
+---
+summary: Archived plan for a simple four-reviewer CI rebuild (#2041); superseded by plan_skinny-review.md
+kind: plan
+status: stale
+read-when: looking up history before the skinny review plan
+---
+
 # Plan — simple reviewer rebuild (4 reviewers, run in CI, stateless)
 
 > **ARCHIVED 2026-10-29** (popcre/ai-devops#2072): superseded by the advisory

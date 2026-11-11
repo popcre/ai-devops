@@ -1,3 +1,10 @@
+---
+summary: Diagnosis and partial fix of non-deterministic AI reviewer test suites (issue 89), with a frozen timing baseline cause still open.
+kind: plan
+status: open
+read-when: Flaky ai-grok-review or reviewer offline test suites
+---
+
 # fix_test_ai — the AI reviewer test suites were non-deterministic
 
 **Written:** 2026-08-26 (edge-dev / claude) — diagnosis

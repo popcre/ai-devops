@@ -1,3 +1,10 @@
+---
+summary: Verification of the issue 1349 repair routing GLM through ai-glm in the review pool adapter, with offline integration checks.
+kind: proof
+status: done
+read-when: Debugging GLM dispatch in the review pool
+---
+
 # Native reviewer dispatch repairs — issue #1349
 
 Parent: popcre/shared-db#3536. Owner: Codex reviewer-relief child.

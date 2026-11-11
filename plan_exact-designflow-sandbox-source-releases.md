@@ -1,3 +1,10 @@
+---
+summary: Plan for exact DesignFlow sandbox source releases (issue 1796); final review, landing, install and consumer adoption still open.
+kind: plan
+status: open
+read-when: Exact DesignFlow sandbox source release tooling
+---
+
 # IMPLEMENTATION PLAN — exact DesignFlow sandbox source releases (2026-10-16)
 
 ## STATUS

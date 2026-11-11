@@ -1,3 +1,10 @@
+---
+summary: Design for non-authorizing recovery of Muse reviews ending after denied reads (issue 674), bounded predicate for technical review.
+kind: spec
+status: current
+read-when: Changing Muse denied-read finalization or recovery
+---
+
 # Exact non-authorizing Muse denied-read recovery
 
 Owner: existing ai-devops issue #674. Recurrence coordination: #1783. This change does not authorize acceptance of a failed review, installation, automatic paid retry or alteration of any retained evidence.

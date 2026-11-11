@@ -1,3 +1,10 @@
+---
+summary: Rules for the reviewed HTS sandbox application workflow gate, with version 2 synthetic acceptance under 2395.
+kind: spec
+status: current
+read-when: Changing or running the HTS sandbox workflow gate
+---
+
 # Reviewed HTS sandbox application workflow
 
 ## Current status

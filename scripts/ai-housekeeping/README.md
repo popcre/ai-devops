@@ -1,3 +1,10 @@
+---
+summary: README for ai-housekeeping scripts, a daily AI debris sweep and a move of growth folders to the D drive on EDGE-DEV
+kind: ops
+status: current
+read-when: running or changing the AI debris cleanup scripts
+---
+
 # ai-housekeeping
 
 Machine hygiene scripts for AI debris on Albert's workstation (EDGE-DEV).
@@ -11,4 +18,4 @@ Tracked by issues [#714](https://github.com/popcre/ai-devops/issues/714) (these 
 
 Policy (owner, 2026-09-23): the run that creates a temporary copy deletes it before returning. This daily sweep is **backup only**. Do not retire it until self-cleanup has been live-proven for 14 days.
 
-See `plan_agent-self-cleanup.md` and `prompt_fix-review-full-history.md` on this repo.
+See `plan_agent-self-cleanup.md` and `docs/archive/prompt_fix-review-full-history.md` on this repo.

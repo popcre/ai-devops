@@ -1,3 +1,10 @@
+---
+summary: Plan for the shared topic-cut transcript store (#2050); most steps done, the final live-proof step remains
+kind: plan
+status: open
+read-when: working on the transcript store or its remaining proof step
+---
+
 # Plan — shared, topic-cut transcript store
 
 **Issue:** popcre/ai-devops#2050.

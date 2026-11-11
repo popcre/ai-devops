@@ -1,3 +1,10 @@
+---
+summary: Guide to the Headroom token-compression proxy - routing, 2026-07-14 fixes, measurement and turning it off.
+kind: ops
+status: current
+read-when: Diagnosing or toggling the Headroom proxy
+---
+
 # Headroom token-compression proxy
 
 **What it is, where it runs, how our machines route through it, what was done to

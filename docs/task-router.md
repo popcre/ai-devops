@@ -1,3 +1,10 @@
+---
+summary: Router of low-frequency specialized tasks to the plan or doc to read first.
+kind: living
+status: current
+read-when: Routing a specialized task to its plan
+---
+
 # Specialized task router
 
 Use this only after `AGENTS.md` routes the current task here. It holds

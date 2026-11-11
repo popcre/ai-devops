@@ -1,3 +1,10 @@
+---
+summary: Plan for issue 1860 ZCode headless runs failing after auto-update; fixed through PR 2370, proven live and issue closed 2026-11-04.
+kind: plan
+status: done
+read-when: Checking the ZCode headless auto-update fix (issue 1860)
+---
+
 # Implementation plan — popcre/ai-devops#1860: ZCode headless runs fail after auto-update
 
 ## VERDICT (checked 2026-11-04 3:54 PM EST): STILL REAL — not fixed, not obsolete

@@ -1,3 +1,10 @@
+---
+summary: Completed phased proposal to converge all machine config onto ai-devops; phases 1 to 3 shipped.
+kind: spec
+status: done
+read-when: Reading the reasoning behind machine config consolidation
+---
+
 # Proposal — converge all machine config onto ai-devops (phased)
 
 **Status:** Phase 1 SHIPPED (2026-07-10, commit `28c44bc`). **Phase 2 COMPLETE

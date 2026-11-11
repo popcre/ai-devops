@@ -1,3 +1,10 @@
+---
+summary: Plan for mining AI transcripts to measure wasted review effort with Jev; all steps done and final report delivered.
+kind: plan
+status: done
+read-when: Reading the Jev review-waste analysis plan or findings
+---
+
 # IMPLEMENTATION PLAN — Jev review-waste mining from AI transcripts
 
 **Handoff (read first together with this file):**

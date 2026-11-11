@@ -1,3 +1,10 @@
+---
+summary: Findings and routing pattern from mining wasted review traffic with Jev scores across transcripts.
+kind: proof
+status: done
+read-when: Reviewing evidence on wasted AI review spend
+---
+
 # Review-waste analysis — findings and routing pattern (2026-10-13)
 
 **Status:** evidence complete. No review policy has been changed by this work.  

@@ -1,3 +1,10 @@
+---
+summary: Frozen decision record classifying Grok Build releases 1.0.6 to 1.0.13 for issue 251.
+kind: spec
+status: done
+read-when: Checking why a Grok Build release item was adopted or skipped
+---
+
 # Grok Build 1.0.6 – 1.0.13 release disposition
 
 Frozen decision record for tracking issue #251 ("Upgrade Grok Build wrapper

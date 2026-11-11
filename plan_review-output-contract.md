@@ -1,3 +1,10 @@
+---
+summary: Plan for one review-output validator and a single repair turn so paid reviews end in a recordable report (#1783)
+kind: plan
+status: open
+read-when: working on review report format validation or the repair turn
+---
+
 # Plan — review OUTPUT contract rebuild (one validator, one repair turn, smaller roster)
 
 Issue: [popcre/ai-devops#1783](https://github.com/popcre/ai-devops/issues/1783).

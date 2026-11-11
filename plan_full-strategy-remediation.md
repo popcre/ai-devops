@@ -1,3 +1,10 @@
+---
+summary: "Plan #62 for complete strategy remediation - memory incident, installers, reviewers, config; steps 12 and 15-17 still verifying or blocked."
+kind: plan
+status: open
+read-when: "Continuing the #62 strategy remediation workstream"
+---
+
 # IMPLEMENTATION PLAN — complete strategy remediation (2026-08-21)
 
 Handoff: `HANDOFF.d/2026-08-21T2325Z-albt16-codex-full-strategy-remediation.md` (retired; recoverable from git history)  

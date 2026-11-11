@@ -1,3 +1,10 @@
+---
+summary: How to run the harness that measures whether a skill fires on realistic prompts, for Claude and Codex
+kind: ops
+status: current
+read-when: measuring whether a skill triggers on prompts
+---
+
 # skill-trigger-eval
 
 Measures whether a Claude Code skill actually fires on realistic prompts.

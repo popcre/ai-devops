@@ -1,3 +1,10 @@
+---
+summary: Procedure for installing the toolkit onto a host, including live-review statuses and installer behavior.
+kind: ops
+status: current
+read-when: Installing or updating the toolkit on a machine
+---
+
 # Deployment
 
 For this repo, "deployment" means **installing the toolkit onto a host** — there

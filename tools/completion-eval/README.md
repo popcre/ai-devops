@@ -1,3 +1,10 @@
+---
+summary: How to run completion-eval, which measures whether the closeout rule makes clients report unfinished work honestly
+kind: ops
+status: current
+read-when: measuring whether the closeout rule changes behaviour
+---
+
 # completion-eval — does the closeout rule change behaviour?
 
 `skill-trigger-eval` asks whether a skill *loads*. This asks whether the

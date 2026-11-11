@@ -1,3 +1,10 @@
+---
+summary: Revised plan to admit Windows render production in one hosted job; stopped at unproved hosted qualification.
+kind: plan
+status: open
+read-when: Resuming Windows render production admission
+---
+
 # Windows render production admission in one qualified hosted job
 
 Status: REVISED PLAN ONLY — ACTUAL STOP at hosted qualification; no supported ephemeral bootstrap/structurally read-only qualification has been proved. No allowance may merge while this remains unproved. No policy change, admission, credential operation or production action is authorized by this document. Snapshot October 11, 2026, 4:48 PM EDT. Source baseline: ai-devops origin/main 4eb599475d78f36eedab3975529a09f4f5cfd320. Coordinator owns security decisions and landing; implementation is not started.

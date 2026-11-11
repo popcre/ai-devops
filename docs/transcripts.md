@@ -1,3 +1,10 @@
+---
+summary: Explains that session transcripts live in the private transcripts repo and Dropbox, how to fetch them, and the rule never to commit them here.
+kind: living
+status: current
+read-when: Locating, backing up or fetching session transcripts
+---
+
 # Session transcripts live in a PRIVATE repo
 
 Claude Code / Codex session transcripts are **not** in the current public tree.

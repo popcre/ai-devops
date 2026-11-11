@@ -1,3 +1,10 @@
+---
+summary: Checklist of every reviewer enforcement point to switch off in the skinny review rebuild (issue 2041).
+kind: proof
+status: done
+read-when: Checking which reviewer gates were removed
+---
+
 # Reviewer enforcement inventory (2026-10-29)
 
 This is the checklist for phases B–F of the skinny review in [plan_simple-reviewer-rebuild.md](../plan_simple-reviewer-rebuild.md) (#2041).

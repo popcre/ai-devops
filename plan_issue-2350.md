@@ -1,3 +1,10 @@
+---
+summary: Plan for issue 2350 indexing the plan_issue-*.md files and doc-safety reachability checks via PR 2349; merge and close remain.
+kind: plan
+status: open
+read-when: Landing the plan index and reachability checks (issue 2350)
+---
+
 # Implementation plan — popcre/ai-devops#2350 (make the issue plans reachable so PR #2349 passes doc-safety)
 
 ## Verdict (read first)

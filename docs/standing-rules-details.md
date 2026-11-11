@@ -1,3 +1,10 @@
+---
+summary: Long procedures behind each always-loaded standing rule, loaded only when needed.
+kind: spec
+status: current
+read-when: Needing detail behind a standing rule
+---
+
 # Standing-rules details (load only when needed)
 
 The always-loaded client globals keep the short rule. This file holds the long

@@ -1,3 +1,10 @@
+---
+summary: Runbook to add a dedicated physical Windows computer to the ai-devops GitHub Actions runner pool.
+kind: ops
+status: current
+read-when: Adding or qualifying a Windows CI runner
+---
+
 # Independent Windows runner setup
 
 **Owner:** issue [#209](https://github.com/popcre/ai-devops/issues/209) under parent

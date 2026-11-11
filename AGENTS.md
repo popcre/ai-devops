@@ -1,6 +1,8 @@
 # AGENTS.md — AI DevOps Toolkit router
 
-Read this first, then open only the document named for the current task.
+The complete document index is [`docs/INDEX.md`](docs/INDEX.md), generated from document headers. Search it for your topic's keywords (or read it) before opening or searching any other document. Open a document only when its summary matches your task.
+
+Read this first. A new or moved document needs the four-key header; then run `ai-doc-health --repo . --fix-index` ([`docs/doc-health.md`](docs/doc-health.md)). Never hand-edit the index.
 
 - Reviewer system: advisory, one rotating CI reviewer (owner ruling 2026-10-29). Plan + STATUS: [plan_skinny-review.md](plan_skinny-review.md); checklist: [docs/reviewer-enforcement-inventory-2026-10-29.md](docs/reviewer-enforcement-inventory-2026-10-29.md).
 - Merge-blocking checks: only data-safety gates block a merge; everything else is advisory (owner ruling 2026-10-30). Plan + STATUS: [plan_lean-required-checks.md](plan_lean-required-checks.md).
@@ -76,11 +78,6 @@ aligned with this list:
 Read [`docs/critical-incidents.md`](docs/critical-incidents.md) before diagnosing "odd" tool behavior — it may be an intentional guardrail ([`docs/design-decisions.md`](docs/design-decisions.md)).
 
 ## Repository contract
-
-`popcre/ai-devops` is Albert's public recovery toolkit for a multi-model AI
-workflow, not an app, service, database, container stack, or deployment
-pipeline. The recovery procedure lives in
-[`docs/restore-from-zero.md`](docs/restore-from-zero.md).
 
 - Work on a branch and pull request; never push to `main`. The protected branch
   uses a merge queue. GitHub is the source of truth, and finished work must be
@@ -179,8 +176,6 @@ Entire trial: ended November 4, 2026 by owner decision, not adopted
 ([#2022](https://github.com/popcre/ai-devops/issues/2022) closed). GitHub only;
 do not consult or install Entire. [`plan_entire-reversible-trial.md`](plan_entire-reversible-trial.md)
 and [`docs/entire-trial.md`](docs/entire-trial.md) are historical records.
-
-Low-frequency and specialized tasks live in [`docs/task-router.md`](docs/task-router.md); load only the matching row.
 
 **Every `HANDOFF.d/` file in this repo MUST open with the three-line contract block
 (`issue:`, `status:`, `owner:`).** A file without it cannot be retired by

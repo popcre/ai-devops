@@ -1,3 +1,10 @@
+---
+summary: Architecture and operations of ai-glm, persistent GLM sessions on OpenCode with Z.ai.
+kind: living
+status: current
+read-when: Running or fixing ai-glm GLM sessions
+---
+
 # GLM on OpenCode — architecture, operations, migration
 
 `ai-glm` gives Claude and Codex **named, persistent GLM sessions**. A session remembers

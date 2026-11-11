@@ -1,3 +1,10 @@
+---
+summary: Procedure and design reference for OpenSSH over Tailscale on Windows coding PCs, now automated by the bootstrap script.
+kind: ops
+status: current
+read-when: Setting up or troubleshooting Windows SSH over Tailscale
+---
+
 # Windows OpenSSH over Tailscale only
 
 Use this procedure to make a Windows coding PC available to approved Claude or

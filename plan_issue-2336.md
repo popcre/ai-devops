@@ -1,3 +1,10 @@
+---
+summary: Plan for issue 2336 review findings on ai-doc-safety --changed and public boundary check; small fixes remain.
+kind: plan
+status: open
+read-when: Fixing ai-doc-safety --changed findings (issue 2336)
+---
+
 # Implementation plan — popcre/ai-devops#2336 (review findings on `ai-doc-safety --changed`)
 
 **Verdict (checked 2026-11-04 against main `f2b4f5bd`): STILL REAL, small, worth doing in a skinny form.**

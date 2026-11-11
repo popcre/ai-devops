@@ -1,3 +1,10 @@
+---
+summary: Describes the portable memory architecture, with public schema and tooling here, private facts in the private memory repo, union sync.
+kind: living
+status: current
+read-when: Working on portable memory sync or memory file layout
+---
+
 # Portable memory architecture
 
 This public repository contains only the reusable memory schema and tooling.

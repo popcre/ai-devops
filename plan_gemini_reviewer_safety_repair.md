@@ -1,3 +1,10 @@
+---
+summary: Plan to repair Gemini reviewer safety (hostile-write fixtures, locked lifecycle, completion contract); all six steps done and live-qualified.
+kind: plan
+status: done
+read-when: Checking how the Gemini reviewer was made safe
+---
+
 # IMPLEMENTATION PLAN — Gemini reviewer safety repair (2026-08-21)
 
 Handoff: `HANDOFF.d/2026-08-21T1122Z-edge-dev-codex-reviewer-repair-plans.md` (retired; recoverable from git history)

@@ -1,3 +1,10 @@
+---
+summary: Inventory of retired Dropbox setup scripts and secret-shaped content found in their backups.
+kind: proof
+status: done
+read-when: Cleaning up old Dropbox setup backups
+---
+
 # Retired Dropbox configuration inventory
 
 The three active Dropbox setup scripts were retired on 2026-08-10. Each active

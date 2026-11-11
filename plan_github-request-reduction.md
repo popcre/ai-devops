@@ -1,3 +1,10 @@
+---
+summary: Plan and status for cutting GitHub API request use and protecting quota, with fleet acceptance still pending on issue 658.
+kind: plan
+status: open
+read-when: Working on GitHub API quota protection or request reduction
+---
+
 # GitHub request reduction and complete quota protection
 
 ## STATUS — read first

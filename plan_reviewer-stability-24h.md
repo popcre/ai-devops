@@ -1,3 +1,10 @@
+---
+summary: Plan to keep maintained reviewers green for 24 hours (#1822); steps after registration still open
+kind: plan
+status: open
+read-when: working on reviewer requalification storms or verdict contract
+---
+
 # Implementation plan — keep maintained reviewers green for ≥24 hours
 
 ## STATUS — read first; do not re-derive completed programmes

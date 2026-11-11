@@ -1,3 +1,10 @@
+---
+summary: Live trigger evidence that the pop-business-rules skill fires correctly in Claude and Codex (issue 35).
+kind: proof
+status: done
+read-when: Checking pop-business-rules skill trigger proof
+---
+
 # `pop-business-rules` trigger evidence — 2026-09-15
 
 This evidence closes the remaining live-client gate in issue #35. After PR #492

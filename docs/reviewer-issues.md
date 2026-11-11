@@ -1,3 +1,10 @@
+---
+summary: Procedure for recording missing or failed reviewer runs and the incident lifecycle.
+kind: ops
+status: stale
+read-when: Recording a reviewer incident
+---
+
 # Reviewer issue recording
 
 For the October 15 edge-dev3 recurrences, read the [repair plan](../plan_reviewer-recurrence-repair.md) STATUS first. It accounts for all local unresolved incidents and preserves existing repair ownership; incident collection alone is not a repair.

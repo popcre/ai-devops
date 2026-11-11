@@ -1,3 +1,10 @@
+---
+summary: Plan for issue 2095 ai-pr-wait advisory-failure follow-ups - header contract and tests still real and unstarted.
+kind: plan
+status: open
+read-when: Fixing ai-pr-wait advisory-failure follow-ups (issue 2095)
+---
+
 # Implementation plan — popcre/ai-devops#2095 (ai-pr-wait advisory-failure follow-ups)
 
 ## Verdict (checked 2026-11-04 against main `f2b4f5bd`)

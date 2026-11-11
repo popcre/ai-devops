@@ -1,10 +1,17 @@
+---
+summary: 2026-08-18 postmortem on why the shared-db orchestrator stopped delivering database work.
+kind: archive
+status: done
+read-when: Only for history of the shared-db orchestrator failure
+---
+
 # Why the shared-db orchestrator stopped delivering work
 
 Date: 2026-08-18
 
 Status: evidence-based postmortem. This document describes the operating failure. It does not propose weakening database safety or bypassing preview and production verification.
 
-Replacement implementation plan: [`plan_shared-db-complete-throughput-repair.md`](plan_shared-db-complete-throughput-repair.md). Read its STATUS table first; the older 1+1 proposal is superseded and this postmortem remains historical evidence, not the build specification.
+Replacement implementation plan: [`plan_shared-db-complete-throughput-repair.md`](../../plan_shared-db-complete-throughput-repair.md). Read its STATUS table first; the older 1+1 proposal is superseded and this postmortem remains historical evidence, not the build specification.
 
 ## Executive conclusion
 
@@ -34,7 +41,7 @@ This report is based on:
 - the prior orchestrator handoff, `shared-db/HANDOFF.d/2026-08-16T2118Z-al8960ofc-codex-orchestrator-transfer.md`;
 - the next handoff, `shared-db/HANDOFF.d/2026-08-17T2357Z-al8960ofc-codex-orchestrator-transfer.md`;
 - the GitHub issue and pull-request histories named below;
-- the detailed reviewer report in [`fix_reviewer_system.md`](fix_reviewer_system.md);
+- the detailed reviewer report in [`fix_reviewer_system.md`](../../fix_reviewer_system.md);
 - the 24-hour chat in which Albert repeatedly asked whether agents were working, why work was frozen, and why issues still were not complete.
 
 The issue state described below is the state at the end of the 2026-08-16/17 orchestrator session unless a later state is explicitly identified.
@@ -352,7 +359,7 @@ Small changes routinely received 10–15 minute reviewer budgets. Observed Grok 
 
 Each failed review then triggered provider rotation, immutable failure recording, and sometimes new reviewer-management tooling.
 
-The detailed evidence and proposed wrapper fixes are in [`fix_reviewer_system.md`](fix_reviewer_system.md). Reviewer repair is necessary, but it will not fix the entire orchestrator failure by itself.
+The detailed evidence and proposed wrapper fixes are in [`fix_reviewer_system.md`](../../fix_reviewer_system.md). Reviewer repair is necessary, but it will not fix the entire orchestrator failure by itself.
 
 ### 5. The system confuses safety evidence with business completion
 

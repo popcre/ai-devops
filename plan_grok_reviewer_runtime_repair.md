@@ -1,3 +1,10 @@
+---
+summary: Plan for Grok reviewer runtime repair (clone locks, truthful interruption, heartbeat); steps 1-6 done, issue 62 follow-ups in landing.
+kind: plan
+status: open
+read-when: Finishing Grok reviewer runtime repair step 7
+---
+
 # IMPLEMENTATION PLAN — Grok reviewer runtime repair (2026-08-21)
 
 Handoff: `HANDOFF.d/2026-08-21T1122Z-edge-dev-codex-reviewer-repair-plans.md` (retired; recoverable from git history)

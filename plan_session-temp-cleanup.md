@@ -1,3 +1,10 @@
+---
+summary: Plan so AI sessions delete their own temp files, moving tmp off RAM on Linux (edge-dev3 first); work complete
+kind: plan
+status: done
+read-when: checking session temp-root cleanup behavior
+---
+
 # Implementation plan — AI sessions clean up their own temporary files (Linux, edge-dev3 first)
 
 Handoff closed 2026-10-09 (work complete). Do not rewrite root `HANDOFF.md`.

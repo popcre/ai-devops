@@ -1,3 +1,10 @@
+---
+summary: Live recovery and install inputs for edge-dev-win maintenance runner step 6, dated 2026-10-09.
+kind: proof
+status: done
+read-when: Reviewing the edge-dev-win step 6 install authorization
+---
+
 # edge-dev-win (EDGE-DEV) step 6 — live recovery and install inputs
 
 Date: 2026-10-09. Scope: `plan_windows-runner-maintenance-elevation.md` step 6,

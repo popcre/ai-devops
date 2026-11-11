@@ -1,3 +1,10 @@
+---
+summary: Plan to repair edge-dev reviewer incidents (StepFun spawn, GLM re-review, report publish, Git Bash) without AI reviewers; steps done by 2026-10-21.
+kind: plan
+status: done
+read-when: edge-dev reviewer repair history (issue 1678)
+---
+
 # Implementation plan — edge-dev reviewer repair without AI reviewers
 
 ## STATUS — read first; do not re-derive completed programmes

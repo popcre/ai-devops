@@ -1,3 +1,10 @@
+---
+summary: Reference rules for shared-db structural work, claim-first admission, promotion and exceptions.
+kind: spec
+status: current
+read-when: Doing structural shared-db schema work
+---
+
 # Shared-db structural work safety rules (reference)
 
 Formerly the `shared-db-orchestrator` skill (retired 2026-10-20, #1881). Read

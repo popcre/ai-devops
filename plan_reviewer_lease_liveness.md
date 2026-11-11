@@ -1,3 +1,10 @@
+---
+summary: Plan to give reviewer leases a liveness signal so silent dead workers can be reclaimed safely (#283, shared-db#2345)
+kind: plan
+status: done
+read-when: checking reviewer lease liveness or silent-reviewer reclaim
+---
+
 # plan_reviewer_lease_liveness.md
 
 **Give a held reviewer lease a liveness signal, so a lease whose worker died

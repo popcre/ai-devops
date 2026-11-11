@@ -1,3 +1,10 @@
+---
+summary: System design of the AI DevOps toolkit - reviewer concurrency safety, packet and verdict contracts, and component layout.
+kind: living
+status: current
+read-when: Understanding how the toolkit components fit together
+---
+
 # Architecture
 
 ## Grok review concurrency safety

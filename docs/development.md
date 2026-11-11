@@ -1,3 +1,10 @@
+---
+summary: How to work on the toolkit itself - prerequisites, testing, CI rules and conventions.
+kind: ops
+status: current
+read-when: Editing or testing toolkit scripts and docs
+---
+
 # Development
 
 How to work on the toolkit itself (the Bash scripts and docs). For system design

@@ -1,3 +1,10 @@
+---
+summary: Plan for StepFun harness token efficiency (#1336) covering retry detection, prompt de-dup and Windows gate; merged and accepted
+kind: plan
+status: done
+read-when: checking StepFun harness token-efficiency changes
+---
+
 # IMPLEMENTATION PLAN — StepFun harness token efficiency (2026-10-06)
 
 Companion handoff: `HANDOFF.d/2026-10-06T0824Z-edge-dev-mimo-stepfun-harness-efficiency.md` (retired; recoverable from git history)

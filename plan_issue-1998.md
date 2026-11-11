@@ -1,3 +1,10 @@
+---
+summary: Plan for issue 1998 finishing ruleset-trim step 6.1, the live transcript re-audit, now unblocked after the freeze ended.
+kind: plan
+status: open
+read-when: Running the ruleset step 6.1 transcript re-audit (issue 1998)
+---
+
 # Plan — popcre/ai-devops#1998: finish #1881 step 6.1 (live transcript re-audit)
 
 **Not obsolete (checked 2026-11-04).** The freeze #1998 waited on ended

@@ -1,3 +1,10 @@
+---
+summary: Plan for issue 31 making Kimi run reliably on Windows without exposing credentials; all steps complete 2026-08-18.
+kind: plan
+status: done
+read-when: Changing Kimi Windows execution or credential handling
+---
+
 # Plan: make Kimi execution reliable on Windows without exposing credentials
 
 Planning issue: [u2giants/ai-devops#31](https://github.com/u2giants/ai-devops/issues/31)
@@ -57,7 +64,7 @@ Primary files:
 - [`bin/setup-machine.ps1`](bin/setup-machine.ps1): Windows machine setup and doctor wiring.
 - [`config/kimi/readonly-review.md`](config/kimi/readonly-review.md): structurally read-only Kimi profile.
 - [`skills/shared/kimi-code-delegation/SKILL.md`](skills/shared/kimi-code-delegation/SKILL.md): instructions used by Claude and Codex.
-- [`models_comparison_grok_kim_glm.md`](models_comparison_grok_kim_glm.md): observed model-quality and transport evidence.
+- [`models_comparison_grok_kim_glm.md`](docs/archive/models_comparison_grok_kim_glm.md): observed model-quality and transport evidence.
 - [`AGENTS.md`](AGENTS.md): documentation router and hard-won constraints.
 
 Official Kimi references, checked 2026-08-17:

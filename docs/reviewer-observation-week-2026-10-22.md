@@ -1,3 +1,10 @@
+---
+summary: Findings of the reviewer observation week from logs and transcripts, plan step 8 for issue 1948.
+kind: proof
+status: done
+read-when: Reviewing reviewer observation week results
+---
+
 # Reviewer observation week — findings (2026-10-22 13:56Z to 2026-10-29)
 
 Plan step 8 report for #1948 ([plan](../plan_reviewer-observation-week.md)).

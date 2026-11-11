@@ -1,3 +1,10 @@
+---
+summary: Plan for issue 2338 giving unowned shared-db blockers in the blocker-watch digest an owner or closing them.
+kind: plan
+status: open
+read-when: Handling the ai-blocker-watch digest blockers (issue 2338)
+---
+
 # Implementation plan — popcre/ai-devops#2338 (ai-blocker-watch digest 2026-11-04: give the unowned shared-db blockers an owner, then stop digests piling up)
 
 ## Verdict (read first)

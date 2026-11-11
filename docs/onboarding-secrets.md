@@ -1,3 +1,10 @@
+---
+summary: Design and steps for unified secrets and new-machine onboarding so every secret resolves automatically.
+kind: ops
+status: current
+read-when: Setting up a new machine or tracing secret loading
+---
+
 # Unified secrets & new-machine onboarding
 
 How a brand-new machine gets set up so Claude can start coding with **every

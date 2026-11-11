@@ -1,3 +1,10 @@
+---
+summary: Incident record and runbook for the Z-code to Headroom HTTPS lane between edge-dev and the hetz VPS.
+kind: ops
+status: current
+read-when: Fixing or operating Z-code through the Headroom proxy
+---
+
 # Z-code + Headroom HTTPS lane — incident and runbook
 
 **Date:** 2026-10-19  

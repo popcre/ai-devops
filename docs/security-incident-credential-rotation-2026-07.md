@@ -1,3 +1,10 @@
+---
+summary: Credential exposure response of July 2026, closed 2026-08-10 with three Synology Monitor rotations.
+kind: proof
+status: done
+read-when: Checking credential exposure incident history
+---
+
 # Credential exposure response — July 2026
 
 ## Final status — closed 2026-08-10

@@ -1,3 +1,10 @@
+---
+summary: Bug report on the false not-git-ignored warning that suppresses review files in four wrappers.
+kind: proof
+status: done
+read-when: Debugging the review file git-ignore warning
+---
+
 # The false `.ai/reviews is not git-ignored` warning — four wrappers, one bug
 
 **Status:** open, unfixed as of 2026-08-20.

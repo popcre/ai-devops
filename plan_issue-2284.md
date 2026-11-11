@@ -1,3 +1,10 @@
+---
+summary: Plan to close issue 2284 as an obsolete review finding with no code change, after rechecking evidence.
+kind: plan
+status: open
+read-when: Closing obsolete issue 2284
+---
+
 # Plan: close out popcre/ai-devops#2284 (obsolete review finding)
 
 ## VERDICT (read first): OBSOLETE — close as not planned, no code change

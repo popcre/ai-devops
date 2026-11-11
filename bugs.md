@@ -1,3 +1,10 @@
+---
+summary: Repository-wide strategy audit of 2026-08-21 with 30 findings; remediation runs through plan_full-strategy-remediation.
+kind: proof
+status: done
+read-when: Checking an original audit finding or its severity
+---
+
 # Repository-wide strategy audit — 2026-08-21
 
 > **Implementation route:** the Codex/Claude Opus 5 debate corrected and expanded

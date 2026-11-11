@@ -1,3 +1,10 @@
+---
+summary: Plan for issue 35 building the pop-business-rules skill over the shared-db library; all six steps complete, PR 492 merged.
+kind: plan
+status: done
+read-when: Checking how the pop-business-rules skill was built
+---
+
 # Implementation plan: `pop-business-rules` Skill
 
 **Tracking issue:** [u2giants/ai-devops #35](https://github.com/u2giants/ai-devops/issues/35)  

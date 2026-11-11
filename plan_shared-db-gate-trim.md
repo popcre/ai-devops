@@ -1,3 +1,10 @@
+---
+summary: Proposal to trim shared-db migration gates to minutes; not yet authorized or implemented
+kind: plan
+status: open
+read-when: trimming shared-db migration gates or claim preflight
+---
+
 # Implementation plan — trim shared-db migration gates to minutes
 
 Related handoff: [`HANDOFF.d/2026-10-30T1512Z-edge-dev-mimo-gate-trim-plan.md`](HANDOFF.d/2026-10-30T1512Z-edge-dev-mimo-gate-trim-plan.md). Do not rewrite root `HANDOFF.md`.

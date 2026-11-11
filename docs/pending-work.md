@@ -1,3 +1,10 @@
+---
+summary: Index of active plan pointers and issue implementation plans, moved out of AGENTS.md.
+kind: living
+status: current
+read-when: Finding which plan covers an open issue
+---
+
 # Pending work
 
 Index of active plan pointers, moved from [`AGENTS.md`](../AGENTS.md) (#1881 phase 4). Read the linked plan STATUS first.

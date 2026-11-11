@@ -1,3 +1,10 @@
+---
+summary: Plan for a reviewer-assisted problem-solving escalation route (#198) with bounded turns; implementation not started
+kind: plan
+status: open
+read-when: designing reviewer escalation for hard problems
+---
+
 # IMPLEMENTATION PLAN — reviewer-assisted problem solving (2026-08-31; corrected 2026-09-01)
 
 Linked handoff: `HANDOFF.d/2026-09-01T1059Z-edge-dev-codex-reviewer-problem-solving-corrections.md` (retired; recoverable from git history)

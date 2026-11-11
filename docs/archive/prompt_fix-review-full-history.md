@@ -1,3 +1,10 @@
+---
+summary: Archived prompt to stop review sandboxes copying full Git history after the 2026-09-23 disk-fill incident.
+kind: archive
+status: done
+read-when: Only for history of the review sandbox full-history fix
+---
+
 Paste this into a fresh session working on `popcre/ai-devops` (local `C:\repos\ai-devops`).
 
 ---

@@ -1,3 +1,10 @@
+---
+summary: Record of getting RDP to edge-dev3 working over Tailscale with KRDP, resolved 2026-09-28 and 2026-09-30.
+kind: proof
+status: done
+read-when: Troubleshooting RDP access to edge-dev3
+---
+
 # edge-dev3 Remote Desktop over Tailscale — incident record (2026-09-28)
 
 Status: **resolved** 10:05 AM EDT, September 28, 2026. Verified from two Windows

@@ -1,3 +1,10 @@
+---
+summary: Plan for issue 56 making Grok reviews single, visible and honestly cancellable; independent review, push and close steps still open.
+kind: plan
+status: open
+read-when: Working on Grok review concurrency or cancellation (issue 56)
+---
+
 # Implementation plan — make Grok reviews single, visible, and honestly cancellable
 
 Tracking issue: [u2giants/ai-devops#56](https://github.com/u2giants/ai-devops/issues/56)

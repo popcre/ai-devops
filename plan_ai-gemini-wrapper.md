@@ -1,3 +1,10 @@
+---
+summary: Original design plan and investigation for the ai-gemini reviewer wrapper; historical, current status lives in the Gemini safety repair plan.
+kind: plan
+status: stale
+read-when: Only for the original ai-gemini design history
+---
+
 # IMPLEMENTATION PLAN — safe `ai-gemini` reviewer wrapper (2026-08-18)
 
 Tracking issue: [u2giants/ai-devops#38](https://github.com/u2giants/ai-devops/issues/38)

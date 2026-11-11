@@ -1,3 +1,10 @@
+---
+summary: Plan to complete the shared-db throughput repair (#401), closed after every step was live-proven
+kind: plan
+status: done
+read-when: checking shared-db throughput, admission or finish-first scheduling
+---
+
 # Implementation plan — complete shared-db throughput repair
 
 Closeout: the programme handoffs were retired in the closing change after their remaining work and evidence were consolidated into this STATUS table.

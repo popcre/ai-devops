@@ -1,3 +1,10 @@
+---
+summary: Transcript credential leak audit of 2026-07-19, closed by owner decision 2026-08-10.
+kind: proof
+status: done
+read-when: Checking transcript leak audit evidence
+---
+
 # Transcript leak audit — 2026-07-19
 
 ## Final status — closed by owner decision 2026-08-10

@@ -1,3 +1,10 @@
+---
+summary: Trial report restoring GLM and testing Gemini and Muse as reviewers, 2026-08-19.
+kind: proof
+status: done
+read-when: Checking why GLM and Muse were kept over Gemini
+---
+
 # Reviewer trial, 2026-08-19: GLM restored, Gemini and Muse trialled
 
 **Owner instruction (Albert Hazan, in chat, 2026-08-19):** *"Stop Kimi. Restore GLM.

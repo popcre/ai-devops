@@ -1,3 +1,10 @@
+---
+summary: Reasoning for each deliberate quirk of the toolkit - looks like, actually, why, do not change.
+kind: spec
+status: current
+read-when: Before changing or removing a behavior that looks like a bug
+---
+
 # Design decisions: intentional quirks and non-obvious choices
 
 **Owner:** this file owns the full "looks like / actually / why / do not change"

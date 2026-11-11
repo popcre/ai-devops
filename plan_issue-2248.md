@@ -1,3 +1,10 @@
+---
+summary: Plan for issue 2248 Entire Gates check failing on popdam3 PRs - already fixed, close-out only.
+kind: plan
+status: open
+read-when: Closing out issue 2248 popdam3 gates check
+---
+
 # Plan: popcre/ai-devops#2248 — Entire Gates check fails on popdam3 PRs
 
 ## VERDICT (read first): ALREADY FIXED — close-out only

@@ -1,3 +1,10 @@
+---
+summary: Plan for persistent Kimi implementation sessions with disposable workspaces and resume; all six steps complete.
+kind: plan
+status: done
+read-when: Changing Kimi persistent implementation sessions
+---
+
 # Plan: persistent Kimi implementation sessions with disposable workspaces
 
 ## STATUS

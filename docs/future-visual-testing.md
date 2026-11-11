@@ -1,3 +1,10 @@
+---
+summary: Placeholder design for an automated visual-testing harness; not built.
+kind: plan
+status: open
+read-when: Considering automated visual testing
+---
+
 # Future: Visual Testing
 
 Placeholder for the automated visual-testing harness. To be built out when UI

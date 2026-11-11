@@ -1,3 +1,10 @@
+---
+summary: Plan for issue 2340 post-Blacksmith wording fixes and manual Windows lane timeout; ten advisory findings still real.
+kind: plan
+status: open
+read-when: Fixing post-Blacksmith wording and Windows lane timeout
+---
+
 # Implementation plan — popcre/ai-devops#2340 (post-Blacksmith wording + manual Windows lane timeout)
 
 ## Verdict (read first)

@@ -1,3 +1,10 @@
+---
+summary: Full narratives of costly toolkit incidents with root cause, fix and prevention.
+kind: living
+status: current
+read-when: Diagnosing a tool that reports success but does nothing
+---
+
 # Critical incidents
 
 **Owner:** this file owns the full narrative of every costly incident this toolkit
@@ -465,7 +472,7 @@ revision plus the patch under review (owner ruling, 2026-09-23).
   (issue #711). Daily sweep is **backup only**; do not retire it until
   self-cleanup has been live-proven for 14 days (owner ruling 2026-09-23).
 - **Stop copying full Git history into review snapshots** —
-  [`prompt_fix-review-full-history.md`](../prompt_fix-review-full-history.md).
+  [`prompt_fix-review-full-history.md`](archive/prompt_fix-review-full-history.md).
 - Keep speed-sensitive data on the SSD (live `C:\repos`, tool binaries, auth).
   Put growth/bulk on the HDD (review copies, worktrees, session logs, archives).
 - Never delete dirty working copies without proof (`cleanup-worktree`). Age is

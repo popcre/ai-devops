@@ -1,3 +1,10 @@
+---
+summary: Plan for issue 2326 cmd shim install safety in setup-secrets - guard shim install and extend test.
+kind: plan
+status: open
+read-when: Fixing cmd shim install safety (issue 2326)
+---
+
 # Implementation plan — popcre/ai-devops#2326 (cmd shim install safety)
 
 **Verdict (checked on main f2b4f5bd, 2026-11-04): STILL REAL, small.** Findings F1 and F2

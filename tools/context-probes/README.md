@@ -1,3 +1,10 @@
+---
+summary: How to run six one-shot probes that check installed global instructions still change Claude behaviour
+kind: ops
+status: current
+read-when: verifying installed globals after an install on a machine
+---
+
 # context-probes — do the installed globals still change behaviour?
 
 `run-context-probes.sh` runs six one-shot Claude sessions against a machine that

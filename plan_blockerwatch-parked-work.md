@@ -1,3 +1,10 @@
+---
+summary: Plan for BlockerWatch to park waiting work as searchable issues and restart it; implementation steps all done, live proof on issue 617.
+kind: plan
+status: done
+read-when: BlockerWatch parked-work feature history
+---
+
 # Implementation plan: BlockerWatch parks waiting work as searchable issues and restarts it even after cleanup
 
 Written 2026-09-18 on machine `edge-dev` by a Claude Opus 5 session, for a

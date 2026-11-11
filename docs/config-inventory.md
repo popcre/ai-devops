@@ -1,3 +1,10 @@
+---
+summary: Exhaustive map of where every AI-tool, shell, SSH and cloud config lives across Albert's machines.
+kind: living
+status: current
+read-when: Finding where a machine-level config lives and what manages it
+---
+
 # Config inventory — where every machine-level config actually lives
 
 **Purpose:** a durable, exhaustive map of all the AI-tool, shell, SSH, and cloud

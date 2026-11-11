@@ -1,3 +1,10 @@
+---
+summary: Plan and STATUS for the repository throughput restructure (#159) covering delivery rows, ruleset cutover and evidence
+kind: plan
+status: done
+read-when: "tracing how repo delivery speed work (#159, #337, #398) was structured"
+---
+
 # Implementation plan — repository throughput restructure
 
 **Repository:** `popcre/ai-devops`

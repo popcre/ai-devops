@@ -1,3 +1,10 @@
+---
+summary: Operating record of the Entire trial 2022, ended and not adopted on 2026-11-04.
+kind: proof
+status: done
+read-when: Only for history of the Entire trial
+---
+
 # Entire trial operating record — #2022 (ended, not adopted)
 
 ## Trial ended — November 4, 2026

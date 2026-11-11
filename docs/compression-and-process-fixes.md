@@ -1,3 +1,10 @@
+---
+summary: Decision record for the 2026-10-14 ScaleDown transcript audit, A-F process fixes and compression trial.
+kind: spec
+status: current
+read-when: Before adding another token-saving or compression tool
+---
+
 # Token-waste process fixes and compression trial
 
 Decision record for the ScaleDown transcript audit (2026-10-14) and the A–F

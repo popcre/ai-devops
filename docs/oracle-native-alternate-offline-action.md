@@ -1,3 +1,10 @@
+---
+summary: Closed source capability for Oracle offline alternate serialization with descriptor-only admission rules.
+kind: spec
+status: current
+read-when: Working on Oracle offline alternate serialization v1
+---
+
 # Oracle offline alternate serialization — closed source capability
 
 Owner: Oracle coordinator on u2giants/theoracle #27/#58. This source capability

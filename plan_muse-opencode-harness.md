@@ -1,3 +1,10 @@
+---
+summary: Plan for issue 40 Muse Spark OpenCode harness on Windows and Ubuntu; Ubuntu qualification, review and landing still open.
+kind: plan
+status: open
+read-when: Working on the Muse OpenCode harness (issue 40)
+---
+
 # IMPLEMENTATION PLAN — Muse Spark 1.2 OpenCode harness on Windows and Ubuntu (2026-08-18)
 
 Tracking issue: [u2giants/ai-devops#40](https://github.com/u2giants/ai-devops/issues/40)

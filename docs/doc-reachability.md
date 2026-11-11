@@ -1,3 +1,10 @@
+---
+summary: Rule and usage of ai-doc-reachability so every Markdown document is linked from a root document.
+kind: spec
+status: current
+read-when: Adding or moving a Markdown document
+---
+
 # Markdown document reachability
 
 `bin/ai-doc-reachability` prevents a new or moved Markdown document from being

@@ -1,3 +1,10 @@
+---
+summary: Plan for measured Jev token savings (#643); baseline was no-go and the plan is superseded by coordination deletion
+kind: plan
+status: stale
+read-when: looking up why Jev spend reduction was a no-go
+---
+
 # IMPLEMENTATION PLAN — measured Jev token savings (2026-09-27)
 
 **Parent issue:** [#643](https://github.com/popcre/ai-devops/issues/643). **Handoff:** retired after the no-go baseline. **Owner:** the session implementing the authorized remaining rows, with each outcome verified.

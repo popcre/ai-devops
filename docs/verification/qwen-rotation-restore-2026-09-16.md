@@ -1,3 +1,10 @@
+---
+summary: Record of restoring Qwen on EDGE-DEV when it was registered but unusable, with the standalone runtime fix and re-qualification steps.
+kind: proof
+status: done
+read-when: Qwen shows registered but not usable on a machine
+---
+
 # Qwen rotation restore — 2026-09-16 (EDGE-DEV)
 
 ### Qwen was listed but not usable

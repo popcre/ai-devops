@@ -1,3 +1,10 @@
+---
+summary: Muse evaluation of EGM and TokenEconomizer plus small-pilot consensus, kept as a decision record (issue 2227).
+kind: proof
+status: done
+read-when: Judging TokenEconomizer or fresh-reader pilots
+---
+
 # Muse evaluation — EGM, TokenEconomizer and our implementation plans
 
 Owner: the coordinator of [#2227](https://github.com/popcre/ai-devops/issues/2227).

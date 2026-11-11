@@ -1,8 +1,15 @@
+---
+summary: Grok and Kimi consensus review of the shared-db finish-first delivery plan, 2026-08-18.
+kind: proof
+status: done
+read-when: Checking reviewer consensus on finish-first plan
+---
+
 # Shared-db finish-first implementation-plan consensus — 2026-08-18
 
 Plan reviewed: [`../plan_shared-db-finish-first-delivery.md`](../plan_shared-db-finish-first-delivery.md)
 
-Primary evidence: [`../shared-db_orchestrator_failure_analysis.md`](../shared-db_orchestrator_failure_analysis.md)
+Primary evidence: [`../shared-db_orchestrator_failure_analysis.md`](archive/shared-db_orchestrator_failure_analysis.md)
 
 ## Review contract
 

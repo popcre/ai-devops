@@ -1,3 +1,10 @@
+---
+summary: Plan for issue 2354 finishing retirement of Entire trial routing surfaces left after PR 2353; all steps open.
+kind: plan
+status: open
+read-when: Removing leftover Entire trial references (issue 2354)
+---
+
 # Implementation plan — popcre/ai-devops#2354 (finish retiring the Entire trial from every live routing surface)
 
 ## Verdict (read first)

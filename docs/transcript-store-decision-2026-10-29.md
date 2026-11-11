@@ -1,3 +1,10 @@
+---
+summary: Decision record on building an organized transcript store instead of re-scanning the 25 GB archive with ScaleDown for every question.
+kind: spec
+status: current
+read-when: Deciding how past-session transcripts are stored and queried
+---
+
 # Should transcript data live in an organized store? (2026-10-29)
 
 **Question (Albert, 2026-10-29).** Should we set up an organized store, such as a database, for transcript data? Today every question means the AI has to find the transcripts, feed them to ScaleDown, and process the output again from scratch.

@@ -1,0 +1,35 @@
+{
+  "exclude": [
+    "node_modules/**",
+    ".claude/**",
+    ".github/**",
+    "skills/**",
+    "templates/**",
+    "tests/**",
+    "transcripts/**",
+    "config/**"
+  ],
+  "router": "AGENTS.md",
+  "router_max_bytes": 30000,
+  "living_max_bytes": 60000,
+  "handoff_dir": "HANDOFF.d",
+  "handoff_max_age_days": 30,
+  "index": "docs/INDEX.md",
+  "header_exempt": [
+    "AGENTS.md",
+    "CLAUDE.md",
+    "README.md",
+    "HANDOFF.md",
+    "HANDOFF.d/**"
+  ],
+  "root_markdown_allow": [
+    "AGENTS.md",
+    "CLAUDE.md",
+    "README.md",
+    "HANDOFF.md",
+    "plan_*.md",
+    "bugs.md",
+    "IMPLEMENTATION-PLAN.md",
+    "fix_*.md"
+  ]
+}

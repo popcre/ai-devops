@@ -1,3 +1,10 @@
+---
+summary: Qualification of the outgoing-write counter built on pinned gh CLI versions (#660), covering pins, profiles and build
+kind: spec
+status: current
+read-when: working on GitHub request counting or pinned gh builds
+---
+
 # Outgoing-write counter qualification
 
 Owner: [#660](https://github.com/popcre/ai-devops/issues/660), under #658.

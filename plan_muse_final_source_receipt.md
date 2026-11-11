@@ -1,3 +1,10 @@
+---
+summary: Plan for Muse original-source receipt and completed-unrecordable review disposition within issue 1783; core approved, consumer code held.
+kind: plan
+status: open
+read-when: Working on Muse final source receipt for reviews
+---
+
 # Muse final original-source receipt and completed-unrecordable disposition
 
 ## STATUS

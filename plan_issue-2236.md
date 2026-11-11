@@ -1,3 +1,10 @@
+---
+summary: Plan for issue 2236 stale freeze-window and approval wording after PR 2234; small docs-only fixes remain.
+kind: plan
+status: open
+read-when: Cleaning stale freeze-window text (issue 2236)
+---
+
 # Implementation plan — popcre/ai-devops#2236 (stale freeze-window and approval text after PR #2234)
 
 ## VERDICT (read first)

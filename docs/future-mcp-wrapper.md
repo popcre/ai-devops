@@ -1,3 +1,10 @@
+---
+summary: Placeholder design sketch for an MCP server wrapping the toolkit workflow; not built.
+kind: plan
+status: open
+read-when: Considering an MCP wrapper for the toolkit
+---
+
 # Future: MCP Wrapper
 
 Placeholder for wrapping this toolkit's capabilities as an MCP (Model Context

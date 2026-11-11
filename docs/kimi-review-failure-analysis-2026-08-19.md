@@ -1,3 +1,10 @@
+---
+summary: Reconciliation of Kimi reviewer failures against job records on edge-dev, issue 46, dated 2026-08-19.
+kind: proof
+status: done
+read-when: Reviewing evidence on past Kimi reviewer failures
+---
+
 # Kimi reviewer failure reconciliation — 2026-08-19
 
 Issue: [#46](https://github.com/u2giants/ai-devops/issues/46)

@@ -1,3 +1,10 @@
+---
+summary: Plan to rewrite the reviewer pipeline core in phases (evidence retention, requalification, failure split, runner); Phase E waiting
+kind: plan
+status: open
+read-when: working on reviewer pipeline phases or retirement metrics
+---
+
 # IMPLEMENTATION PLAN — Reviewer pipeline core (rewrite per StepFun)
 
 **Tracking:** see HANDOFF.d/2026-09-29T2205Z-edge-dev-mimo-reviewer-pipeline-wrapup.md  

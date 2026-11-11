@@ -1,3 +1,10 @@
+---
+summary: How ai-muse gives named persistent Muse Spark conversations through OpenCode direct-session mode, with commands.
+kind: ops
+status: current
+read-when: Using or repairing the ai-muse wrapper
+---
+
 # Muse Spark persistent conversations
 
 `ai-muse` gives Codex and Claude named, persistent Muse Spark 1.3 Contributor

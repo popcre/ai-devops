@@ -1,3 +1,10 @@
+---
+summary: Runbook to detect, recover and prevent a full C - drive, from issue 768.
+kind: ops
+status: current
+read-when: C - is nearly full or a tool cannot write
+---
+
 # Disk space on C: — detect, recover, prevent
 
 **Open this when** C: is nearly full, a tool says there is no room to write, or
@@ -120,8 +127,8 @@ are closed. Do not kill processes just to free a rename.
    Do not retire it until self-cleanup has been live-proven for 14 days
    (owner ruling 2026-09-23).
 3. **Prompts for related cleanup:**
-   - [`prompt_fix-review-full-history.md`](../prompt_fix-review-full-history.md) — stop full-history snapshots
-   - [`prompt_six-dirty-codex-worktrees.md`](../prompt_six-dirty-codex-worktrees.md) — ship or discard dirty work folders (issue [#713](https://github.com/popcre/ai-devops/issues/713))
+   - [`prompt_fix-review-full-history.md`](archive/prompt_fix-review-full-history.md) — stop full-history snapshots
+   - [`prompt_six-dirty-codex-worktrees.md`](archive/prompt_six-dirty-codex-worktrees.md) — ship or discard dirty work folders (issue [#713](https://github.com/popcre/ai-devops/issues/713))
 
 ---
 
