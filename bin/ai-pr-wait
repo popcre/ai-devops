@@ -25,10 +25,9 @@
 # --timeout-minutes defaults to 60. Run it in the background (Claude Code's
 # run_in_background) and do other work until it exits and wakes the session.
 #
-# A documentation-only change does not wait for checks. This command refuses to
-# start a long wait for one, and says so, unless an assigned AI
-# reviewer APPROVE of the exact head exists (a plan-review suffices) and you pass
-# --reviewer-approval with that report.
+# A documentation-only change waits like any other pull request: the merge
+# queue lands it when green. Plain `gh pr merge` enqueues it (never `--admin`
+# or `--squash`; the queue refuses them).
 #
 # Exit status:
 #   0  merged
@@ -237,29 +236,7 @@ if [ -n "$GATE_LIB" ]; then
   gate_args=()
   [ -z "$REVIEWER_APPROVAL" ] || gate_args=(--reviewer-approval "$REVIEWER_APPROVAL")
   if ! tg_preflight_gate pr-wait "${gate_args[@]+"${gate_args[@]}"}"; then
-    # The gate has already said why. Only add the admin-merge shortcut when the
-    # change set really is prose; after a class escalation it is wrong advice,
-    # and it would be the last line the caller reads.
-    GATE_BIN="$(cd "$(dirname "$GATE_LIB")/../../bin" 2>/dev/null && pwd)/ai-task-gates"
-    OBSERVED=""
-    [ -x "$GATE_BIN" ] && OBSERVED="$("$GATE_BIN" explain --json 2>/dev/null | jq -r '.observed_class // empty' 2>/dev/null | tr -d '\r')"
-    if [ "$OBSERVED" = prose ]; then
-      # The immediate squash-admin lane skips the offline suites, so its own
-      # doc content is never checked anywhere else (#1188). Prove the two
-      # whole-repo doc invariants on this tree before offering the shortcut;
-      # a refusal here is the fix point, not a reason to wait.
-      DOC_SAFETY_BIN="$REAL_DIR/ai-doc-safety"
-      DOC_SAFETY_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)"
-      if [ ! -f "$DOC_SAFETY_BIN" ] || [ -z "$DOC_SAFETY_ROOT" ]; then
-        printf 'ai-pr-wait: run `bin/ai-doc-safety` on the exact head worktree before `gh pr merge --squash --admin`; no wait was started.\n' >&2
-      elif DOC_SAFETY_OUT="$(bash "$DOC_SAFETY_BIN" "$DOC_SAFETY_ROOT" 2>&1)"; then
-        printf 'ai-pr-wait: doc-safety passed on this tree; a documentation-only pull request merges immediately with `gh pr merge --squash --admin`; no wait was started.\n' >&2
-      else
-        printf 'ai-pr-wait: doc-safety FAILED on this tree; fix the named file before `gh pr merge --squash --admin`:\n%s\nno wait was started.\n' "$DOC_SAFETY_OUT" >&2
-      fi
-    else
-      printf 'ai-pr-wait: no wait was started.\n' >&2
-    fi
+    printf 'ai-pr-wait: no wait was started.\n' >&2
     exit 3
   fi
 fi

@@ -230,8 +230,9 @@ check "nothing else in the repository hand-rolls a pull-request wait loop" \
   "test -z '$STRAYS'"
 
 # --------------------------------------------------------------------------
-# Task gate. A documentation-only pull request must not start a long wait at
-# all. An optional lifecycle-recorded AI review report may still lift that; review is advice, never required (#2041).
+# Task gate. A documentation-only pull request waits like any other: the merge
+# queue lands it when green. Plain `gh pr merge` enqueues it (never `--admin`
+# or `--squash`; the queue refuses them). Review is advice, never required (#2041).
 # --------------------------------------------------------------------------
 GR="$TMP/gated"; mkdir -p "$GR"; git -C "$GR" init -q --initial-branch=main
 git -C "$GR" config user.name Test; git -C "$GR" config user.email t@example.com
@@ -241,31 +242,17 @@ printf 'a note\n' > "$GR/docs.md"
 export AI_TASK_GATES_DIR="$TMP/gates"
 ( cd "$GR" && "$ROOT/bin/ai-task-gates" start --class prose --reason 'documentation only' ) >/dev/null 2>&1
 
-# The refusal text carries backticks, so it is kept in a file rather than in a
-# shell variable the check would re-expand.
-GATE_OUT="$TMP/gate-refusal.txt"
-( cd "$GR" && AI_TASK_GATES_MODE=standard bash "$CMD" 1 --repo popcre/ai-devops --timeout-minutes 1 ) >"$GATE_OUT" 2>&1; RC=$?
-check "a documentation-only pull request does not start a long wait" "test '$RC' -eq 3"
-check "the refusal names the admin squash merge instead" \
-  "grep -qF -- 'gh pr merge --squash --admin' '$GATE_OUT'"
-check "the refusal explains which gate applied" \
-  "grep -q ai-task-gates '$GATE_OUT'"
-check "the prose refusal proves doc safety on this tree first" \
-  "grep -qF 'doc-safety passed on this tree' '$GATE_OUT'"
-
-# The #1188 jams: prose content that violates a whole-repo doc invariant must
-# not be offered the immediate admin merge. The waiter runs the same two
-# offline checks the merge queue would run, on the exact tree at hand.
-mkdir -p "$GR/docs"; printf 'HostName 10.20.30.40\n' > "$GR/docs/topology.md"
-git -C "$GR" add docs/topology.md
-BAD_OUT="$TMP/gate-docfail.txt"
-( cd "$GR" && AI_TASK_GATES_MODE=standard bash "$CMD" 1 --repo popcre/ai-devops --timeout-minutes 1 ) >"$BAD_OUT" 2>&1; RC=$?
-check "a doc-unsafe prose tree still does not start a long wait" "test '$RC' -eq 3"
-check "a doc-unsafe prose tree is refused the admin merge until fixed" \
-  "grep -qF 'doc-safety FAILED on this tree' '$BAD_OUT' && grep -q 'BOUNDARY FAIL' '$BAD_OUT'"
-check "the doc-unsafe refusal still names the topology culprit" \
-  "grep -q 'protected private-network topology' '$BAD_OUT'"
-git -C "$GR" rm -q --cached docs/topology.md; rm -f "$GR/docs/topology.md"
+# The gate allows pr-wait for prose: the wait starts normally (reaches the
+# API stub and times out, not a gate refusal). The stale squash-admin
+# instruction must never appear.
+GATE_OUT="$TMP/gate-prose.txt"
+( cd "$GR" && AI_TASK_GATES_MODE=standard AI_PR_WAIT_TEST_MARKER="$TMP/gate-prose-called" AI_PR_WAIT_TEST_CLOCK="$TMP/gate-prose-clock" PATH="$TMP/bin:$PATH" bash "$CMD" 1 --repo popcre/ai-devops --timeout-minutes 1 --interval 60 ) >"$GATE_OUT" 2>&1; RC=$?
+check "a documentation-only pull request starts a normal wait (gate allows pr-wait)" \
+  "test '$RC' -eq 2 && test -e '$TMP/gate-prose-called' && ! grep -qF 'no wait was started' '$GATE_OUT'"
+check "the waiter never prints the stale squash-admin instruction" \
+  "! grep -qF -- 'gh pr merge --squash --admin' '$GATE_OUT'"
+check "the waiter does not refuse prose with a doc-safety shortcut" \
+  "! grep -qF 'doc-safety passed on this tree' '$GATE_OUT'"
 
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-reviewer-approval.sh"
 export AI_REVIEW_LIFECYCLE_DIR="$TMP/review-lifecycle"
@@ -273,7 +260,7 @@ LIB_REVIEWER_APPROVAL_BIN="$ROOT/bin"
 appr_file(){ mint_reviewer_approval "$TMP" "$1" plan-review; }
 WAIT_APPROVAL="$(appr_file "$GR" pr-wait "$ROOT/bin/ai-task-gates")"
 OUT="$( cd "$GR" && AI_TASK_GATES_MODE=standard bash "$CMD" 1 --repo popcre/ai-devops --timeout-minutes 0 --reviewer-approval "$WAIT_APPROVAL" 2>&1 )"; RC=$?
-check "a reviewer-approved wait passes the gate and reaches the normal checks" \
+check "a wait with a reviewer approval reaches the normal checks (gate allows pr-wait)" \
   "test '$RC' -eq 3 && printf '%s' \"$OUT\" | grep -q 'positive whole number'"
 
 printf 'select 1;\n' > "$GR/migration.sql"
