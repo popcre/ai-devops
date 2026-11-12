@@ -253,7 +253,6 @@
         "required": [],
         "forbidden_actions": [
           "review",
-          "pr-wait",
           "deploy",
           "database",
           "infrastructure",
