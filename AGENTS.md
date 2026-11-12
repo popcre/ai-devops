@@ -82,10 +82,15 @@ Read [`docs/critical-incidents.md`](docs/critical-incidents.md) before diagnosin
 - Work on a branch and pull request; never push to `main`. The protected branch
   uses a merge queue. GitHub is the source of truth, and finished work must be
   tested, merged, and verified on `origin/main`.
-- Documentation-only changes (every changed file is prose) merge **around** the
-  merge queue: run `bin/ai-doc-safety --changed origin/main` on the exact head worktree first; when it
-  passes, `gh pr merge --squash --admin`. Any code, test, script, workflow, or
-  config change uses the merge queue. Never admin-merge a non-prose change.
+- Documentation-only changes (every changed file is prose) merge through the
+  merge queue like every other PR: run `bin/ai-doc-safety --changed origin/main`
+  on the exact head worktree first; when it passes, plain `gh pr merge` enqueues
+  the PR and the queue lands it when green. Never `--admin` or `--squash`: the
+  queue refuses `--admin` ("Changes must be made through the merge queue") and
+  owns the merge strategy ("merge strategy for main is set by the merge queue").
+  This supersedes the older prose-merge teaching `gh pr merge --squash --admin`.
+  Any code, test, script, workflow, or config change uses the merge queue too.
+  Never admin-merge a non-prose change.
 - Before committing, run `git var GIT_COMMITTER_IDENT`; it must show
   `Albert Hazan <u2giants@users.noreply.github.com>`.
 - The canonical local checkout is landing-only. Every write-capable Codex or Claude task uses its own current-upstream worktree. Stage only task-owned
