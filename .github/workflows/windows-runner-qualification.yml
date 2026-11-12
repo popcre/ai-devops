@@ -4,12 +4,20 @@ on:
   workflow_dispatch:
     inputs:
       scope:
-        description: complete = full matrix in one job (150 min); sections = the 12 pull-request sections, each held to the 40-minute section ceiling
+        description: complete = full matrix; sections = 12 bounded sections; ssh-host-trust = fixed read-only identity diagnostic
         type: choice
-        options: [complete, sections]
+        options: [complete, sections, ssh-host-trust]
         default: complete
       runner_label:
-        description: sections only - a custom label carried by exactly the candidate host, so every section lands on it
+        description: sections or ssh-host-trust - a custom label carried by exactly one host
+        type: string
+        default: ''
+      expected_peer_digest:
+        description: ssh-host-trust only - SHA256 binding from authenticated Tailscale peer metadata
+        type: string
+        default: ''
+      expected_source_sha:
+        description: ssh-host-trust only - independently reviewed immutable commit SHA
         type: string
         default: ''
   pull_request:
@@ -17,6 +25,8 @@ on:
       - .github/workflows/windows-runner-qualification.yml
       - tests/test-windows-runner-qualification-workflow.sh
       - tools/ci/assert-windows-runner-host.ps1
+      - tools/ci/read-windows-ssh-host-trust.ps1
+      - tests/test-windows-ssh-host-trust.ps1
 
 permissions:
   contents: read
@@ -25,7 +35,7 @@ jobs:
   qualify:
     if: >-
       (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) &&
-      (github.event_name != 'workflow_dispatch' || inputs.scope != 'sections')
+      (github.event_name != 'workflow_dispatch' || inputs.scope == 'complete')
     runs-on: [self-hosted, Windows, X64, ai-devops-windows]
     # The complete matrix takes 60-75 minutes on the fastest qualified host.
     # EDGE-ALIEN was still passing tests at 90 minutes on 2026-09-02 (run
@@ -68,7 +78,7 @@ jobs:
   # a pool host. The label must be carried by exactly one registered runner,
   # and that runner must not already be in the qualified pool.
   sections-host-pin:
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.scope == 'sections' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && (inputs.scope == 'sections' || inputs.scope == 'ssh-host-trust') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 3
     outputs:
@@ -78,10 +88,19 @@ jobs:
         id: pin
         env:
           RUNNER_LABEL: ${{ inputs.runner_label }}
+          DIAGNOSTIC_SCOPE: ${{ inputs.scope }}
+          EXPECTED_PEER_DIGEST: ${{ inputs.expected_peer_digest }}
+          EXPECTED_SOURCE_SHA: ${{ inputs.expected_source_sha }}
+          DISPATCHED_SOURCE_SHA: ${{ github.sha }}
           GH_TOKEN: ${{ secrets.RUNNER_POOL_READ_TOKEN }}
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
+          if [ "$DIAGNOSTIC_SCOPE" = ssh-host-trust ]; then
+            [[ "$EXPECTED_PEER_DIGEST" =~ ^[0-9a-f]{64}$ ]] || { echo "::error::ssh-host-trust requires an authenticated peer digest."; exit 1; }
+            [[ "$EXPECTED_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::ssh-host-trust requires an independently reviewed source commit."; exit 1; }
+            [ "$DISPATCHED_SOURCE_SHA" = "$EXPECTED_SOURCE_SHA" ] || { echo "::error::dispatched source differs from the reviewed commit; refusing diagnostic."; exit 1; }
+          fi
           case "$(printf '%s' "$RUNNER_LABEL" | tr '[:upper:]' '[:lower:]')" in
             self-hosted|windows|x64|linux|arm64|ai-devops-windows|ai-devops-windows-qualified)
               echo "::error::runner_label must be a custom label, not a shared pool label."; exit 1 ;;
@@ -94,7 +113,7 @@ jobs:
             --jq ".runners[] | select(any(.labels[]; (.name | ascii_downcase) == (\"$RUNNER_LABEL\" | ascii_downcase))) | {name, status, qualified: any(.labels[]; .name == \"ai-devops-windows-qualified\"), candidate: ([.labels[].name] as \$l | all(\"self-hosted\", \"Windows\", \"X64\", \"ai-devops-windows\"; . as \$w | \$l | index(\$w)))} | @json")"
           count="$(printf '%s' "$hosts" | grep -c . || true)"
           [ "$count" -eq 1 ] || { echo "::error::runner_label must be carried by exactly one runner; found $count."; exit 1; }
-          if printf '%s' "$hosts" | grep -q '"qualified":true'; then
+          if [ "$DIAGNOSTIC_SCOPE" != ssh-host-trust ] && printf '%s' "$hosts" | grep -q '"qualified":true'; then
             echo "::error::the pinned runner is already in the qualified pool."; exit 1
           fi
           printf '%s' "$hosts" | grep -q '"candidate":true' || { echo "::error::the pinned runner is not a Windows X64 ai-devops-windows candidate."; exit 1; }
@@ -103,6 +122,48 @@ jobs:
           pinned_name="$(printf '%s' "$hosts" | sed -n 's/.*"name":"\([^"]*\)".*/\1/p')"
           [ -n "$pinned_name" ] || { echo "::error::could not read the pinned runner name."; exit 1; }
           echo "pinned_runner_name=$pinned_name" >> "$GITHUB_OUTPUT"
+
+  # Read-only identity recovery is separate from qualification. It cannot
+  # admit a runner or refresh Administrator security evidence.
+  ssh-host-trust:
+    needs: sections-host-pin
+    if: ${{ needs.sections-host-pin.result == 'success' && github.event_name == 'workflow_dispatch' && inputs.scope == 'ssh-host-trust' }}
+    runs-on: [self-hosted, Windows, X64, ai-devops-windows, "${{ inputs.runner_label }}"]
+    timeout-minutes: 3
+    steps:
+      - name: Bind diagnostic to reviewed source and pinned host
+        shell: pwsh
+        env:
+          PINNED_RUNNER_NAME: ${{ needs.sections-host-pin.outputs.pinned_runner_name }}
+          EXPECTED_SOURCE_SHA: ${{ inputs.expected_source_sha }}
+          DISPATCHED_SOURCE_SHA: ${{ github.sha }}
+        run: |
+          if ($env:EXPECTED_SOURCE_SHA -cnotmatch '^[0-9a-f]{40}$' -or $env:DISPATCHED_SOURCE_SHA -cne $env:EXPECTED_SOURCE_SHA) {
+            throw 'The dispatched diagnostic source does not match the independently reviewed commit.'
+          }
+          if ([string]::IsNullOrWhiteSpace($env:PINNED_RUNNER_NAME) -or $env:RUNNER_NAME -cne $env:PINNED_RUNNER_NAME) {
+            throw 'The diagnostic runner does not match the hosted host pin.'
+          }
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.expected_source_sha }}
+          clean: true
+
+      - name: Prove checkout matches the dispatched immutable source
+        shell: pwsh
+        env:
+          EXPECTED_SOURCE_SHA: ${{ inputs.expected_source_sha }}
+        run: |
+          if ((git rev-parse HEAD) -cne $env:EXPECTED_SOURCE_SHA) {
+            throw 'The diagnostic checkout does not match its dispatched source.'
+          }
+
+      - name: Read fixed public host-key fingerprints and bound node identity
+        shell: pwsh
+        env:
+          EXPECTED_PEER_DIGEST: ${{ inputs.expected_peer_digest }}
+        run: .\tools\ci\read-windows-ssh-host-trust.ps1
 
   qualify-sections:
     needs: sections-host-pin

@@ -33,8 +33,8 @@ grep -Fq 'not a Windows X64 ai-devops-windows candidate' "$workflow" || fail 'th
 grep -Fq "tr '[:upper:]' '[:lower:]'" "$workflow" || fail 'the shared-label denylist must be case-insensitive'
 grep -Fq 'must be carried by exactly one runner' "$workflow" || fail 'the host pin must prove a single candidate runner'
 grep -Fq 'already in the qualified pool' "$workflow" || fail 'the host pin must refuse a qualified pool host'
-grep -Fq 'options: [complete, sections]' "$workflow" || fail 'qualification must offer the sections scope'
-grep -Fq "inputs.scope != 'sections'" "$workflow" || fail 'the complete job must not also run for a sections dispatch'
+grep -Fq 'options: [complete, sections, ssh-host-trust]' "$workflow" || fail 'qualification must offer the original scopes and fixed diagnostic'
+grep -Fq "inputs.scope == 'complete'" "$workflow" || fail 'the complete job must not also run for other dispatch scopes'
 grep -Fq 'section: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]' "$workflow" || fail 'sections scope must cover all 12 pull-request sections'
 grep -Fq 'runs-on: [self-hosted, Windows, X64, ai-devops-windows, "${{ inputs.runner_label }}"]' "$workflow" || fail 'sections must be pinned to the candidate host label'
 grep -Fq "'ai-devops-windows-qualified')) {" "$workflow" || fail 'a shared pool label must not satisfy the host pin'
@@ -51,5 +51,42 @@ done
 if grep -Fq 'edge-dev' "$workflow"; then
   fail 'qualification must not route through the legacy shared-host label'
 fi
+
+# Diagnostic scope has no qualification or maintenance side effects.
+python3 - "$workflow" "$ROOT/tools/ci/read-windows-ssh-host-trust.ps1" <<'PY' || fail 'host trust diagnostic is not fixed, pinned and bounded'
+import pathlib, sys
+text = pathlib.Path(sys.argv[1]).read_text()
+job = text.split('  ssh-host-trust:\n', 1)[1].split('\n  qualify-sections:', 1)[0]
+for required in ('needs: sections-host-pin', "inputs.scope == 'ssh-host-trust'", 'timeout-minutes: 3',
+                 '$env:RUNNER_NAME -cne $env:PINNED_RUNNER_NAME', 'ref: ${{ inputs.expected_source_sha }}',
+                 '$env:DISPATCHED_SOURCE_SHA -cne $env:EXPECTED_SOURCE_SHA',
+                 'EXPECTED_SOURCE_SHA: ${{ inputs.expected_source_sha }}',
+                 '(git rev-parse HEAD) -cne $env:EXPECTED_SOURCE_SHA',
+                 'EXPECTED_PEER_DIGEST: ${{ inputs.expected_peer_digest }}',
+                 'run: .\\tools\\ci\\read-windows-ssh-host-trust.ps1'):
+    assert required in job, required
+for forbidden in ('assert-windows-runner-host', 'test-all.ps1', 'qualification-refresh', 'workflow_dispatch.inputs.command'):
+    assert forbidden not in job, forbidden
+assert '[ "$DIAGNOSTIC_SCOPE" != ssh-host-trust ]' in text
+assert '[[ "$EXPECTED_PEER_DIGEST" =~ ^[0-9a-f]{64}$ ]]' in text
+assert '[ "$DISPATCHED_SOURCE_SHA" = "$EXPECTED_SOURCE_SHA" ]' in text
+assert '[[ "$EXPECTED_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]' in text
+# Execute the exact hosted refusal block with wrong/moved and matched source.
+import os, subprocess
+block = text.split('          if [ "$DIAGNOSTIC_SCOPE" = ssh-host-trust ]; then\n', 1)[1].split('\n          fi', 1)[0]
+expected = '1' * 40
+for source, success in ((expected, True), ('2' * 40, False), ('', False)):
+    env = dict(os.environ, EXPECTED_PEER_DIGEST='a' * 64, EXPECTED_SOURCE_SHA=expected, DISPATCHED_SOURCE_SHA=source)
+    result = subprocess.run(['bash', '-c', block], env=env, capture_output=True)
+    assert (result.returncode == 0) is success
+env = dict(os.environ, EXPECTED_PEER_DIGEST='a' * 64, EXPECTED_SOURCE_SHA='', DISPATCHED_SOURCE_SHA=expected)
+assert subprocess.run(['bash', '-c', block], env=env, capture_output=True).returncode != 0
+source = pathlib.Path(sys.argv[2]).read_text()
+for required in ('param()', 'C:\\ProgramData\\ssh\\ssh_host_', 'kind+"_key.pub"',
+                 '0x08200000', 'info.Attr & 0x410', 'WaitForExit(15000)',
+                 '$digest -cne $env:EXPECTED_PEER_DIGEST'):
+    assert required in source, required
+assert 'Set-Service' not in source and 'Register-ScheduledTask' not in source
+PY
 
 printf 'PASS: dedicated Windows runner qualification is security- and capability-complete\n'
