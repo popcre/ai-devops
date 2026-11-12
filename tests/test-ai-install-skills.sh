@@ -93,6 +93,15 @@ output="$(run_installer "$fixture" "$claude" "$codex" --dry-run)"
 assert_absent "$claude/skills"
 assert_absent "$codex/skills"
 grep -Fq '[dry-run]' <<<"$output" || fail "dry-run actions not reported"
+# Installed launchers are symlinks (/usr/local/bin/ai-install-skills); the
+# checkout must be found through the link, not from the link's directory.
+mkdir -p "$TMP_ROOT/dry/linkbin"
+ln -s "$fixture/bin/ai-install-skills" "$TMP_ROOT/dry/linkbin/ai-install-skills"
+linked="$(AI_DEVOPS_SKIP_MACHINE_TOOLS_GATE=1 USERPROFILE="$HOME" CLAUDE_HOME="$claude" CODEX_HOME="$codex" \
+  ZCODE_HOME="$TMP_ROOT/dry/zcode" MIMO_HOME="$TMP_ROOT/dry/mimo" \
+  bash "$TMP_ROOT/dry/linkbin/ai-install-skills" --dry-run 2>&1)" || true
+grep -Fq 'globals-common.sh: No such file' <<<"$linked" && fail "symlinked launcher could not find its checkout"
+grep -Fq '[dry-run]' <<<"$linked" || fail "symlinked launcher did not reach the checkout"
 
 echo "4/13 collision fails before mutation"
 fixture="$TMP_ROOT/collision/repo"; claude="$TMP_ROOT/collision/claude"; codex="$TMP_ROOT/collision/codex"
