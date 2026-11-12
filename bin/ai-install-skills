@@ -53,7 +53,10 @@
 #
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Resolve the launcher symlink (/usr/local/bin/ai-install-skills) to the checkout.
+_self="${BASH_SOURCE[0]}"
+while [ -L "$_self" ]; do _t="$(readlink "$_self")"; case "$_t" in /*) _self="$_t" ;; *) _self="$(dirname "$_self")/$_t" ;; esac; done
+REPO_ROOT="$(cd "$(dirname "$_self")/.." && pwd)"
 # shellcheck source=../tools/lib/globals-common.sh
 source "$REPO_ROOT/tools/lib/globals-common.sh"
 SHORT_HOST="${SHORT_HOST:-$(hostname 2>/dev/null | cut -d. -f1 | tr '[:upper:]' '[:lower:]')}"
