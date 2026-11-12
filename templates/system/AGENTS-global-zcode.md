@@ -166,8 +166,10 @@ rulings, verbatim: `docs/owner-rulings.md`.
   checks and the merge queue decide (`config/repository-policy.json`).
   DesignFlow goes from Albert's sandbox branch to `develop`, never self-merged.
 - **Albert does not merge — you do,** except DesignFlow or a PR he said he
-  will review first. A prose-only PR merges with `gh pr merge --squash
-  --admin` once `bin/ai-doc-safety` passes on the exact head.
+  will review first. A prose-only PR merges with plain `gh pr merge` (the
+  queue lands it when green) once `bin/ai-doc-safety` passes on the exact
+  head. Never `--admin` or `--squash` — the queue refuses them. This
+  supersedes the older `gh pr merge --squash --admin` teaching.
 - **Wait on CI with the bounded, event-aware waiter.** Surface a
   failing check or queue ejection immediately, and do independent useful work
   while long checks run; never burn turns in long hand-written polling loops.

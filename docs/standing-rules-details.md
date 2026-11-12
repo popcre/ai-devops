@@ -240,9 +240,11 @@ and points here.
   `Albert Hazan <u2giants@users.noreply.github.com>`. Never `git pull` the
   installed ai-devops checkout; see `docs/deployment.md`.
 - **Merging:** checks and the merge queue decide
-  (`config/repository-policy.json`). A prose-only PR merges with
-  `gh pr merge --squash --admin` once `bin/ai-doc-safety` passes on the exact
-  head.
+  (`config/repository-policy.json`). A prose-only PR merges through the merge
+  queue like every other PR: plain `gh pr merge` enqueues it once
+  `bin/ai-doc-safety` passes on the exact head, and the queue lands it when
+  green. Never `--admin` or `--squash` (the queue refuses them). This
+  supersedes the older `gh pr merge --squash --admin` teaching.
 - **Compression:** never send secrets, private transcripts, review verdicts,
   or code through a compressor.
 - **Subagents:** never delegate schema, merge, production, or security
