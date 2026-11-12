@@ -52,7 +52,8 @@ designflow-bff, designflow-item-master, designflow-tracking, designflow-data-syn
   itself is just a pointer in migrated repos, but read it as a full handoff if
   it is still the legacy form (line 1 lacks `handoff-pointer: v1`). Do not
   bulk-load every .md file, and search `shared-db/` only for database tasks.
-- dflow uses GCP Cloud SQL today (Supabase migration is planned, architecture
-  stays Angular→BFF→Express→Sequelize). It is NOT on Supabase — don't assume.
+- dflow runs on Supabase (production `dflow_prod` since 17 Oct 2026; the
+  sandbox DB is Supabase too, pooler port 6543). It is NOT on GCP Cloud SQL —
+  don't assume. Architecture stays Angular→BFF→Express→Sequelize.
 - Pushing the user branch auto-deploys via Google Cloud Build (GCP project
   `lithe-breaker-323913`, region `us-east4`).
