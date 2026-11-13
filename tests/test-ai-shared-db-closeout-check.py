@@ -436,6 +436,8 @@ exit 127
                 (f'Posted by Codex chat "Pull latest ai-devops repo" ({SESSION[:8]}) on edge-dev', 1),
                 (f'Posted by Codex chat "renamed session" ({SESSION[:8]}) on edge-dev', 1),
                 (f'Posted by Claude chat ({SESSION[:8]}) on hetz', 1),
+                (f'posted by Codex chat "name" ({SESSION[:8]}) on hetz', 1),
+                (f'POSTED BY Codex chat ({SESSION[:8]}) on hetz', 1),
                 (f'Posted by Codex chat "name" ({SESSION}) on edge-dev', 1),
                 (f'Posted by Codex chat "name" ({FOREIGN[:8]}) on edge-dev', 0),
                 (f'Posted by ZCode chat "shared-db sweep" (sess_9ed78740) on edge-dev', 0),
@@ -479,6 +481,21 @@ exit 127
         result = self.run_check("--session-id", zcode, env=env)
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertEqual(self.summary(result)["blocking_claims"], [{"issue": 5453}])
+
+    def test_uppercase_zcode_identity_still_blocks(self):
+        zcode = "sess_9ed78740-9d9d-4622-9fbd-09f4b00dd4d7"
+        env = self.env.copy()
+        env.pop("CODEX_THREAD_ID", None)
+        for body, expected in (
+                (f'posted by ZCode chat ({zcode[:13].upper()}) on edge-dev', 1),
+                (f'Unsupported owner {zcode.upper()}', 2)):
+            with self.subTest(body=body):
+                row = nonclaim_issue(5453, ["db-claim"])
+                row["body"] = body
+                self.write_data({"open_pages": [[row]]})
+                result = self.run_check("--session-id", zcode, env=env)
+                self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
+                self.assertFalse(self.summary(result)["ok"])
 
     def test_relinquished_handoff_ready_claim_still_blocks_until_owner_changes(self):
         ready = issue(18, f"codex/{SESSION}-4152", "relinquished",

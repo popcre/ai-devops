@@ -243,16 +243,21 @@ def resolve_session(explicit):
 def text_has_session_identity(text, session):
     if UUID.fullmatch(session):
         return re.search(rf"(?<![A-Za-z0-9]){re.escape(session)}(?![A-Za-z0-9])", text, re.IGNORECASE) is not None
-    return re.search(rf"(?<![A-Za-z0-9_]){re.escape(session)}(?![A-Za-z0-9_])", text) is not None
+    flags = re.IGNORECASE if ZCODE_SESSION.fullmatch(session) else 0
+    return re.search(rf"(?<![A-Za-z0-9_]){re.escape(session)}(?![A-Za-z0-9_])", text, flags) is not None
 
 
 def expand_short_identity(identity, session):
     """A short signature cannot distinguish sessions sharing that prefix;
     conservatively attribute it to the current session when the current
     session id starts with it, else leave it short (not this session).
-    MiMo tokens are case-sensitive; UUIDs fold to lower case."""
+    MiMo tokens are case-sensitive; UUIDs and ZCode ids fold to lower case."""
     if UUID.fullmatch(session):
         if re.fullmatch(r"[0-9a-f]{8}", identity, re.IGNORECASE) and session.startswith(identity.lower()):
+            return session
+        return identity
+    if ZCODE_SESSION.fullmatch(session):
+        if re.fullmatch(r"sess_[0-9a-f]{8}", identity, re.IGNORECASE) and session.startswith(identity.lower()):
             return session
         return identity
     if re.fullmatch(r"ses+_[A-Za-z0-9]{8}", identity) and session.startswith(identity):
@@ -286,7 +291,7 @@ def parse_claim_owner(body, session):
         # Body edits preserve earlier signatures. Repeated attribution to the
         # same session is one owner; a different or unreadable signer is not.
         if (len(set(signatures)) != 1
-                or len(re.findall(r"^Posted by\b", prose, re.MULTILINE)) != len(signatures)):
+                or len(re.findall(r"^Posted by\b", prose, re.MULTILINE | re.IGNORECASE)) != len(signatures)):
             raise CheckError("lease-free claim owner signature is missing or ambiguous")
         return expand_short_identity(signatures[0], session)
     if len(fences) != 1:

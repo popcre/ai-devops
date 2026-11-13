@@ -21,6 +21,7 @@ Store roots are overridable for tests:
 
 import json
 import os
+from pathlib import Path
 import re
 import socket
 import sqlite3
@@ -48,6 +49,8 @@ def home():
 
 
 def short_id(sid):
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", sid):
+        return "unknown"
     m = re.match(r"^(ses+_)(.*)$", sid)
     if m:
         return m.group(1) + m.group(2)[:8]
@@ -76,7 +79,7 @@ def lookup_mimo(sid):
     )
     if not os.path.isfile(path):
         return ""
-    uri = "file:" + path.replace("\\", "/") + "?mode=ro"
+    uri = Path(path).resolve().as_uri() + "?mode=ro"
     try:
         con = sqlite3.connect(uri, uri=True)
         try:
@@ -94,7 +97,7 @@ def lookup_zcode(sid):
     )
     if not os.path.isfile(path):
         return ""
-    uri = "file:" + path.replace("\\", "/") + "?mode=ro"
+    uri = Path(path).resolve().as_uri() + "?mode=ro"
     try:
         con = sqlite3.connect(uri, uri=True)
         try:

@@ -100,5 +100,47 @@ check "no app and no id falls back to a stub" 'printf %s "$out" | grep -q "^Post
 out="$(run --app claude)"
 check "an app without an id falls back to unknown" 'printf %s "$out" | grep -q "^Posted by Claude chat (unknown) on "'
 
+"$py" - "$tool" "$work" <<'PYEOF'
+import os, re, runpy, shutil, sqlite3, sys
+from unittest.mock import patch
+
+tool, work = sys.argv[1:]
+module = runpy.run_path(tool)
+for sid in ("ab\ncd", "ab cd", "ab)cd", "ab\x00cd", "ab\x7fcd", "ab\u2028cd", ""):
+    signature = module["build"]("codex", sid)
+    assert re.fullmatch(r"Posted by Codex chat \(unknown\) on [A-Za-z0-9._-]+", signature), repr(signature)
+
+connect = sqlite3.connect
+def readonly_connect(*args, **kwargs):
+    con = connect(*args, **kwargs)
+    try:
+        con.execute("create table forbidden_write (id text)")
+    except sqlite3.OperationalError as exc:
+        assert "readonly" in str(exc), str(exc)
+    else:
+        con.close()
+        raise AssertionError("signature lookup opened a writable database")
+    return con
+
+for app, sid, title in (
+        ("mimo", "ses_ffe5e2d8d4fcdffeS1R1pHQ7vt", 'Tracing "AI" sessions'),
+        ("zcode", "sess_9ed78740-9d9d-4622-9fbd-09f4b00dd4d7", "shared-db throughput follow-ups")):
+    for suffix in ("?mode=rw", "#fragment", "%20 space"):
+        path = os.path.join(work, app + suffix + ".db")
+        shutil.copyfile(os.path.join(work, app + ".db"), path)
+        with patch.dict(os.environ, {"AI_GH_SIG_" + app.upper() + "_DB": path}), \
+                patch.object(sqlite3, "connect", readonly_connect):
+            assert module["lookup_" + app](sid) == title, path
+PYEOF
+if [ "$?" -eq 0 ]; then ok "unsafe ids and URI paths preserve the signature and read-only contract"; else bad "unsafe ids or URI paths"; fi
+
+if [ "$(uname -s)" = Linux ]; then
+  if "$tool" --app codex --id "$CODEX_ID" >/dev/null; then
+    ok "signature tool executes directly"
+  else
+    bad "signature tool executes directly"
+  fi
+fi
+
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
