@@ -81,7 +81,7 @@ installed_shas() {
   {
     for shim in "${shim_dir:-$HOME/.local/bin}"/*.cmd; do
       [ -f "$shim" ] || continue
-      sed -n 's/^rem source-sha=\([0-9a-f]\{40\}\)$/\1/p' "$shim"
+      tr -d '\r' < "$shim" | sed -n 's/^rem source-sha=\([0-9a-f]\{40\}\)$/\1/p'
     done
     [ -n "$manifest" ] || manifest="${AI_DEVOPS_ETC:-/etc/ai-devops}/install-manifest.tsv"
     [ -f "$manifest" ] && awk -F '\t' '$1=="meta"&&$2=="source_sha"{print $3}' "$manifest"
