@@ -46,7 +46,26 @@ read-when: Working on CI process, ci-red, or required-check repair
 | 5.3 | Transcript store: remove the false label, close redaction gaps | ✅ done | PR #2456 (two redaction patterns + v6 generic-example prompt, with tests); PR #2465 (reredact.py — re-applies patterns to PUBLISHED stored text; run 2026-11-08: 4 residual segments scrubbed into store-20261108T212129Z, whole-store residual scan 0); false-label note in the store's reports folder; verification on the tracker (comment 6727319257) |
 | 6.1 | 7-day live acceptance against the targets in section 13 | ⬜ open | — |
 
-**A fresh session starts at step 0.1.** Phases 1 to 5 can run in parallel after that, one session per phase. Re-read later phases before starting each one, because the existing owners below keep landing work.
+**A fresh session starts at steps 5.2 and 6.1** (2026-11-13: 0.1–5.1 are done or
+listed; 2.10 is closing). Phases 1 to 5 can run in parallel where open, one
+session per phase. Re-read later phases before starting each one, because the
+existing owners below keep landing work.
+
+### 2026-11-13 addendum — three recurring-noise classes closed (MiMo on edge-dev)
+
+Not plan steps, but they serve goals 2 and 3 ("red means something real") and
+are recorded here so no session re-derives or re-fixes them:
+
+| Work | State | Evidence |
+|---|---|---|
+| Ghost run records (queued forever, zero jobs, GET/DELETE 404 or 403, cancel refused) get a sweeper | ✅ done | shared-db PR #6216 reaps queued runs older than 30 min every 10 min via `lane-watchdog.mjs --sweep-ghosts` and goes red naming anything it cannot remove; ai-devops PR #2492 ports it as `tools/ci/ghost-run-sweep.mjs` + `ghost-run-sweep.yml`. Tracking: popcre/shared-db#6215 (live-proof box open) |
+| Documents-only gate false reds ("Lightweight authorization refused" on ordinary code PRs) | ✅ done | shared-db PR #6216: status-history read retried once before a revocation verdict (a transient blip manufactured the red); an unreadable change set reports "Not applicable" green and routes to the guarded checks. Red on that gate now means revocation and nothing else (#2838 follow-through) |
+| no-progress alarm dead on arrival (`actions: read` missing) | ✅ done | shared-db PR #6216 adds the permission (review finding popcre/shared-db#5922 item 1; that issue's other findings stay open) |
+
+Still outside this plan's checklist: GitHub Support purge of the 22 standing
+ghost records (ticket filed 2026-11-12 ~8:05 PM EST; sweepers red meanwhile —
+they hold nothing globally; see `docs/critical-incidents.md` 2026-11-11 for the
+go-arounds).
 
 ## Part 1: Why
 

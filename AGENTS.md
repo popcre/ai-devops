@@ -76,6 +76,9 @@ aligned with this list:
 ## Critical incidents
 
 Read [`docs/critical-incidents.md`](docs/critical-incidents.md) before diagnosing "odd" tool behavior — it may be an intentional guardrail ([`docs/design-decisions.md`](docs/design-decisions.md)).
+Ghost run records (queued forever, zero jobs, cancel refused, delete 404/403) are
+a known GitHub-side half-deleted state: go around with a fresh ref; sweepers reap
+them every 10 minutes — see the 2026-11-11 entry.
 
 ## Repository contract
 
