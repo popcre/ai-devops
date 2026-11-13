@@ -1,0 +1,41 @@
+name: ghost-run-sweep
+
+# Reap wedged queued run records ("ghosts") — 2026-11-11 20:22Z dispatch
+# wedge (popcre/ai-devops#2367; ported from popcre/shared-db#6215/#6216).
+#
+# A ghost is a workflow run the LIST endpoint shows as queued for over 30
+# minutes with zero jobs ever created. GET/DELETE return 404 and cancel is
+# refused, yet the record holds a per-ref concurrency group and blocks every
+# later run of its workflow on its ref. This sweep cancels and deletes those
+# records; a ghost that cannot be removed turns the job red so a GitHub
+# support purge can be requested instead of staying silent.
+#
+# ADVISORY: never a required check. A red run is an alarm on the umbrella
+# issue (#2367). A run that is progressing is never touched.
+on:
+  workflow_dispatch:
+  schedule:
+    # Every 30 minutes, off the crowded :00/:30 boundaries.
+    - cron: '13,43 * * * *'
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: ghost-run-sweep
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reap wedged queued run records (ghosts)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          node tools/ci/ghost-run-sweep.mjs --repo "$REPO"
