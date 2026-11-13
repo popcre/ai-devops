@@ -137,10 +137,10 @@ rulings, verbatim: `docs/owner-rulings.md`.
   minimum scope). Before any shared-db work, load `shared-db-change`.
 - **Sign everything posted to GitHub** with `Posted by MiMo chat "<display
   name>" (<short id>) on <machine>` — omit the name when the app has none.
-  The display name is the session's own name in MiMo Desktop; the short id is
-  `$MIMO_SESSION_ID` cut to its `ses_` prefix plus 8 characters.
-  `ai-gh-signature` builds the line. When editing a body, keep existing
-  signatures and add yours.
+  The display name is the session's own name in its app; the short id keeps
+  any `ses_`/`sess_` prefix plus 8 characters, or is the first 8 characters
+  of a UUID. `ai-gh-signature` builds the line from `$MIMO_SESSION_ID`.
+  When editing a body, keep existing signatures and add yours.
 - **Reviews are advice only** (owner ruling 2026-10-29): CI runs one
   advisory AI review per code or plan PR and never blocks a merge; findings
   become `review-finding` issues that an automatic fixer handles. Never wait
