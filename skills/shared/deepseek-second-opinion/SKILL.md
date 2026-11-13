@@ -110,9 +110,38 @@ The installer prepares an owner-only key store. Review turns read only that
 store and never call 1Password. If the store is missing or a key is rejected,
 run `ai-deepseek-agent store-key` outside a review, then requalify DeepSeek.
 
-Never paste a secret value into the brief. Point DeepSeek at facts, not
-credentials -- there is no sandboxing on the DeepSeek side the way `codex exec
--s read-only` provides, so the discipline has to be in what you send it.
+## Brief content — the other model gets nothing but this
+
+DeepSeek starts with **zero knowledge of this session**: no chat history, no
+memory, no prior turns, and no files unless you point at them or attach them
+with `--file`. Anything you leave out of the brief, it does not know. A thin
+brief produces a confident answer to a question you did not ask.
+
+Standard: **a stranger who walked in this morning could make the right call
+from the brief alone.** If a fact shaped your own thinking, it belongs in the
+brief. Never write "as discussed", "the usual setup", or "you know the
+context".
+
+Every brief carries all of this, every time:
+
+- **Background** — what the work is, why it is happening, what led to this
+  question, and every prior decision, owner ruling, constraint, or incident
+  that bears on the answer.
+- **The material** — the plan, design, diff, diagnosis, config, log, or error
+  being judged. Name exact paths, function names, SHAs, table and column
+  names, and error text; never "the relevant file". Use `--file` for anything
+  long. Put in full anything DeepSeek cannot read for itself.
+- **The question** — the one thing to judge or decide, stated sharply.
+- **Constraints** — scope limits, what must not change, and the compatibility
+  or safety rules that govern the answer.
+- **Required output** — the verdict or artifact, the reasoning, its confidence,
+  the evidence to return, and anything to flag as uncertain or unassessable
+  from what was supplied.
+
+Never put a secret, token, connection string, credential, or `.env` value in a
+brief. Point at facts, not credentials — there is no sandboxing on the
+DeepSeek side the way `codex exec -s read-only` provides, so the discipline has
+to be in what you send it.
 
 ## Step 1 -- commit to your own position FIRST
 
@@ -127,19 +156,12 @@ can assess), say so plainly rather than manufacturing a position.
 
 ## Step 2 -- send the material and your position to DeepSeek
 
-DeepSeek starts with **zero knowledge of this session**. The message is the
-whole handoff -- write it like a brief to a stranger who just walked in.
-Include:
+Write the message to the **Brief content** standard above — it is the whole
+handoff — and add the one debate-specific element:
 
-- **The material** -- the plan/diagnosis/design/diff/config/log itself, in
-  full (use `--file` for anything long). Exact file paths, function names,
-  error text. Never "the relevant file"; name it.
-- **The question** -- what you want judged or discussed, stated sharply.
 - **Your position** -- include it, clearly labelled as one input to weigh, not
   the expected answer. Tell DeepSeek to reason from the material first and say
   plainly if you're wrong.
-- **The required output** -- its own verdict/answer, its reasoning, its
-  confidence, where it agrees and disagrees with your position and why.
 
 ## Step 3 -- report DeepSeek's answer, then your agreement
 
