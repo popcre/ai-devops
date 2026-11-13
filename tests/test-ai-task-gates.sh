@@ -1103,7 +1103,7 @@ newrepo "$TMP/gate"
 ( cd "$TMP/gate" && "$GATES" start --class prose ) >/dev/null
 printf 'x\n' > "$TMP/gate/note.md"
 check 'a paid review is refused for a documentation change' "rc 3 '$TMP/gate' check --before review"
-check 'a long PR wait is refused for a documentation change' "rc 3 '$TMP/gate' check --before pr-wait"
+check 'a documentation change may wait on the PR (#2489)' "rc 0 '$TMP/gate' check --before pr-wait"
 check 'an optional lifecycle-recorded AI review report still lifts a non-protected forbidden verification action (advice, never required)' \
   "rc 0 '$TMP/gate' check --before review --reviewer-approval \"\$(appr '$TMP/gate' review)\""
 check 'an approval whose reviewer is the implementing engine is refused' \
