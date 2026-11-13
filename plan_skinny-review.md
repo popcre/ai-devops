@@ -249,7 +249,9 @@ The fixer runs **Codex** (`codex exec`) on edge-dev3, because Claude's CLI login
 - **The PR-polling hook blocks hand-written `sleep`/loop PR polling.** Use `bin/ai-pr-wait <pr> --timeout-minutes N` in the background.
 - **Flaky suites seen:**
   - `test-ai-shared-db-closeout-check.sh` fails when caller env leaks in (`env -i` makes it pass);
-  - `test-ai-install-skills.sh` failed once in the merge queue and passes locally.
+  - `test-ai-install-skills.sh` failed once in the merge queue and passes locally —
+    FIXED 2026-11-13 (#2506, PR #2507): the symlinked-launcher step now skips when
+    `ln -s` copies instead of symlinking. Do not re-fix.
   Re-run once before debugging.
 
 ### 7. Rejected approaches
