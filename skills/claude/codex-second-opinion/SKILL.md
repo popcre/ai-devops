@@ -62,6 +62,36 @@ is a junction, and Codex's sandbox helper is unreachable through it, so every
 sandboxed write fails while `--version` still passes. See the junction incident in
 `AGENTS.md`.
 
+## Brief content — the other model gets nothing but this
+
+Codex starts with **zero knowledge of this session**: no chat history, no memory,
+no prior turns, and no files unless you point at them. Anything you leave out
+of the brief, it does not know. A thin brief produces a confident answer to a
+question you did not ask.
+
+Standard: **a stranger who walked in this morning could make the right call
+from the brief alone.** If a fact shaped your own thinking, it belongs in the
+brief. Never write "as discussed", "the usual setup", or "you know the
+context".
+
+Every brief carries all of this, every time:
+
+- **Background** — what the work is, why it is happening, what led to this
+  question, and every prior decision, owner ruling, constraint, or incident
+  that bears on the answer.
+- **The material** — the plan, design, diff, diagnosis, config, or error being
+  judged. Name exact paths, function names, SHAs, table and column names, and
+  error text; never "the relevant file". Codex cannot see your scrollback.
+- **The question** — the one thing to judge or decide, stated sharply.
+- **Constraints** — scope limits, what must not change, and the compatibility
+  or safety rules that govern the answer.
+- **Required output** — the verdict or artifact, the reasoning, its confidence,
+  the evidence to return, and anything to flag as uncertain or unassessable
+  from what was supplied.
+
+Never put a secret, token, connection string, credential, or `.env` value in a
+brief. Point at facts, not credentials.
+
 ## Step 1 — commit to your own position FIRST
 
 Before Codex sees anything, write your own position to
@@ -77,22 +107,14 @@ legitimate and useful outcome.
 
 ## Step 2 — send the material and your position to Codex
 
-Codex starts with **zero knowledge of this chat**. The brief is the whole
-handoff: hold it to the `handoff-writer` standard — a stranger who walked in
-this morning could act on it with no questions. Write it to
-`<scratchpad>/codex-brief.md`. Include:
+Write it to `<scratchpad>/codex-brief.md`, to the **Brief content** standard
+above and the `handoff-writer` standard — a stranger who walked in this morning
+could act on it with no questions. Add the debate-specific pieces:
 
-- **The material** — the plan/diagnosis/design/diff itself, in full. Exact file
-  paths, function names, SHAs, table and column names, error text. Never "the
-  relevant file"; name it. Codex cannot see your scrollback.
-- **The question** — what you want judged, stated sharply.
 - **Claude's position** — include it, clearly labelled as one input to weigh and
   explicitly *not* the expected answer. Tell Codex to reason from the material
   first and to say so plainly if Claude is wrong. Including it is what makes
   Step 4 a real rebuttal instead of two disconnected monologues.
-- **The required output** — its own verdict, the reasoning, its confidence, where
-  it agrees and disagrees with Claude's position and why, and anything it could
-  not assess from the material given.
 - **Read-only** — state that this is an opinion, not a work order: do not edit,
   create, commit, push, or delete anything.
 

@@ -160,10 +160,12 @@ long session, and headless output provides no context-window or cache counters.
 
 ## Writing the brief
 
-- Self-contained: the task, the repo and branch, relevant paths or errors, constraints,
-  and the evidence you want back. Tell Kimi to read the repo's `AGENTS.md`.
+Write every brief to the **Brief content** standard that follows. Kimi-specific
+notes on top of it:
+
 - **Do not paste file contents** — Kimi has `Read`, and pasted text is prefix that
-  changes every call.
+  changes every call. Point at paths instead.
+- Tell Kimi to read the repo's `AGENTS.md`.
 - Kimi Code 0.32.0 has no headless prompt-file or stdin option. The wrapper must use
   `-p`, so the brief can be visible to other local users through the process list.
   Never put secrets in a Kimi brief on a shared host.
@@ -173,6 +175,36 @@ long session, and headless output provides no context-window or cache counters.
 - Name exact paths in prose (`Read only path/to/a and path/to/b`). `@path` injection is
   documented for the interactive input box, not for headless prompts.
 - One scoped change and one verification target per call.
+
+## Brief content — the other model gets nothing but this
+
+Kimi starts with **zero knowledge of this session**: no chat history, no memory,
+no prior turns, and no files unless you point at them. Anything you leave out
+of the brief, it does not know. A thin brief produces a confident answer to a
+question you did not ask.
+
+Standard: **a stranger who walked in this morning could make the right call
+from the brief alone.** If a fact shaped your own thinking, it belongs in the
+brief. Never write "as discussed", "the usual setup", or "you know the
+context".
+
+Every brief carries all of this, every time:
+
+- **Background** — what the work is, why it is happening, what led to this
+  question, and every prior decision, owner ruling, constraint, or incident
+  that bears on the answer.
+- **The material** — the plan, design, diff, diagnosis, config, or error being
+  judged. Name exact paths, functions, commits, and error text; never "the
+  relevant file". Point at repository paths Kimi can read; put in full anything
+  it cannot read for itself.
+- **The question** — the one thing to judge or decide, stated sharply.
+- **Constraints** — scope limits, what must not change, and the compatibility
+  or safety rules that govern the answer.
+- **Required output** — the verdict or artifact, the evidence to return, and
+  anything to flag as uncertain or unassessable from what was supplied.
+
+Never put a secret, token, connection string, credential, or `.env` value in a
+brief. Point at facts, not credentials.
 
 ## Implementation runs
 

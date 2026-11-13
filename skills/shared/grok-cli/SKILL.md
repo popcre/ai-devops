@@ -90,16 +90,46 @@ from Codex**; it defaults to `claude`, so without this both clients collide on o
 
 ## Writing the brief
 
-- Make it self-contained: the task, the repo and branch, relevant paths or errors, the
-  constraints, and the evidence you want back. Tell Grok to read the repo's own
-  `AGENTS.md`.
+Write every brief to the **Brief content** standard that follows. Grok-specific
+notes on top of it:
+
 - **Do not paste file contents.** Grok reads files itself, and pasted text is prefix that
-  changes every turn — the worst case for caching.
+  changes every turn — the worst case for caching. Point at paths instead.
+- Tell Grok to read the repo's own `AGENTS.md`.
 - Keep the opening of the brief stable across a workstream; put the new instruction last.
-- Never include secrets, `.env` contents, credential files, or unrelated private data.
 - Prefer `--prompt-file` over `--prompt` so quoting can never mangle a long brief.
 - The wrapper appends a formatting instruction asking Grok to put its conclusion under a
   `## Verdict` heading, and extracts from there. You do not need to ask for that.
+
+## Brief content — the other model gets nothing but this
+
+Grok starts with **zero knowledge of this session**: no chat history, no memory,
+no prior turns, and no files unless you point at them. Anything you leave out
+of the brief, it does not know. A thin brief produces a confident answer to a
+question you did not ask.
+
+Standard: **a stranger who walked in this morning could make the right call
+from the brief alone.** If a fact shaped your own thinking, it belongs in the
+brief. Never write "as discussed", "the usual setup", or "you know the
+context".
+
+Every brief carries all of this, every time:
+
+- **Background** — what the work is, why it is happening, what led to this
+  question, and every prior decision, owner ruling, constraint, or incident
+  that bears on the answer.
+- **The material** — the plan, design, diff, diagnosis, config, or error being
+  judged. Name exact paths, functions, commits, and error text; never "the
+  relevant file". Point at repository paths Grok can read; put in full anything
+  it cannot read for itself.
+- **The question** — the one thing to judge or decide, stated sharply.
+- **Constraints** — scope limits, what must not change, and the compatibility
+  or safety rules that govern the answer.
+- **Required output** — the verdict or artifact, the evidence to return, and
+  anything to flag as uncertain or unassessable from what was supplied.
+
+Never put a secret, token, connection string, credential, or `.env` value in a
+brief. Point at facts, not credentials.
 
 ## Run a debate to convergence
 
