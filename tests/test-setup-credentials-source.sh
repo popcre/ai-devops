@@ -41,6 +41,9 @@ start = source.index("read -r -d '' SHELLRC_BODY <<EOF\n")
 end = source.index("\nEOF\n", start) + len("\nEOF")
 print(source[start:end])
 PY
+  # The snippet embeds the install repo root at render time (ai-gh-signature);
+  # provide it like the other synthetic values so `set -u` stays honest.
+  REPO_ROOT="$ROOT"
   . "$shellrc_tmp/render-source.sh" || true
   printf '%s\n' "$SHELLRC_BODY" > "$shellrc_tmp/shellrc"
   cat > "$shellrc_tmp/bin/op" <<'SH'

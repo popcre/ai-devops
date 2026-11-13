@@ -228,9 +228,17 @@ and points here.
   production command or bypass.
 - **Shared database:** claim-first, minimum scope; see "Production and
   shared-db scope".
-- **GitHub signature:** `Posted by Claude chat <id> on <machine>`, where
-  `<id>` is `$CLAUDE_CODE_SESSION_ID` (or `unknown` when empty). The managed
-  shell snippet exports it ready-made as `$AI_GH_SIGNATURE`. When editing a
+- **GitHub signature:** `Posted by Claude chat "<display name>" (<short id>)
+  on <machine>`, e.g. `Posted by Claude chat "Shared-db throughput #401"
+  (66bd69f2) on hetz`. Omit the name when the app has none:
+  `Posted by Claude chat (66bd69f2) on hetz`. The display name is the
+  session's own name in its app (MiMo session title, ZCode task title, Claude
+  custom title, Codex thread name) — never a prompt excerpt, since prompts can
+  hold private data and this line is posted in public. The short id keeps the
+  id's `ses_`/`sess_` prefix plus 8 characters, or the first 8 characters of a
+  UUID. `bin/ai-gh-signature` builds the line (app: mimo, zcode, claude,
+  codex); the managed shell snippet exports it ready-made as
+  `$AI_GH_SIGNATURE`. Legacy full-id signatures stay valid. When editing a
   body, keep existing signatures and add yours.
 - **Successors:** never inherit a predecessor's repository, work type, route,
   or object claim. Private artifacts stay in their approved private repository.
