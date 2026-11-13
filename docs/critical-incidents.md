@@ -607,3 +607,37 @@ historical contracts remain unchanged and refused.
 own-output pages and denies a foreign session. That is offline source proof,
 not #1791 installation or provider acceptance. The historical failed inner
 subprocess output was not retained; its original cause remains unproven.
+
+## 2026-11-11 — ghost workflow run records: queued forever, unaddressable by API
+
+**Impact:** 22 workflow runs across `popcre/shared-db` (20) and `popcre/ai-devops`
+(2) sat `queued` for up to five weeks with zero jobs ever created while the runs
+listing showed nothing wrong. A 2026-11-06 session concluded the only escape was
+a fresh PR number. On 2026-11-12 the batch read as "the merge queue is jammed",
+costing a diagnosis cycle before the queue was proven healthy.
+
+**Symptom:** the runs listing shows `status=queued` forever; the run has no jobs;
+`GET` and `DELETE /repos/{owner}/{repo}/actions/runs/{id}` return 404 (shared-db)
+or delete returns 403 `Could not delete the workflow run` (ai-devops); cancel is
+refused with "Cannot cancel a workflow run that is completed". The record is
+half-deleted on GitHub's side: every endpoint but the listing rejects it.
+
+**Root cause:** a dispatch wedge (2026-11-11 20:22 UTC batch; same window on both
+repos) leaves runs that never materialise into jobs. They can hold per-ref
+concurrency groups declared with `cancel-in-progress: false`, which strands every
+later run of that workflow on that ref — the 2026-11-06 case that forced a fresh
+PR. Most standing ghosts sit on dead refs (merged PR branches) and block nothing;
+a schedule ghost coexisted with the same workflow running green every few hours.
+
+**Fix:** ghost sweepers reap the signature every 10 minutes and go red naming
+anything they cannot remove — shared-db `lane-watchdog.mjs --sweep-ghosts`
+(PR #6216) and ai-devops `tools/ci/ghost-run-sweep.mjs` + `ghost-run-sweep.yml`
+(PR #2492). A purge of the 22 standing records was filed with GitHub Support on
+2026-11-12 ~8:05 PM EST (Actions → Stuck workflow; record IDs on
+[popcre/shared-db#6215](https://github.com/popcre/shared-db/issues/6215)).
+
+**Prevention / go-arounds while the purge is pending:** nothing is globally
+jammed — merges land and checks run. A ghost strands at most one workflow on one
+ref. Escape hatches: push a new PR/branch (new ref = new concurrency group, the
+proven workaround), let `lane-watchdog` re-dispatch missing check contexts on PR
+heads, and treat a sweeper red as the alarm that one of these is biting.
