@@ -12,17 +12,22 @@ input="$(cat 2>/dev/null || true)"
 sid="$(printf '%s' "$input" | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
 [ -n "$sid" ] || exit 0
 
+here="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+
 # GitHub post signature (docs/standing-rules-details.md "GitHub signature").
 # The shell snippet computes it when the login shell is sourced, which can be
 # before Claude Code sets CLAUDE_CODE_SESSION_ID; export the real id here.
 if [ "$mode" = start ] && [ -n "${CLAUDE_ENV_FILE:-}" ] \
    && ! grep -qF "AI_GH_SIGNATURE=" "$CLAUDE_ENV_FILE" 2>/dev/null; then
-  printf 'export CLAUDE_CODE_SESSION_ID=%q AI_GH_SIGNATURE=%q\n' "$sid" \
-    "Posted by Claude chat $sid on $(hostname 2>/dev/null || echo unknown)" \
+  sig=""
+  py="$(command -v python3 2>/dev/null || command -v python 2>/dev/null || true)"
+  if [ -n "$py" ] && [ -f "$here/ai-gh-signature" ]; then
+    sig="$("$py" "$here/ai-gh-signature" --app claude --id "$sid" 2>/dev/null || true)"
+  fi
+  [ -n "$sig" ] || sig="Posted by Claude chat $sid on $(hostname 2>/dev/null || echo unknown)"
+  printf 'export CLAUDE_CODE_SESSION_ID=%q AI_GH_SIGNATURE=%q\n' "$sid" "$sig" \
     >> "$CLAUDE_ENV_FILE" 2>/dev/null || true
 fi
-
-here="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 lib="${AI_SESSION_TMP_LIB:-$here/../tools/lib/session-tmp.sh}"
 [ -f "$lib" ] || lib="$HOME/.config/ai-devops/session-tmp.sh"
 [ -f "$lib" ] || exit 0

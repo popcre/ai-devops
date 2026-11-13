@@ -1,0 +1,233 @@
+#!/usr/bin/env python3
+"""ai-gh-signature — build the GitHub posting signature line.
+
+Format (docs/standing-rules-details.md "GitHub signature"):
+
+    Posted by <App> chat "<display name>" (<short id>) on <machine>
+    Posted by <App> chat (<short id>) on <machine>      # when the app has no name
+
+The display name is the session's own name in its app (MiMo session title,
+ZCode task title, Claude custom title, Codex thread name). Never fall back to
+a prompt excerpt: prompts can hold private data and this line is posted in
+public.
+
+The short id keeps a ses_/sess_ prefix and the first 8 characters after it,
+or the first 8 characters of a UUID. Same session, stable short form.
+
+Store roots are overridable for tests:
+    AI_GH_SIG_MIMO_DB, AI_GH_SIG_ZCODE_DB, AI_GH_SIG_CLAUDE_PROJECTS,
+    AI_GH_SIG_CODEX_INDEX
+"""
+
+import json
+import os
+import re
+import socket
+import sqlite3
+import sys
+
+APPS = ("mimo", "zcode", "claude", "codex")
+LABEL = {"mimo": "MiMo", "zcode": "ZCode", "claude": "Claude", "codex": "Codex"}
+ALIAS = {
+    "mimo": "mimo", "mimo desktop": "mimo", "mimocode": "mimo",
+    "zcode": "zcode",
+    "claude": "claude", "claude code": "claude", "claude desktop": "claude",
+    "codex": "codex", "chatgpt": "codex", "chatgpt for windows": "codex",
+}
+ID_ENV = {
+    "mimo": ("MIMO_SESSION_ID",),
+    "zcode": ("ZCODE_SESSION_ID",),
+    "claude": ("CLAUDE_CODE_SESSION_ID",),
+    "codex": ("CODEX_THREAD_ID", "CODEX_SESSION_ID"),
+}
+NAME_MAX = 80
+
+
+def home():
+    return os.path.expanduser("~")
+
+
+def short_id(sid):
+    m = re.match(r"^(ses+_)(.*)$", sid)
+    if m:
+        return m.group(1) + m.group(2)[:8]
+    return sid[:8]
+
+
+def sanitize_name(raw):
+    if not raw:
+        return ""
+    text = re.sub(r"[\x00-\x1f\x7f]", " ", str(raw))
+    text = text.replace('"', "'")
+    text = re.sub(r"\s+", " ", text).strip()
+    if len(text) > NAME_MAX:
+        text = text[: NAME_MAX - 3].rstrip() + "..."
+    return text
+
+
+def machine():
+    name = re.sub(r"[^A-Za-z0-9._-]", "", socket.gethostname() or "")
+    return name or "unknown"
+
+
+def lookup_mimo(sid):
+    path = os.environ.get("AI_GH_SIG_MIMO_DB") or os.path.join(
+        home(), ".local", "share", "mimocode", "mimocode.db"
+    )
+    if not os.path.isfile(path):
+        return ""
+    uri = "file:" + path.replace("\\", "/") + "?mode=ro"
+    try:
+        con = sqlite3.connect(uri, uri=True)
+        try:
+            row = con.execute("select title from session where id = ?", (sid,)).fetchone()
+        finally:
+            con.close()
+    except sqlite3.Error:
+        return ""
+    return row[0] if row else ""
+
+
+def lookup_zcode(sid):
+    path = os.environ.get("AI_GH_SIG_ZCODE_DB") or os.path.join(
+        home(), ".zcode", "v2", "tasks-index.sqlite"
+    )
+    if not os.path.isfile(path):
+        return ""
+    uri = "file:" + path.replace("\\", "/") + "?mode=ro"
+    try:
+        con = sqlite3.connect(uri, uri=True)
+        try:
+            row = con.execute(
+                "select title, cli_title from tasks where task_id = ?", (sid,)
+            ).fetchone()
+        finally:
+            con.close()
+    except sqlite3.Error:
+        return ""
+    if not row:
+        return ""
+    return row[0] or row[1] or ""
+
+
+def lookup_claude(sid):
+    root = os.environ.get("AI_GH_SIG_CLAUDE_PROJECTS") or os.path.join(
+        home(), ".claude", "projects"
+    )
+    if not os.path.isdir(root) or not re.fullmatch(r"[A-Za-z0-9._-]{1,128}", sid):
+        return ""
+    for project in sorted(os.listdir(root)):
+        path = os.path.join(root, project, sid, "custom-title.json")
+        if not os.path.isfile(path):
+            continue
+        try:
+            with open(path, encoding="utf-8") as handle:
+                data = json.load(handle)
+        except (OSError, ValueError):
+            continue
+        if isinstance(data, dict) and data.get("customTitle"):
+            return data["customTitle"]
+    return ""
+
+
+def lookup_codex(sid):
+    path = os.environ.get("AI_GH_SIG_CODEX_INDEX") or os.path.join(
+        home(), ".codex", "session_index.jsonl"
+    )
+    if not os.path.isfile(path):
+        return ""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    row = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(row, dict) and row.get("id") == sid:
+                    return row.get("thread_name") or ""
+    except OSError:
+        return ""
+    return ""
+
+
+LOOKUP = {
+    "mimo": lookup_mimo,
+    "zcode": lookup_zcode,
+    "claude": lookup_claude,
+    "codex": lookup_codex,
+}
+
+
+def detect_app():
+    for app in ("mimo", "claude", "codex", "zcode"):
+        for var in ID_ENV[app]:
+            if os.environ.get(var):
+                return app
+    return ""
+
+
+def detect_id(app):
+    for var in ID_ENV[app]:
+        value = os.environ.get(var)
+        if value:
+            return value
+    return ""
+
+
+def resolve_app(raw):
+    key = (raw or "").strip().lower()
+    if key in ALIAS:
+        return ALIAS[key]
+    raise SystemExit("ai-gh-signature: unknown app %r (use mimo|zcode|claude|codex)" % raw)
+
+
+def build(app, sid, name=""):
+    label = LABEL[app]
+    short = short_id(sid)
+    host = machine()
+    if name:
+        return 'Posted by %s chat "%s" (%s) on %s' % (label, name, short, host)
+    return "Posted by %s chat (%s) on %s" % (label, short, host)
+
+
+def main(argv):
+    app_raw = ""
+    sid = ""
+    i = 1
+    while i < len(argv):
+        arg = argv[i]
+        if arg == "--app" and i + 1 < len(argv):
+            app_raw = argv[i + 1]
+            i += 2
+        elif arg == "--id" and i + 1 < len(argv):
+            sid = argv[i + 1]
+            i += 2
+        elif arg in ("-h", "--help"):
+            sys.stdout.write(__doc__ or "")
+            return 0
+        else:
+            sys.stderr.write("ai-gh-signature: unexpected argument %r\n" % arg)
+            return 2
+
+    app = resolve_app(app_raw) if app_raw else detect_app()
+    if not app:
+        # No session env and no --app: emit a harmless stub so callers that
+        # expand $AI_GH_SIGNATURE never end up with an empty post body.
+        sys.stdout.write("Posted by chat (unknown) on %s\n" % machine())
+        return 0
+    if not sid:
+        sid = detect_id(app)
+    if not sid:
+        sys.stdout.write("Posted by %s chat (unknown) on %s\n" % (LABEL[app], machine()))
+        return 0
+
+    name = sanitize_name(LOOKUP[app](sid))
+    sys.stdout.write(build(app, sid, name) + "\n")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

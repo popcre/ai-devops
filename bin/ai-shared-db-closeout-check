@@ -65,15 +65,50 @@ GH_CALL_SERIAL = 0
 UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 # MiMo Desktop sessions use ses_<token> identifiers, not UUIDs. Tokens are
 # opaque and case-sensitive; never case-fold them the way UUIDs are folded.
+# ZCode sessions use sess_<uuid> identifiers (the uuid part folds like UUIDs).
 MIMO_SESSION = re.compile(r"^ses_[A-Za-z0-9]{16,64}$")
-SESSION_TOKEN = r"(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|ses_[A-Za-z0-9]{16,64})"
-OWNER_CHAT = re.compile(rf"^(?:Codex|Claude|MiMo) chat ({SESSION_TOKEN}) on [A-Za-z0-9][A-Za-z0-9._-]{{0,119}}$", re.IGNORECASE)
+ZCODE_SESSION = re.compile(r"^sess_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+SESSION_TOKEN = (r"(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                 r"|ses_[A-Za-z0-9]{16,64}"
+                 r"|sess_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})")
+# A posting signature may carry the session's app display name and a short id
+# (docs/standing-rules-details.md "GitHub signature"): the name is quoted, the
+# id in parentheses is short (a ses_/sess_ prefix plus 8 characters, or 8 hex
+# of a UUID) or a full session token. A bare token without parentheses is the
+# legacy form.
+SIGNATURE_NAME = r'(?:"[^"\n]{1,120}" )?'
+SIGNATURE_ID = rf"(?:{SESSION_TOKEN}|ses+_[A-Za-z0-9]{{8}}|[0-9a-f]{{8}})"
+OWNER_CHAT = re.compile(rf"^(?:Codex|Claude|MiMo|ZCode) chat ({SESSION_TOKEN}) on [A-Za-z0-9][A-Za-z0-9._-]{{0,119}}$", re.IGNORECASE)
 OWNER_AT_CHAT = re.compile(rf"^(?:codex|claude)-chat-([0-9a-f]{{8}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{12}})@[A-Za-z0-9][A-Za-z0-9._-]{{0,119}}$", re.IGNORECASE)
 OWNER_ADOPTION = re.compile(r"^codex/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})-[1-9][0-9]*$", re.IGNORECASE)
-OWNER_SIGNATURE = re.compile(rf"^Posted by (?:Codex|Claude|MiMo) chat ({SESSION_TOKEN}|[0-9a-f]{{8}}) on [A-Za-z0-9][A-Za-z0-9._-]{{0,119}}[ \t]*$", re.IGNORECASE | re.MULTILINE)
+OWNER_SIGNATURE = re.compile(
+    rf"^Posted by (?:Codex|Claude|MiMo|ZCode) chat "
+    rf"(?:{SIGNATURE_NAME}\((?P<short>{SIGNATURE_ID})\)"
+    rf"|(?P<full>{SIGNATURE_ID})) "
+    rf"on [A-Za-z0-9][A-Za-z0-9._-]{{0,119}}[ \t]*$",
+    re.IGNORECASE | re.MULTILINE)
+
+
+def signature_identities(prose):
+    return [m.group("short") or m.group("full") for m in OWNER_SIGNATURE.finditer(prose)]
 
 
 def normalize_session(value):
+    raw = value.strip()
+    lowered = raw.lower()
+    if UUID.fullmatch(lowered):
+        return lowered
+    if MIMO_SESSION.fullmatch(raw):
+        return raw
+    if ZCODE_SESSION.fullmatch(lowered):
+        return "sess_" + lowered[len("sess_"):]
+    return None
+
+
+def normalize_env_session(value):
+    """Env identity sources accept UUID and MiMo tokens only. A ZCode harness
+    may leave a sess_-prefixed id in another engine's variable (#2431); it
+    must never veto a valid explicit --session-id."""
     raw = value.strip()
     lowered = raw.lower()
     if UUID.fullmatch(lowered):
@@ -180,8 +215,10 @@ def json_output(value):
 
 def resolve_session(explicit):
     has_explicit = explicit is not None and explicit.strip()
-    candidates = [normalize_session(value) for value in (
-        explicit,
+    candidates = []
+    if has_explicit:
+        candidates.append(normalize_session(explicit))
+    candidates += [normalize_env_session(value) for value in (
         os.environ.get("CODEX_THREAD_ID"),
         os.environ.get("CLAUDE_CODE_SESSION_ID"),
         os.environ.get("MIMO_SESSION_ID"),
@@ -197,7 +234,7 @@ def resolve_session(explicit):
                 raise CheckError("session identity sources disagree")
         return candidates[0]
     if any(value is None for value in candidates):
-        raise CheckError("session identity must be an exact Codex/Claude UUID or MiMo ses_ id")
+        raise CheckError("session identity must be an exact Codex/Claude UUID, MiMo ses_ id, or ZCode sess_ id")
     if len(set(candidates)) != 1:
         raise CheckError("session identity sources disagree")
     return candidates[0]
@@ -209,9 +246,24 @@ def text_has_session_identity(text, session):
     return re.search(rf"(?<![A-Za-z0-9_]){re.escape(session)}(?![A-Za-z0-9_])", text) is not None
 
 
+def expand_short_identity(identity, session):
+    """A short signature cannot distinguish sessions sharing that prefix;
+    conservatively attribute it to the current session when the current
+    session id starts with it, else leave it short (not this session).
+    MiMo tokens are case-sensitive; UUIDs fold to lower case."""
+    if UUID.fullmatch(session):
+        if re.fullmatch(r"[0-9a-f]{8}", identity, re.IGNORECASE) and session.startswith(identity.lower()):
+            return session
+        return identity
+    if re.fullmatch(r"ses+_[A-Za-z0-9]{8}", identity) and session.startswith(identity):
+        return session
+    return identity
+
+
 def owner_session(owner, actual_session):
     raw_owner = owner.strip()
-    if UUID.fullmatch(raw_owner.lower()) or MIMO_SESSION.fullmatch(raw_owner):
+    if (UUID.fullmatch(raw_owner.lower()) or MIMO_SESSION.fullmatch(raw_owner)
+            or ZCODE_SESSION.fullmatch(raw_owner.lower())):
         return normalize_session(raw_owner)
     match = OWNER_CHAT.fullmatch(owner) or OWNER_AT_CHAT.fullmatch(owner) or OWNER_ADOPTION.fullmatch(owner)
     if match:
@@ -230,18 +282,13 @@ def parse_claim_owner(body, session):
         # Lease-free C2 claims retain their posting signature. Ignore fenced
         # examples; missing/ambiguous attribution is never evidence of absence.
         prose = re.sub(r"```[^\n]*\n[\s\S]*?```", "", body)
-        signatures = OWNER_SIGNATURE.findall(prose)
+        signatures = signature_identities(prose)
         # Body edits preserve earlier signatures. Repeated attribution to the
         # same session is one owner; a different or unreadable signer is not.
         if (len(set(signatures)) != 1
                 or len(re.findall(r"^Posted by\b", prose, re.MULTILINE)) != len(signatures)):
             raise CheckError("lease-free claim owner signature is missing or ambiguous")
-        identity = signatures[0]
-        if re.fullmatch(r"[0-9a-f]{8}", identity, re.IGNORECASE):
-            # A short signature cannot distinguish sessions sharing a prefix;
-            # conservatively block every matching full UUID.
-            return session if UUID.fullmatch(session) and session.startswith(identity.lower()) else identity
-        return identity
+        return expand_short_identity(signatures[0], session)
     if len(fences) != 1:
         raise CheckError("claim must contain exactly one author lease")
     owners = []

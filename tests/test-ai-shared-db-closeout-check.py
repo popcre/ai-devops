@@ -428,6 +428,58 @@ exit 127
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertEqual(self.summary(result)["blocking_claims"], [{"issue": 5423}])
 
+    def test_lease_free_named_signature_ownership(self):
+        # Display name + short id (docs/standing-rules-details.md "GitHub
+        # signature"): the name is decoration, the id in parentheses is the
+        # identity. Renames must not change who owns the claim.
+        for body, expected in (
+                (f'Posted by Codex chat "Pull latest ai-devops repo" ({SESSION[:8]}) on edge-dev', 1),
+                (f'Posted by Codex chat "renamed session" ({SESSION[:8]}) on edge-dev', 1),
+                (f'Posted by Claude chat ({SESSION[:8]}) on hetz', 1),
+                (f'Posted by Codex chat "name" ({SESSION}) on edge-dev', 1),
+                (f'Posted by Codex chat "name" ({FOREIGN[:8]}) on edge-dev', 0),
+                (f'Posted by ZCode chat "shared-db sweep" (sess_9ed78740) on edge-dev', 0),
+                (f'Posted by MiMo chat "name" ({MIMO_SESSION[:12]}) on edge-dev', 0)):
+            with self.subTest(body=body):
+                row = nonclaim_issue(5450, ["db-claim"])
+                row["body"] = body
+                self.write_data({"open_pages": [[row]]})
+                result = self.run_check()
+                self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
+                self.assertEqual(self.summary(result)["blocking_claims"],
+                                 [{"issue": 5450}] if expected else [])
+
+    def test_lease_free_renamed_signature_is_still_one_owner(self):
+        row = nonclaim_issue(5451, ["db-claim"])
+        first = f'Posted by Codex chat "old name" ({SESSION[:8]}) on edge-dev'
+        second = f'Posted by Codex chat "new name" ({SESSION[:8]}) on edge-dev'
+        row["body"] = first + "\n\nRenamed.\n\n" + second
+        self.write_data({"open_pages": [[row]]})
+        result = self.run_check()
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertEqual(self.summary(result)["blocking_claims"], [{"issue": 5451}])
+
+    def test_lease_free_full_token_in_parens_matches_legacy_owner(self):
+        row = nonclaim_issue(5452, ["db-claim"])
+        named = f'Posted by Codex chat "name" ({SESSION}) on edge-dev'
+        legacy = f"Posted by Codex chat {SESSION} on edge-dev"
+        row["body"] = named + "\n\nSame signer.\n\n" + legacy
+        self.write_data({"open_pages": [[row]]})
+        result = self.run_check()
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertEqual(self.summary(result)["blocking_claims"], [{"issue": 5452}])
+
+    def test_lease_free_zcode_signature_blocks_zcode_session(self):
+        zcode = "sess_9ed78740-9d9d-4622-9fbd-09f4b00dd4d7"
+        row = nonclaim_issue(5453, ["db-claim"])
+        row["body"] = f'Posted by ZCode chat "shared-db sweep" ({zcode[:13]}) on edge-dev'
+        env = self.env.copy()
+        env.pop("CODEX_THREAD_ID", None)
+        self.write_data({"open_pages": [[row]]})
+        result = self.run_check("--session-id", zcode, env=env)
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertEqual(self.summary(result)["blocking_claims"], [{"issue": 5453}])
+
     def test_relinquished_handoff_ready_claim_still_blocks_until_owner_changes(self):
         ready = issue(18, f"codex/{SESSION}-4152", "relinquished",
                       suffix="\n\nOwner handoff-ready receipt was recorded.")

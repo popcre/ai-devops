@@ -135,9 +135,12 @@ rulings, verbatim: `docs/owner-rulings.md`.
 - **Shared database:** every STRUCTURE change, and every outside bulk load into
   curated Master Data, is authored first in `popcre/shared-db` (claim-first,
   minimum scope). Before any shared-db work, load `shared-db-change`.
-- **Sign everything posted to GitHub** with `Posted by ZCode chat <id> on
-  <machine>`, where `<id>` is `$ZCODE_SESSION_ID` (or `unknown` when
-  empty). When editing a body, keep existing signatures and add yours.
+- **Sign everything posted to GitHub** with `Posted by ZCode chat "<display
+  name>" (<short id>) on <machine>` — omit the name when the app has none.
+  The display name is the session's own name in ZCode; the short id is
+  `$ZCODE_SESSION_ID` cut to its `sess_` prefix plus 8 characters.
+  `ai-gh-signature` builds the line. When editing a body, keep existing
+  signatures and add yours.
 - **Reviews are advice only** (owner ruling 2026-10-29): CI runs one
   advisory AI review per code or plan PR and never blocks a merge; findings
   become `review-finding` issues that an automatic fixer handles. Never wait

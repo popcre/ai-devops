@@ -214,6 +214,17 @@ read -r -d '' SHELLRC_BODY <<EOF
 # Ready-made GitHub post signature (set before the non-interactive return so
 # agent shells get it too). Use: \$AI_GH_SIGNATURE
 export AI_GH_SIGNATURE="Posted by Claude chat \${CLAUDE_CODE_SESSION_ID:-unknown} on \$(hostname 2>/dev/null || echo unknown)"
+# Prefer the resolved form (app display name + short id) when a session id is
+# present; see docs/standing-rules-details.md "GitHub signature".
+if [ -n "\${MIMO_SESSION_ID:-}\${CLAUDE_CODE_SESSION_ID:-}\${CODEX_THREAD_ID:-}\${ZCODE_SESSION_ID:-}" ] \
+   && [ -f "$REPO_ROOT/bin/ai-gh-signature" ]; then
+  _ai_py="\$(command -v python3 2>/dev/null || command -v python 2>/dev/null || true)"
+  if [ -n "\$_ai_py" ]; then
+    _ai_sig="\$( "\$_ai_py" "$REPO_ROOT/bin/ai-gh-signature" 2>/dev/null )" \\
+      && [ -n "\$_ai_sig" ] && export AI_GH_SIGNATURE="\$_ai_sig"
+  fi
+  unset _ai_py _ai_sig
+fi
 # Login shells used to launch Codex and other unattended tools must not inherit
 # every credential. An explicit script may opt in to the old behavior.
 case \$- in
