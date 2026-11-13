@@ -38,9 +38,10 @@ case "$out" in
   *FAIL*) echo 'FAIL: lag report must never fail' >&2; exit 1 ;;
 esac
 
-# Up-to-date case: shims at main.
+# Up-to-date case: shims and manifest at main.
 printf '@echo off\r\nrem source-sha=%s\r\n' "$main_sha" > "$TMP/bin/ai-task-gates.cmd"
 printf '@echo off\r\nrem source-sha=%s\r\n' "$main_sha" > "$TMP/bin/ai-pr-wait.cmd"
+printf 'meta\tsource_sha\t%s\t-\n' "$main_sha" > "$TMP/manifest.tsv"
 out="$(report_install_lag "$TMP/repo" "$TMP/bin" "$TMP/manifest.tsv" 2>&1)"
 case "$out" in
   *"= origin/main (up to date)"*) ;;
