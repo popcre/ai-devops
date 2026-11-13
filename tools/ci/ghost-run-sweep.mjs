@@ -11,7 +11,7 @@
 //
 // This tool reaps those ghost records on a schedule. A run is a ghost when
 // the listing shows it queued, it is older than the age floor (default 30
-// minutes), and it never created a job. Healthy work never matches: a run
+// minutes), it never created a job, and its individual record returns 404. Healthy work never matches: a run
 // that is progressing is not queued, and a young queued run is still within
 // the dispatch grace.
 //
@@ -39,10 +39,11 @@ const REPO_SLUG = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/
 /**
  * The reap plan. `runs` are `GET /actions/runs?status=queued` entries
  * ({id, status, created_at, name, head_branch, html_url}); `jobsCount` when
- * the caller probed the run's jobs endpoint is honoured — a run that did
- * create jobs is not a ghost however old. Returns { reap, notes }.
+ * the caller probed the jobs endpoint must be zero, and `missingRecord`
+ * must confirm a 404 from the run endpoint. Readable queued backlogs are safe. Returns { reap, notes }.
  */
 export function planGhostActions(runs, nowMs = Date.now(), minAgeMs = DEFAULT_GHOST_MIN_AGE_MS) {
+  if (!Number.isFinite(minAgeMs) || minAgeMs < 0) throw new Error('invalid minimum age')
   const reap = []
   const notes = []
   for (const run of runs ?? []) {
@@ -53,7 +54,7 @@ export function planGhostActions(runs, nowMs = Date.now(), minAgeMs = DEFAULT_GH
       continue
     }
     if (run.status !== 'queued') continue
-    if (run.jobsCount !== undefined && run.jobsCount > 0) continue
+    if (run.jobsCount !== 0 || run.missingRecord !== true) continue
     const ageMs = nowMs - createdMs
     if (ageMs < minAgeMs) {
       notes.push({ id, action: 'skip-young-run', reason: `queued ${Math.round(ageMs / 60000)}m (< ${Math.round(minAgeMs / 60000)}m floor); still within dispatch grace` })
@@ -83,7 +84,12 @@ function gh(args) {
 function transportIo({ log = console.log } = {}) {
   return {
     readJson(args) {
-      return JSON.parse(gh(args))
+      try {
+        return JSON.parse(gh(args))
+      } catch (error) {
+        if (/\(HTTP 404\)/.test(String(error.stderr))) error.status = 404
+        throw error
+      }
     },
     cancelRun(repo, runId) {
       if (!REPO_SLUG.test(repo)) throw new Error(`refusing unsafe repo slug: ${repo}`)
@@ -116,11 +122,31 @@ export function runGhostSweep({
   if (!REPO_SLUG.test(String(repo ?? ''))) throw new Error('--repo owner/name (or GITHUB_REPOSITORY) is required')
   const log = io.log ?? console.log
   const readQueued = () => {
-    const answer = io.readJson(['api', `repos/${repo}/actions/runs?status=queued&per_page=100`])
-    if (!Array.isArray(answer?.workflow_runs)) throw new Error('queued run listing did not return workflow_runs; refusing rather than judge a partial read')
-    return answer.workflow_runs
+    const runs = []
+    for (let page = 1; ; page += 1) {
+      const answer = io.readJson(['api', `repos/${repo}/actions/runs?status=queued&per_page=100&page=${page}`])
+      if (!Array.isArray(answer?.workflow_runs)) throw new Error('queued run listing did not return workflow_runs')
+      runs.push(...answer.workflow_runs)
+      if (answer.workflow_runs.length < 100) return runs
+    }
   }
-  const { reap, notes } = planGhostActions(readQueued(), nowMs, minAgeMs)
+  const candidates = readQueued().map((run) => {
+    // Validate identity and age before constructing a per-run endpoint.
+    const candidate = { ...run, jobsCount: 0, missingRecord: true }
+    if (!planGhostActions([candidate], nowMs, minAgeMs).reap.length) return run
+    let missingRecord = false
+    try {
+      io.readJson(['api', `repos/${repo}/actions/runs/${run.id}`])
+    } catch (error) {
+      if (error.status !== 404) throw error
+      missingRecord = true
+    }
+    if (!missingRecord) return { ...run, missingRecord: false }
+    const jobs = io.readJson(['api', `repos/${repo}/actions/runs/${run.id}/jobs?filter=all&per_page=1`])
+    if (!Number.isSafeInteger(jobs?.total_count) || jobs.total_count < 0) throw new Error('unreadable jobs count')
+    return { ...run, jobsCount: jobs.total_count, missingRecord }
+  })
+  const { reap, notes } = planGhostActions(candidates, nowMs, minAgeMs)
   for (const note of notes) log(`ghost sweep: ${note.action}${note.id ? ` run ${note.id}` : ''}: ${note.reason}`)
   if (!reap.length) {
     log('ghost sweep: no wedged queued runs.')
@@ -161,13 +187,22 @@ function argValue(argv, flag) {
   return i >= 0 ? argv[i + 1] : undefined
 }
 
+export function parseMinAgeMinutes(argv) {
+  const raw = argv.includes('--min-age-minutes') ? argValue(argv, '--min-age-minutes') : '30'
+  const minutes = Number(raw)
+  if (raw === undefined || String(raw).trim() === '' || !Number.isFinite(minutes) || minutes < 0 || !Number.isFinite(minutes * 60000)) {
+    throw new Error('invalid --min-age-minutes')
+  }
+  return minutes
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const argv = process.argv.slice(2)
   try {
-    const minAgeMinutes = Number(argValue(argv, '--min-age-minutes') ?? 30)
+    const minAgeMinutes = parseMinAgeMinutes(argv)
     const result = runGhostSweep({
       repo: argValue(argv, '--repo') ?? process.env.GITHUB_REPOSITORY,
-      minAgeMs: Math.max(0, minAgeMinutes) * 60000,
+      minAgeMs: minAgeMinutes * 60000,
       dryRun: argv.includes('--dry-run'),
     })
     // Red on unreaped ghosts: they hold concurrency groups and silence is
