@@ -11,16 +11,18 @@ Owner tracker [ai-devops #2510](https://github.com/popcre/ai-devops/issues/2510)
 
 ## STATUS
 
-| Step | State on November 13, 2026 | Proof needed |
+| Step | State on November 14, 2026 | Proof needed |
 | --- | --- | --- |
-| 1. Measure and map checks | Open | Comparable paid Linux usage and exact check inventory |
-| 2a. Stop starting the weekly check on pushes | Open | Manual bridge and mirror-only and mixed events |
-| 2b. Prove weekly operation | Open | First real weekly run in all six apps with the intended permissions |
-| 3. Remove paid duplicate notifications | Open | Central, app and partial-failure receipts with the candidate routing |
-| 4. Measure other duplicate paid jobs | Open | Evidence-based disposition by workflow and event |
+| 1. Measure and map checks | Baseline reproduced | [Run counts, billing, sampled jobs and required checks](https://github.com/popcre/ai-devops/issues/2510#issuecomment-6885738211). Complete the matched comparison after rollout. |
+| 2a. Stop starting the weekly check on pushes | On all six sandbox branches | Finish DesignFlow promotion. Backend manual dispatch passed and the same commit's push had no doc-health run. Prove on develop mirror and app-doc PR events after promotion. |
+| 2b. Prove weekly operation | Open, after develop promotion | First actual scheduled run in each app. The Actions token cannot create index PRs in any of the six repositories. The existing rolling issue reports the index fault in that case. |
+| 3. Remove paid duplicate notifications | No safe savings candidate found | Keep the canonical notifier. The hosted chooser alone uses the same number of hosted starts as the sampled no-op notifier. Shared-db release owners still need to prove live observer recovery and partial-batch coverage. |
+| 4. Measure other duplicate paid jobs | Samples confirm two independent runner-routing jobs | Evaluate shared routing only if existing check identities, fork isolation, fallback and measured savings can be proven. No changes shipped for these jobs. |
 | 5. Verify savings and hand back | Open | Live run receipts, normalized paid-minute comparison, documentation |
 
-Start at step 1, then re-read the downstream steps against current upstream before starting each. Steps 2a and 3 can start independently after step 1. Do not wait for 2b to investigate steps 3–4. Use the end of 2a as a context cut when moving between repositories. Continue from the [handoff](HANDOFF.d/2026-11-13T2126Z-edge-dev3-codex-actions-spend.md).
+Resume step 2a with the existing DesignFlow owners. Uma retains merge ownership for [frontend #590](https://github.com/popcre/designflow-frontend/pull/590), [BFF #94](https://github.com/popcre/designflow-bff/pull/94), and [tracking #204](https://github.com/popcre/designflow-tracking/pull/204). Backend `80e5b8f5`, Item Master `16daa594`, and Data Syncing `5345326d` are on sandbox-albert. Their sandbox branches also carry unrelated changes. Coordinate those changes with their owners and open scoped promotion PRs when the branch difference is clear.
+
+The [backend manual receipt](https://github.com/popcre/designflow-backend/actions/runs/43652028166) succeeded on the sandbox commit. Local cases passed for dirty and clean runs against the same issue, index-only PR base selection for develop and sandbox, and issue fallback when PR creation is denied. App unit suites and the frontend sandbox build passed. The [already-failing scheduled observer](https://github.com/popcre/shared-db/actions/runs/43637817763) hits its workflow-run discovery bound, leaving release proof open. Keep the live-proof item in #2510, then complete the actual scheduled receipts and matched billing check. See the [original handoff](HANDOFF.d/2026-11-13T2126Z-edge-dev3-codex-actions-spend.md) for baseline context.
 
 ## 1. Ultimate goal
 
@@ -41,7 +43,7 @@ In scope are documentation trigger frequency, paid no-op release notifications, 
 ## 5. Current state
 
 - Shared-db [deployment guide](https://github.com/popcre/shared-db/blob/main/docs/deployment.md#what-release-means-here) and [sync workflow](https://github.com/popcre/shared-db/blob/main/.github/workflows/sync.yml) describe the per-update copy and central completion dispatch. [PR #4847](https://github.com/popcre/shared-db/pull/4847) consolidated notifications. The canonical consumer source is [config/designflow-consumer-release-notify.yml](https://github.com/popcre/shared-db/blob/main/config/designflow-consumer-release-notify.yml). The app file is .github/workflows/designflow-db-release-notify.yml. All six copies follow the canonical source. See [delivery rules](https://github.com/popcre/shared-db/blob/main/docs/designflow-db-release.md#consolidated-mirror-notifications-issue-4655).
-- DesignFlow [docs upkeep plan §4.2](https://github.com/popcre/designflow-backend/blob/develop/plan_docs-lookup-cleanup-and-upkeep.md) calls for weekly upkeep. The [November 11 change](https://github.com/popcre/designflow-backend/commit/55f54c812) added pushes to sandbox-albert and develop. All six GitHub default branches were verified as develop on November 13. Current app paths are .github/workflows/doc-health.yml and .doc-health.json. The latter excludes the copied tree from scanning.
+- DesignFlow [docs upkeep plan §4.2](https://github.com/popcre/designflow-backend/blob/develop/plan_docs-lookup-cleanup-and-upkeep.md) calls for weekly upkeep. The [November 11 change](https://github.com/popcre/designflow-backend/commit/55f54c812) added pushes to sandbox-albert and develop. The November 14 sandbox change removes that trigger and keeps Monday scheduling and manual dispatch. All six default branches were verified as develop on November 14. Current app paths are .github/workflows/doc-health.yml and .doc-health.json. The latter excludes the copied tree from scanning.
 - App .github/workflows/task-gates.yml and forbid-shared-db-bypass.yml both run on develop pushes. The [shared runner router](https://github.com/popcre/ai-devops/blob/main/.github/workflows/edge-dev3-route.yml) starts on GitHub even when the next job runs on edge-dev3. Inspect unit-environment-matrix.yml and sample-tracking-regression.yml only where present. The observed November 5–6 backend mirror events started 426 workflows before the November 8 backend develop routing merge. No workflow or runtime changes were made in the planning session.
 
 ## 6. Root causes and known evidence
