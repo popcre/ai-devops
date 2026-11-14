@@ -44,7 +44,7 @@ read-when: Working on CI process, ci-red, or required-check repair
 | 5.1 | Waiter names the reason for a stall | ✅ done | Prerequisite plan_issue-2095 landed (#2447). #2449 merged: `queued too long` warn window, `still queued at the deadline` names the two runner-stall causes, billing/capacity/review-step/failing-test named from #2444/#2447, cheat-sheet documents them all. One fixture per reason |
 | 5.2 | Merged-but-not-installed is visible | ⬜ open | — |
 | 5.3 | Transcript store: remove the false label, close redaction gaps | ✅ done | PR #2456 (two redaction patterns + v6 generic-example prompt, with tests); PR #2465 (reredact.py — re-applies patterns to PUBLISHED stored text; run 2026-11-08: 4 residual segments scrubbed into store-20261108T212129Z, whole-store residual scan 0); false-label note in the store's reports folder; verification on the tracker (comment 6727319257) |
-| 6.1 | 7-day live acceptance against the targets in section 13 | ⬜ open | — |
+| 6.1 | 7-day live acceptance against the targets in section 13 | 🟡 measured, 5/10 pass | Acceptance 2026-11-14 ([file](tests/verification/ci-process/acceptance-2026-11-14.md)): delivery lane fully green (targets 6, 7, 9, 10, 5) but merge-signal targets 1-2 missed (red merge-group verify: #2513), fixer PRs age >48h (#2514), fixer share 36.6% and workflow count 56 are standing definitional gaps. Re-measure after #2513/#2514 land |
 
 **A fresh session starts at steps 5.2 and 6.1** (2026-11-13: 0.1–5.1 are done or
 listed; 2.10 is closing). Phases 1 to 5 can run in parallel where open, one
