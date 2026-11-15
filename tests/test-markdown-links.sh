@@ -60,4 +60,13 @@ printf '[`docs/gone.md`](docs/gone.md)\n' > "$HIST/live.md"
 git -C "$HIST" add .; git -C "$HIST" commit -qm codespan-text
 if python "$ROOT/tools/check-markdown-links.py" "$HIST" >"$TMP/out" 2>"$TMP/err"; then echo 'FAIL: code-span-text link unchecked'; exit 1; fi
 grep -q 'missing local target: docs/gone.md' "$TMP/err"
+# App-protocol URIs (desktop/chat links) are not local targets and are skipped.
+printf '[ok](README.md)\n' > "$HIST/live.md"
+printf '# URIs\n\n[chat](mimo-session://desktop/ses_abc123) [claude](claude://claude.ai/epitaxy/x) [web](HTTPS://Example.com/x)\n' > "$HIST/uris.md"
+git -C "$HIST" add .; git -C "$HIST" commit -qm uris
+python "$ROOT/tools/check-markdown-links.py" "$HIST" >/dev/null || { echo 'FAIL: app-scheme URIs treated as local paths'; exit 1; }
+# A one-letter "scheme" is a Windows drive target and stays checkable.
+printf '[drive](C:/no/such/file.md)\n' > "$HIST/live.md"
+git -C "$HIST" add .; git -C "$HIST" commit -qm drive
+if python "$ROOT/tools/check-markdown-links.py" "$HIST" >/dev/null 2>&1; then echo 'FAIL: drive-letter target skipped as URI scheme'; exit 1; fi
 python "$ROOT/tools/check-markdown-links.py" "$ROOT"
