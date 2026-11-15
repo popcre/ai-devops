@@ -641,3 +641,34 @@ jammed — merges land and checks run. A ghost strands at most one workflow on o
 ref. Escape hatches: push a new PR/branch (new ref = new concurrency group, the
 proven workaround), let `lane-watchdog` re-dispatch missing check contexts on PR
 heads, and treat a sweeper red as the alarm that one of these is biting.
+
+## 2026-11-13 — the Windows installer died at startup: `ProgramFiles` dropped by the Git Bash tool shell
+
+**Impact:** a fleet rollout of a skills-only release hit a hard stop on the first
+Windows machine. The installer refused to run at all, with a PowerShell
+parameter error that pointed at nothing useful. Roughly half an hour of
+diagnosis, most of it spent suspecting the repository and the machine's
+checkouts rather than the shell.
+
+**Symptom:** `install-ai-devops-windows.ps1` fails immediately after printing
+"Preparing repo" and "Repo exists; proving canonical clean main and
+fast-forwarding only", with
+`Cannot bind argument to parameter 'Path' because it is null.`
+
+**Root cause:** not a repository problem, and not a bad checkout. When a
+PowerShell process is spawned from the Git Bash tool shell, the environment
+variables whose names contain a space or parentheses — `ProgramFiles` and
+`ProgramFiles(x86)` — are dropped. The installer then calls `Join-Path` with an
+empty base path while building its list of acceptable Git Bash locations, and
+PowerShell reports the null parameter instead of the missing variable.
+
+**Fix:** run the installer from a PowerShell that actually has the variable set
+(a normal interactive PowerShell does), or set it explicitly before invoking.
+Spawning a child PowerShell from the Bash tool shell reproduces the loss every
+time.
+
+**Prevention:** when something fails at startup with a null-parameter error,
+print the values of the environment variables the failing line uses before
+suspecting the code — one check of `ProgramFiles` in the same shell would have
+named the cause in seconds. A defensive fallback inside the installer has
+deliberately **not** been added and is not implied by this entry.
