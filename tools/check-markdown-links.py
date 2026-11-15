@@ -113,6 +113,12 @@ for relative in tracked:
                 target = target.split(maxsplit=1)[0]
             if not target or target.startswith(("#", "http://", "https://", "mailto:", "data:")):
                 continue
+            # App-protocol URIs (mimo-session://, claude://, ...) are not file
+            # paths; a one-letter "scheme" is a Windows drive target (C:/...) and
+            # must stay checkable as a local path.
+            scheme = re.match(r"^([A-Za-z][A-Za-z0-9+.\-]*):", target)
+            if scheme and len(scheme.group(1)) > 1:
+                continue
             if target == "HANDOFF.d/":  # Template link resolves in the consuming repository.
                 continue
             target = urllib.parse.unquote(target.split("#", 1)[0])
