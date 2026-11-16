@@ -337,17 +337,8 @@ resolve_repo(){
 # base recorded by `start`, then the merge base with the repository's own main
 # branch. A repository with no base (fresh, detached, no upstream) is not an
 # error: the working tree alone is then the whole change set.
-resolve_base(){
-  local requested="$1" recorded main
-  if [ -n "$requested" ]; then
-    BASE_REF="$(git rev-parse --verify --quiet "$requested^{commit}" 2>/dev/null)" \
-      || fail_closed "base ref not found: $requested"
-    return 0
-  fi
-  recorded="$(state_field base)"
-  if [ -n "$recorded" ] && git rev-parse --verify --quiet "$recorded^{commit}" >/dev/null 2>&1; then
-    BASE_REF="$(git rev-parse "$recorded^{commit}")"; return 0
-  fi
+main_merge_base(){
+  local main candidate mb
   main=""
   if [ -x "$REPO_POLICY_BIN" ]; then
     main="$("$REPO_POLICY_BIN" 2>/dev/null | jqr '.main_branch // empty' 2>/dev/null || true)"
@@ -355,10 +346,33 @@ resolve_base(){
   [ -n "$main" ] || main=main
   for candidate in "origin/$main" "$main"; do
     git rev-parse --verify --quiet "$candidate^{commit}" >/dev/null 2>&1 || continue
-    BASE_REF="$(git merge-base HEAD "$candidate" 2>/dev/null || true)"
-    [ -n "$BASE_REF" ] && return 0
+    mb="$(git merge-base HEAD "$candidate" 2>/dev/null || true)"
+    [ -n "$mb" ] && { printf '%s\n' "$mb"; return 0; }
   done
-  BASE_REF=""
+  return 0
+}
+
+resolve_base(){
+  local requested="$1" recorded mb
+  if [ -n "$requested" ]; then
+    BASE_REF="$(git rev-parse --verify --quiet "$requested^{commit}" 2>/dev/null)" \
+      || fail_closed "base ref not found: $requested"
+    return 0
+  fi
+  mb="$(main_merge_base)"
+  recorded="$(state_field base)"
+  if [ -n "$recorded" ] && recorded="$(git rev-parse --verify --quiet "$recorded^{commit}" 2>/dev/null)"; then
+    # A recorded base goes stale when the branch is rebuilt on newer main:
+    # it is then no longer an ancestor of HEAD, or it is older than the
+    # current merge base. Judge against the merge base in both cases, so a
+    # PR is never charged with files main changed after `start`.
+    if [ -n "$mb" ] && { ! git merge-base --is-ancestor "$recorded" HEAD 2>/dev/null \
+        || git merge-base --is-ancestor "$recorded" "$mb" 2>/dev/null; }; then
+      BASE_REF="$mb"; return 0
+    fi
+    BASE_REF="$recorded"; return 0
+  fi
+  BASE_REF="$mb"
 }
 
 # The complete observed change set. Rename detection is disabled on purpose so

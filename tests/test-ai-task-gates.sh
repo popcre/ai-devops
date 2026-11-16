@@ -1066,6 +1066,18 @@ jq -n '{schema_version:1,declared_class:"made-up-class"}' > "$statepath"
 check 'an unknown recorded class fails closed' "rc 4 '$TMP/stale' check --before ship"
 rm -f "$statepath"
 
+printf 'recorded base after the branch is rebuilt on newer main\n'
+newrepo "$TMP/rebuilt"
+( cd "$TMP/rebuilt" && "$GATES" start --class prose ) >/dev/null
+git -C "$TMP/rebuilt" checkout -q -b feature
+mkdir -p "$TMP/rebuilt/supabase/migrations"; printf 'select 1;\n' > "$TMP/rebuilt/supabase/migrations/1_main.sql"
+git -C "$TMP/rebuilt" add -A; git -C "$TMP/rebuilt" commit -qm 'main moved on'
+git -C "$TMP/rebuilt" update-ref refs/remotes/origin/main HEAD
+printf 'x\n' > "$TMP/rebuilt/note.md"; git -C "$TMP/rebuilt" add -A; git -C "$TMP/rebuilt" commit -qm note
+check 'a recorded base older than the main merge base is replaced by the merge base' \
+  "[ \"\$(out '$TMP/rebuilt' explain --json | jq -r '[.changes[].path]|join(\",\")')\" = note.md ]"
+rm -f "$(state_file_for "$TMP/rebuilt")"
+
 printf 'worktrees and concurrent tasks\n'
 newrepo "$TMP/main-checkout"
 git -C "$TMP/main-checkout" worktree add -q -b side "$TMP/side-worktree" >/dev/null 2>&1
