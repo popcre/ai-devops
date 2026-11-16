@@ -101,9 +101,9 @@ import json, os, sys, time
 args = sys.argv[1:]
 with open(os.environ["FAKE_GH_CALLS"], "a", encoding="utf-8") as f:
     f.write(json.dumps(args) + "\n")
-if args[:2] == ["auth", "status"]:
-    sys.exit(0)
 data = json.load(open(os.environ["FAKE_GH_DATA"], encoding="utf-8"))
+if args[:2] == ["auth", "status"]:
+    sys.exit(data.get("auth_exit", 0))
 if data.get("sleep_seconds"):
     time.sleep(float(data["sleep_seconds"]))
 if args[:1] != ["api"]:
@@ -268,6 +268,21 @@ exit 127
         self.assertIn("ai-gh call 1 (auth status) waiting for admission", result.stderr)
         self.assertIn("ai-gh call 1 (auth status) finished in", result.stderr)
         self.assertIn("includes admission wait", result.stderr)
+
+    def test_unsuccessful_auth_probe_never_checks_claims(self):
+        for status, error in (
+            (1, "GitHub authentication is unavailable"),
+            (75, "GitHub request deferred by the shared throttle"),
+        ):
+            with self.subTest(status=status):
+                self.calls.write_text("")
+                self.write_data({"auth_exit": status})
+                result = self.run_check()
+                self.assertEqual(result.returncode, 2)
+                summary = self.summary(result)
+                self.assertFalse(summary["ok"])
+                self.assertEqual(summary["error"], error)
+                self.assertEqual(self.calls_made(), [["auth", "status", "--hostname", "github.com"]])
 
     def mimo_env(self, session=MIMO_SESSION):
         env = self.env.copy()

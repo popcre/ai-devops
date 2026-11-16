@@ -34,7 +34,7 @@ if [[ -n "${STUB_CALL_LOG:-}" ]]; then
   printf '%s\n' "$*" >> "$STUB_CALL_LOG"
 fi
 case "${1:-}" in
-  auth) exit 0 ;;
+  auth) exit "${STUB_AUTH_EXIT:-0}" ;;
   issue)
     if [[ "${2:-}" == "view" ]]; then
       printf '%s\n' "${STUB_ISSUE_STATE:-OPEN}"
@@ -395,6 +395,18 @@ else
   bad "keeps the latest 30 dated daily blocks in the log (blocks=$blocks13)"
 fi
 unset AI_HOUSEKEEPING_LOG
+
+stub_deferred="$TMP/gh-deferred"
+make_gh_stub "$stub_deferred"
+( cd "$case13" && STUB_AUTH_EXIT=75 STUB_CALL_LOG="$TMP/deferred-calls.log" \
+    AI_HOUSEKEEPING_GH="$stub_deferred" bash "$TOOL" ) > "$TMP/deferred.out" 2>&1
+if grep -q 'GitHub: UNKNOWN (GitHub probe deferred by the shared throttle)' "$TMP/deferred.out" && \
+   ! grep -q 'Install and authenticate gh' "$TMP/deferred.out" && \
+   [[ "$(cat "$TMP/deferred-calls.log")" == 'auth status' ]]; then
+  ok "deferred GitHub probe reports UNKNOWN without diagnosing sign-in or reading PRs"
+else
+  bad "deferred GitHub probe was not distinguished from unavailable authentication"
+fi
 
 # ---------------------------------------------------------------------------
 # 14. offline --log still records UNKNOWN and exits 0 (D3)

@@ -599,6 +599,8 @@ if [[ "$GH_OK" -eq 1 ]]; then
   GH_LINE="available"
 elif [[ "$GH_PROBE_RC" -eq 124 ]]; then
   GH_LINE="UNKNOWN (GitHub probe timed out)"
+elif [[ "$GH_PROBE_RC" -eq 75 ]]; then
+  GH_LINE="UNKNOWN (GitHub probe deferred by the shared throttle)"
 else
   GH_LINE="UNKNOWN (GitHub unavailable)"
 fi
@@ -614,6 +616,8 @@ emit "Odd refs (clone-local): $ODD_REFS unowned"
 if [[ "$GH_OK" -ne 1 ]]; then
   if [[ "$GH_PROBE_RC" -eq 124 ]]; then
     emit_warn "GitHub probe timed out — merged-ness is UNKNOWN for every worktree and branch above. The shared call throttle is busy on this machine; re-run when it is quieter. Never trust an ancestry fallback."
+  elif [[ "$GH_PROBE_RC" -eq 75 ]]; then
+    emit_warn "GitHub probe deferred by the shared throttle — merged-ness is UNKNOWN. Re-run when the throttle admits requests. Never trust an ancestry fallback."
   else
     emit_warn "GitHub unavailable — merged-ness is UNKNOWN for every worktree and branch above. Install and authenticate gh, then re-run. Never trust an ancestry fallback."
   fi
