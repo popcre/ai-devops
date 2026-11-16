@@ -4,6 +4,7 @@ The complete document index is [`docs/INDEX.md`](docs/INDEX.md), generated from 
 
 Read this first. A new or moved document needs the four-key header; then run `ai-doc-health --repo . --fix-index` ([`docs/doc-health.md`](docs/doc-health.md)). Never hand-edit the index.
 
+- DeepSeek reviewer consolidation: [plan and STATUS](plan_deepseek-harness-openrouter.md).
 - Reviewer system: advisory, one rotating CI reviewer (owner ruling 2026-10-29). Plan + STATUS: [plan_skinny-review.md](plan_skinny-review.md); checklist: [docs/reviewer-enforcement-inventory-2026-10-29.md](docs/reviewer-enforcement-inventory-2026-10-29.md).
 - Merge-blocking checks: only data-safety gates block a merge; everything else is advisory (owner ruling 2026-10-30). Plan + STATUS: [plan_lean-required-checks.md](plan_lean-required-checks.md).
 
