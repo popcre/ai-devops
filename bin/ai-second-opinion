@@ -83,8 +83,12 @@ changed and why.
 """
 
 # 1Password references for store-key (vault vibe_coding; never printed).
+# muse: the 2026-11-15 rotated key in "Meta ai Muse Spark API Key" was restricted
+# by the provider on 2026-11-16 (HTTP 403); the working key lives in the item
+# "Meta ai Muse Spark API Key tied to hello@popcre.com" (field "credential",
+# live-proofed 200 on 2026-11-16). Address it by item id: the title has spaces.
 OP_REFS = {
-    "muse": "op://vibe_coding/Meta ai Muse Spark API Key/api key",
+    "muse": "op://vibe_coding/6e6ojstxgxu3ol4z2mgxphnjb4/credential",
     "stepfun": os.environ.get("AI_STEPFUN_OP_REF") or "op://vibe_coding/stepfun step5 ai api key/credential",
 }
 
