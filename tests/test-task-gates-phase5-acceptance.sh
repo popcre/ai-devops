@@ -41,12 +41,13 @@ explain() { (cd "$1" && printf '%s\n' "$2" | "$GATE" explain --json --paths-from
 
 printf 'Phase 5 controlled scenarios\n'
 
-# 1. Documentation-only cleanup refuses both paid review and a long PR wait.
+# 1. Documentation-only cleanup refuses paid review but waits like any other
+# pull request (#2489): the merge queue lands prose when green.
 new_repo "$TMP/docs" popcre/ai-devops
 start "$TMP/docs" prose
 printf 'note\n' > "$TMP/docs/notes.md"
 check 'documentation-only cleanup refuses paid review before launch' "rc '$TMP/docs' 3 check --before review"
-check 'documentation-only cleanup refuses long wait before launch' "rc '$TMP/docs' 3 check --before pr-wait"
+check 'documentation-only cleanup allows the ordinary PR wait (#2489)' "rc '$TMP/docs' 0 check --before pr-wait"
 check 'documentation-only cleanup retains immediate shipping' "rc '$TMP/docs' 0 check --before ship"
 
 # 2. A prose claim drifting into code is stopped before shipping.
