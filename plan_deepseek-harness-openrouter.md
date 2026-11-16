@@ -9,11 +9,11 @@ read-when: changing DeepSeek, Muse, or Hy4 review routes, credential fallback, o
 
 Keep GitHub reviews and second opinions available even when Meta direct loses access. Give both entry points the same reviewer choices, preserve ongoing discussions, and make every review read-only. Confirm that GitHub publishes each reviewer’s verdict before a route becomes active. If a step conflicts with this goal, the goal wins — stop and flag it.
 
-Tracking: [#2531](https://github.com/popcre/ai-devops/issues/2531). Start with the [current handoff](HANDOFF.d/2026-11-16T2118Z-edge-dev3-codex-reviewer-route-build.md). The [original DeepSeek handoff](HANDOFF.d/2026-11-16T1837Z-edge-dev3-codex-deepseek-harness-openrouter.md) records the initial scope.
+Tracking: [parent #2531](https://github.com/popcre/ai-devops/issues/2531), [DeepSeek #2549](https://github.com/popcre/ai-devops/issues/2549), [OpenCode #2550](https://github.com/popcre/ai-devops/issues/2550), [caching #2551](https://github.com/popcre/ai-devops/issues/2551). Start with the [current handoff](HANDOFF.d/2026-11-16T2207Z-edge-dev3-codex-reviewer-rollout-closeout.md). The [previous handoff](HANDOFF.d/2026-11-16T2118Z-edge-dev3-codex-reviewer-route-build.md) records the earlier implementation planning.
 
 ## STATUS — start here
 
-Use current upstream. Planning baseline: `ec4886f57232a1bb2741b7cf66d5fa1a949a1def`. The combined implementation starts at step 1. Runtime tests used disposable setups and the regular workflow on a test branch. No candidate route shipped or became a default.
+Use current upstream. Planning baseline: `ec4886f57232a1bb2741b7cf66d5fa1a949a1def`. The combined implementation starts at step 1. Steps 1–4 track on #2549 and #2550, Phase C on #2551. Integrated acceptance and the no-switch hold remain on #2531. Runtime tests used disposable setups and the regular workflow on a test branch. No candidate route shipped or became a default.
 
 | Step | Status, 2026-11-16 | Evidence or next gate |
 |---|---|---|
