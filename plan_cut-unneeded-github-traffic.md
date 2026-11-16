@@ -37,6 +37,15 @@ superseded by this audit. Current source checks passed: the managed GitHub
 transport guard and all 15 request-counter tests. These checks establish
 neither savings nor live programme completion.
 
+The [November 1 closeout](https://github.com/popcre/ai-devops/blob/011493c5bdf3f57fd3123c576440c82fd2f5fd40/HANDOFF.d/2026-11-01T0234Z-edge-dev3-codex-session-closeout.md)
+records the scoped queue and cached-waiter delivery. The remaining active-copy
+inventory, comparable workload and live acceptance obligations stay in the
+table above and the parent plan. The separate closeout-checker admission timeout
+was addressed by [#2305](https://github.com/popcre/ai-devops/pull/2305) and
+[#2440](https://github.com/popcre/ai-devops/pull/2440). The housekeeping probe
+was rerun with GitHub evidence, and the first two pilot handoff retirements
+landed in [#2539](https://github.com/popcre/ai-devops/pull/2539).
+
 ### Historical status snapshots
 
 October 21, 2026, 2:12 PM EDT: current Codex session on edge-dev3 owns resumed

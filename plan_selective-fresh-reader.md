@@ -20,7 +20,7 @@ Coordination parent: [#2227](https://github.com/popcre/ai-devops/issues/2227)
 Planning date: October 31, 2026 (America/New_York).
 Source baseline: `7e591363634be65a6b99d7e60443afc6f1091716` in
 [popcre/ai-devops](https://github.com/popcre/ai-devops).
-Handoff: [session continuation](HANDOFF.d/2026-11-01T0016Z-edge-dev3-codex-selective-fresh-reader.md).
+Historical [planning handoff](https://github.com/popcre/ai-devops/blob/02762462dc573e9da5ad51a877db61d063380ec4/HANDOFF.d/2026-11-01T0016Z-edge-dev3-codex-selective-fresh-reader.md).
 
 ## STATUS — read first; do not re-derive or re-plan
 
