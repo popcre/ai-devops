@@ -97,6 +97,7 @@ routed straight to Z.ai.
 | TLS material | `/etc/ai-zcode-headroom/tls/` (`ca.crt`, `server.key`, `server-chain.crt`) |
 | Chain served | `server-chain.crt` = leaf + CA |
 | Compression lane | `headroom-zcode.service` → `$HEADROOM_HOST:8788`, isolated `HOME=/home/ai/.headroom-zcode-home` |
+| Lossless no-tool mode | drop-in `HEADROOM_LOSSLESS=1` in `/etc/systemd/system/headroom-zcode.service.d/lossless.conf` (since 2026-11-16, §5.4) |
 | Upstream | `--anthropic-api-url https://api.z.ai/api/anthropic` |
 | Z-code config | `~/.zcode/v2/provider_config.json` → `baseUrl: https://$HEADROOM_HOST:8443/v1` |
 | CA bundle on Windows | `C:\Users\<user>\.config\ai-devops\zcode-ca-bundle.crt` (**combined** — see §3.2) |
@@ -285,6 +286,41 @@ Measured savings on the Claude lane in `cache` mode are ~2% (see
 [`headroom.md`](headroom.md)). The standing rule remains: if it is not clearly
 worth it, pull it. The Z-code lane should be judged the same way after real
 sessions (`/home/ai/.headroom-zcode-home/.headroom/proxy_savings.json`).
+
+### 5.4 2026-11-16 — subagents reject `headroom_retrieve` (fixed with lossless mode)
+
+Z-code Desktop 3.18.2 (installed 2026-11-12) dispatches the proxy-injected
+`headroom_retrieve` tool on **main-thread** turns but rejects it in
+**subagent** contexts: `~/.zcode/cli/log/zcode-*.jsonl` shows
+`event=tool.call.not_found`, `querySource=subagent`,
+`toolName=headroom_retrieve`, surfaced to the owner as the error card
+`Tool not found: headroom_retrieve`. Occurrences: three on 2026-11-12, one on
+2026-11-15, one on 2026-11-16 (UTC). The lane itself stayed healthy and
+main-thread retrieval round-trips kept working throughout.
+
+Vendor bytes cannot be patched (§3.6), so the fix is proxy-side:
+`headroom proxy --lossless` — marker-free lossless compression with **no CCR
+retrieval markers and no injected tool** (Headroom's own recommendation for
+clients that cannot resolve an injected tool; `--no-ccr` would sacrifice the
+recovery path for maximum savings).
+
+Applied 2026-11-16 ~5:15 PM EST on hetz:
+
+```bash
+sudo mkdir -p /etc/systemd/system/headroom-zcode.service.d
+printf '[Service]\nEnvironment=HEADROOM_LOSSLESS=1\n' | \
+  sudo tee /etc/systemd/system/headroom-zcode.service.d/lossless.conf
+sudo systemctl daemon-reload && sudo systemctl restart headroom-zcode.service
+```
+
+Verified: both services active, `/health` healthy, and a live desktop turn
+completed through the lane after the restart. **Savings watchpoint:** with CCR
+the lane had saved 3.1% of input on GLM-5.3 (277.5M of 8.98B tokens across
+50,195 requests, ledger read 2026-11-16). Re-check `proxy_savings.json` after
+a week of lossless mode; if savings collapse, revisit `HEADROOM_NO_CCR`
+(lossy, maximum savings) under the §5.3 standing rule. Do not remove the
+drop-in to chase retrieval back — with lossless mode no context ever receives
+a marker, so nothing needs retrieving.
 
 ---
 
