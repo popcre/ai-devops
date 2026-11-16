@@ -775,7 +775,7 @@ if [ "$count" -gt 3 ]; then
   printf '%s\n' '{"data":{"repository":{"pullRequest":{"state":"MERGED","headRefOid":"h1","isInMergeQueue":false,"mergeCommit":{"oid":"landed"}}}}}'
   exit 0
 fi
-printf '%s\n' '{"data":{"repository":{"pullRequest":{"state":"OPEN","headRefOid":"h1",isInMergeQueue":true,"mergeCommit":null,commits:{nodes:[{commit:{oid:"h1",statusCheckRollup:{state:"SUCCESS",contexts:{totalCount:0,pageInfo:{hasPreviousPage:false},nodes:[]}}}}]}}}}}'
+printf '%s\n' '{"data":{"repository":{"pullRequest":{"state":"OPEN","headRefOid":"h1","isInMergeQueue":true,"mergeCommit":null,"commits":{"nodes":[{"commit":{"oid":"h1","statusCheckRollup":{"state":"SUCCESS","contexts":{"totalCount":0,"pageInfo":{"hasPreviousPage":false},"nodes":[]}}}}]}}}}}'
 EOF
 chmod +x "$TMP/bin/gh"
 rm -f "$TMP/qstall-called" "$TMP/qstall-clock"
@@ -800,7 +800,7 @@ case "$*" in
 esac
 [[ "$*" == *'isRequired(pullRequestNumber:1)'* && "$*" == *'commit{oid '* ]] || exit 9
 printf '%s
-' '{"data":{"repository":{"pullRequest":{"state":"OPEN","headRefOid":"h1",isInMergeQueue":true,"mergeCommit":null,commits:{nodes:[{commit:{oid:"h1",statusCheckRollup:{state:"SUCCESS",contexts:{totalCount:0,pageInfo:{hasPreviousPage:false},nodes:[]}}}}]}}}}}'
+' '{"data":{"repository":{"pullRequest":{"state":"OPEN","headRefOid":"h1","isInMergeQueue":true,"mergeCommit":null,"commits":{"nodes":[{"commit":{"oid":"h1","statusCheckRollup":{"state":"SUCCESS","contexts":{"totalCount":0,"pageInfo":{"hasPreviousPage":false},"nodes":[]}}}}]}}}}}'
 EOF
 chmod +x "$TMP/bin/gh"
 cat > "$TMP/bin/date" <<'EOF'
