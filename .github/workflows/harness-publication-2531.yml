@@ -26,10 +26,14 @@ jobs:
           sha=$(jq -r .head "$receipt")
           remote=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$pr")
           jq -e --arg sha "$sha" '.draft and .state == "open" and .head.sha == $sha' <<<"$remote" >/dev/null
-          python3 bin/ai-review-simple --combine "$receipt" --head "$sha" --comment-out comment.md > summary.json
-          jq -e '.state=="findings" and .reviewer=="deepseek" and .rows[0].verdict=="REVISE"' summary.json >/dev/null
-          sed -i '/A `review-finding` issue tracks them/d' comment.md
-          printf '\nDisposable test. No finding ticket is created.\n' >> comment.md
-          jq -n --arg sha "$sha" --rawfile body comment.md '{name:"ai-review (qualification)",head_sha:$sha,status:"completed",conclusion:"neutral",output:{title:"ai-review: findings (deepseek)",summary:$body}}' |
-            gh api "repos/$GITHUB_REPOSITORY/check-runs" --input - --jq '.html_url'
-          gh pr comment "$pr" --repo "$GITHUB_REPOSITORY" --body-file comment.md
+          for reviewer in deepseek muse; do
+            receipt="tests/fixtures/harness-publication/$reviewer.json"
+            python3 bin/ai-review-simple --combine "$receipt" --head "$sha" --comment-out comment.md > summary.json
+            jq -e --arg reviewer "$reviewer" '.state=="findings" and .reviewer==$reviewer' summary.json >/dev/null
+            grep -F "| $reviewer | REVISE |" comment.md >/dev/null
+            sed -i '/A `review-finding` issue tracks them/d' comment.md
+            printf '\nDisposable test. No finding ticket is created.\n' >> comment.md
+            jq -n --arg sha "$sha" --arg reviewer "$reviewer" --rawfile body comment.md '{name:("ai-review (qualification: "+$reviewer+")"),head_sha:$sha,status:"completed",conclusion:"neutral",output:{title:("ai-review: findings ("+$reviewer+")"),summary:$body}}' |
+              gh api "repos/$GITHUB_REPOSITORY/check-runs" --input - --jq '.html_url'
+            gh pr comment "$pr" --repo "$GITHUB_REPOSITORY" --body-file comment.md
+          done

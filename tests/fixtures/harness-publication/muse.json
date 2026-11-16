@@ -1,0 +1,8 @@
+{
+  "provider": "muse",
+  "head": "842824f059f0c81aa3d326a9aa77d3cc873a0131",
+  "verdict": "REVISE",
+  "findings": "Intake reference: FULFILLMENT-6dd30b971e\nFINDING: billing.py total includes inactive lines, e.g. active 10.00 + inactive 10.00 with rate 0 returns 20.00 should return 10.00\nFINDING: reservations.py reserve rejects exact stock, e.g. stock {\"A\":5}, reserve(stock,\"A\",5) returns False should return True\nFINDING: dispatch.py ready excludes due exactly now, e.g. ready([{\"id\":\"a\",\"status\":\"queued\",\"due\":10}], 10) returns [] should return [\"a\"]\nFINDING: allocations.py available subtracts other warehouses, e.g. stock {(1,\"A\"):10}, pending [{\"sku\":\"A\",\"warehouse\":2,\"qty\":10}] for warehouse 1 returns 0 should return 10\nFINDING: refunds.py refundable deducts pending instead of settled, e.g. captured 100 with settled 30 + pending 10 returns 90 should return 70\nFINDING: paging.py page drops same-sequence ids after cursor, e.g. rows [(1,\"a\"),(1,\"b\")], after=(1,\"a\") returns [] should return [(1,\"b\")]\nFINDING: retries.py next_delay doubles first retry, e.g. next_delay(1) with base=2 returns 4 should return 2\nFINDING: export.py snapshot keeps last input not max sequence, e.g. [{\"sku\":\"A\",\"sequence\":2},{\"sku\":\"A\",\"sequence\":1}] keeps sequence 1 should keep sequence 2\nVERDICT: REVISE",
+  "elapsed": 50.25,
+  "error": null
+}
