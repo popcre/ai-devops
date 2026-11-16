@@ -7,6 +7,11 @@
 #     machine-wide ai-gh admission throttle; the default tolerates that while
 #     still bounding the run. On deadline the tool emits the standard failure
 #     JSON ("deadline exceeded while waiting for ai-gh admission") and exits 2.
+#   AI_SHARED_DB_CLOSEOUT_LATCH_DIR  directory holding the machine-wide
+#     single-run latch (default ~/.ai-devops/shared-db-closeout). At most one
+#     check run at a time per machine: competing runs wait for the latch
+#     instead of stacking into the ai-gh admission queue, where concurrent
+#     retries starve each other past the 600s per-call cap (issue #2540).
 #
 # Progress lines go to stderr (one per ai-gh call, with the admission wait
 # included in the elapsed time); stdout stays exactly one line of
@@ -44,6 +49,17 @@ AI_SHARED_DB_CLOSEOUT_BASH="$BASH_BIN"
 AI_SHARED_DB_CLOSEOUT_GH_SCRIPT="$GH_SCRIPT"
 export AI_SHARED_DB_CLOSEOUT_BASH AI_SHARED_DB_CLOSEOUT_GH_SCRIPT
 
+# Machine-wide single-run latch directory (issue #2540). Respect a caller's
+# override (tests isolate themselves); otherwise derive from $HOME here, where
+# MSYS paths already work, and hand Python a native form.
+if [ -z "${AI_SHARED_DB_CLOSEOUT_LATCH_DIR:-}" ]; then
+  AI_SHARED_DB_CLOSEOUT_LATCH_DIR="$HOME/.ai-devops/shared-db-closeout"
+  if command -v cygpath >/dev/null 2>&1; then
+    AI_SHARED_DB_CLOSEOUT_LATCH_DIR="$(cygpath -m "$AI_SHARED_DB_CLOSEOUT_LATCH_DIR")" || exit 2
+  fi
+fi
+export AI_SHARED_DB_CLOSEOUT_LATCH_DIR
+
 "$PYTHON_BIN" - "$@" <<'PY'
 import argparse
 import json
@@ -59,6 +75,8 @@ PROGRESS_PREFIX = "ai-shared-db-closeout-check:"
 DEADLINE_ENV = "AI_SHARED_DB_CLOSEOUT_DEADLINE_SECONDS"
 DEFAULT_DEADLINE_SECONDS = 3600.0
 GH_CALL_TIMEOUT_SECONDS = 600
+LATCH_ENV = "AI_SHARED_DB_CLOSEOUT_LATCH_DIR"
+LATCH_POLL_SECONDS = 2.0
 RUN_STARTED = time.monotonic()
 DEADLINE_SECONDS = None
 GH_CALL_SERIAL = 0
@@ -153,6 +171,81 @@ def deadline_remaining():
     if DEADLINE_SECONDS is None:
         return None
     return DEADLINE_SECONDS - (time.monotonic() - RUN_STARTED)
+
+
+def latch_path():
+    root = os.environ.get(LATCH_ENV)
+    if not root:
+        root = os.path.join(os.path.expanduser("~"), ".ai-devops", "shared-db-closeout")
+    return os.path.join(root, "run.lock")
+
+
+def _try_lock(handle):
+    try:
+        if os.name == "nt":
+            import msvcrt
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return True
+    except OSError:
+        return False
+
+
+def acquire_latch():
+    """Machine-wide single-run latch (issue #2540).
+
+    Only one check run at a time per machine: competing runs wait here instead
+    of stacking into the ai-gh admission queue, where parallel retries starve
+    each other past the 600s per-call cap. The lock is OS-level (flock/msvcrt),
+    so a killed process releases it. Additive serialization only: it never
+    touches the evidence gate, its timeouts, or its admission path."""
+    path = latch_path()
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        handle = open(path, "a+")
+    except OSError as exc:
+        raise CheckError("cannot create the closeout latch file") from exc
+    started = time.monotonic()
+    waiting = False
+    while True:
+        if _try_lock(handle):
+            if waiting:
+                progress(f"machine-wide closeout latch acquired after {time.monotonic() - started:.1f}s")
+            try:
+                os.truncate(handle.fileno(), 0)
+                handle.write(json.dumps({"pid": os.getpid(), "started_at": time.time()}))
+                handle.flush()
+            except OSError:
+                pass
+            return handle
+        remaining = deadline_remaining()
+        if remaining is not None and remaining <= 0:
+            handle.close()
+            raise CheckError("deadline exceeded while waiting for the machine-wide closeout latch")
+        if not waiting:
+            waiting = True
+            progress("waiting for the machine-wide single-run closeout latch (another run holds it)")
+        time.sleep(LATCH_POLL_SECONDS)
+
+
+def release_latch(handle):
+    try:
+        if os.name == "nt":
+            import msvcrt
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+    except OSError:
+        pass
+    try:
+        handle.close()
+    except OSError:
+        pass
 
 
 def describe_gh_args(args):
@@ -435,43 +528,47 @@ def main():
     progress(f"session {session} resolved; deadline {int(DEADLINE_SECONDS)}s total wall clock")
 
     try:
-        auth = gh_call(["auth", "status", "--hostname", "github.com"])
-        if auth.returncode != 0:
-            raise CheckError("GitHub authentication is unavailable")
-        claims, issue_count = open_claim_pages()
-        matching_claims = []
-        for item in claims:
-            try:
-                owner = parse_claim_owner(item["body"], session)
-            except CheckError:
-                # A claim whose owner cannot be read (legacy no-lease claims
-                # with an unreadable signature, ambiguous or doubled leases)
-                # must not fail closed for unrelated sessions. It stays
-                # fail-closed for a session whose identity the claim carries;
-                # with no implicated identity there is no owner to block.
-                if text_has_session_identity(item["body"], session):
-                    raise CheckError(
-                        f"claim #{item['number']} carries this session identity without a readable owner")
-                continue
-            if owner_session(owner, session) == session:
-                matching_claims.append({"issue": item["number"]})
-        stages = []
-        for stage, kinds in STAGES.items():
-            holder = read_stage(stage, kinds)
-            if holder is not None and (owner_session(holder["holder_id"], session) == session
-                                       or owner_session(holder["owner"], session) == session):
-                stages.append({"stage": stage})
-        summary = {
-            "ok": not matching_claims and not stages,
-            "session_id": session,
-            "open_claims_checked": len(claims),
-            "open_issues_seen": issue_count,
-            "stages_checked": len(STAGES),
-            "blocking_claims": matching_claims,
-            "blocking_stages": stages,
-        }
-        json_output(summary)
-        return 0 if summary["ok"] else 1
+        latch = acquire_latch()
+        try:
+            auth = gh_call(["auth", "status", "--hostname", "github.com"])
+            if auth.returncode != 0:
+                raise CheckError("GitHub authentication is unavailable")
+            claims, issue_count = open_claim_pages()
+            matching_claims = []
+            for item in claims:
+                try:
+                    owner = parse_claim_owner(item["body"], session)
+                except CheckError:
+                    # A claim whose owner cannot be read (legacy no-lease claims
+                    # with an unreadable signature, ambiguous or doubled leases)
+                    # must not fail closed for unrelated sessions. It stays
+                    # fail-closed for a session whose identity the claim carries;
+                    # with no implicated identity there is no owner to block.
+                    if text_has_session_identity(item["body"], session):
+                        raise CheckError(
+                            f"claim #{item['number']} carries this session identity without a readable owner")
+                    continue
+                if owner_session(owner, session) == session:
+                    matching_claims.append({"issue": item["number"]})
+            stages = []
+            for stage, kinds in STAGES.items():
+                holder = read_stage(stage, kinds)
+                if holder is not None and (owner_session(holder["holder_id"], session) == session
+                                           or owner_session(holder["owner"], session) == session):
+                    stages.append({"stage": stage})
+            summary = {
+                "ok": not matching_claims and not stages,
+                "session_id": session,
+                "open_claims_checked": len(claims),
+                "open_issues_seen": issue_count,
+                "stages_checked": len(STAGES),
+                "blocking_claims": matching_claims,
+                "blocking_stages": stages,
+            }
+            json_output(summary)
+            return 0 if summary["ok"] else 1
+        finally:
+            release_latch(latch)
     except CheckError as exc:
         json_output({"ok": False, "session_id": session, "error": str(exc),
                      "blocking_claims": [], "blocking_stages": []})

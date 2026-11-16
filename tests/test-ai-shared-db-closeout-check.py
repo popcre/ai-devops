@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -24,6 +25,35 @@ FOREIGN_MIMO = "ses_aaaaaaaaaaaaaaaaBBBBBBBBBB"
 # The checker's resolve_session() reads exactly these. A live AI session exports
 # its own, which must not leak into the fixture's child environment.
 CHECKER_IDENTITY_VARIABLES = ("CODEX_THREAD_ID", "CLAUDE_CODE_SESSION_ID", "MIMO_SESSION_ID")
+
+
+def lock_latch_file(handle):
+    """Hold the machine-wide closeout latch the way the checker does (issue #2540)."""
+    if os.name == "nt":
+        import msvcrt
+        handle.seek(0)
+        msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+    else:
+        import fcntl
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+
+def unlock_latch_file(handle):
+    try:
+        if os.name == "nt":
+            import msvcrt
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+    except (OSError, ValueError):
+        pass
+    finally:
+        try:
+            handle.close()
+        except OSError:
+            pass
 
 
 def issue(number, owner, state="active", expires="2026-10-14T00:00:00Z", suffix=""):
@@ -72,7 +102,8 @@ class CloseoutCheck(unittest.TestCase):
         noise = io.StringIO()
         with patch.dict(os.environ, {"CODEX_THREAD_ID": SESSION,
                                     "AI_SHARED_DB_CLOSEOUT_BASH": "bash",
-                                    "AI_SHARED_DB_CLOSEOUT_GH_SCRIPT": "ai-gh"}, clear=True), \
+                                    "AI_SHARED_DB_CLOSEOUT_GH_SCRIPT": "ai-gh",
+                                    "AI_SHARED_DB_CLOSEOUT_LATCH_DIR": str(self.root / "latch")}, clear=True), \
                 patch.object(sys, "argv", [str(CHECKER)]), \
                 patch("subprocess.run", side_effect=subprocess.TimeoutExpired("ai-gh", 600)), \
                 contextlib.redirect_stdout(output), contextlib.redirect_stderr(noise):
@@ -160,6 +191,7 @@ exit 127
             "FAKE_GH_DATA": str(self.data),
             "FAKE_GH_IMPL": str(gh_impl),
             "CODEX_THREAD_ID": SESSION,
+            "AI_SHARED_DB_CLOSEOUT_LATCH_DIR": str(self.root / "latch"),
         })
         self.write_data({"open_pages": [[nonclaim_issue(900)]], "search": {"total_count": 0, "incomplete_results": False, "items": []},
                          "stages": {}, "messages": {}})
@@ -777,6 +809,54 @@ exit 127
         result = self.run_check()
         self.assertEqual(result.returncode, 2)
         self.assertIn("canonical lease format", self.summary(result)["error"])
+
+    def test_latch_held_elsewhere_fails_closed_before_any_github_call(self):
+        latch_dir = self.root / "latch"
+        latch_dir.mkdir(parents=True, exist_ok=True)
+        handle = open(latch_dir / "run.lock", "a+")
+        lock_latch_file(handle)
+        self.addCleanup(lambda: unlock_latch_file(handle))
+        env = self.env.copy()
+        env["AI_SHARED_DB_CLOSEOUT_DEADLINE_SECONDS"] = "3"
+        result = self.run_check(env=env)
+        self.assertEqual(result.returncode, 2, result.stderr)
+        summary = self.summary(result)
+        self.assertFalse(summary["ok"])
+        self.assertIn("latch", summary["error"])
+        self.assertEqual(self.calls_made(), [])
+
+    def test_latch_is_released_after_a_run(self):
+        self.write_data({"open_pages": [[nonclaim_issue(900)]], "stages": {}, "messages": {}})
+        result = self.run_check()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(self.summary(result)["ok"])
+        latch_dir = self.root / "latch"
+        latch_dir.mkdir(parents=True, exist_ok=True)
+        handle = open(latch_dir / "run.lock", "a+")
+        lock_latch_file(handle)
+        unlock_latch_file(handle)
+
+    def test_second_run_waits_for_latch_then_completes(self):
+        self.write_data({"open_pages": [[nonclaim_issue(900)]], "stages": {}, "messages": {}})
+        latch_dir = self.root / "latch"
+        latch_dir.mkdir(parents=True, exist_ok=True)
+        handle = open(latch_dir / "run.lock", "a+")
+        lock_latch_file(handle)
+        self.addCleanup(lambda: unlock_latch_file(handle))
+        env = self.env.copy()
+        env["AI_SHARED_DB_CLOSEOUT_DEADLINE_SECONDS"] = "60"
+        proc = subprocess.Popen([str(self.bash), str(self.checker)],
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
+        try:
+            time.sleep(1.5)
+            self.assertEqual(self.calls_made(), [], "run must wait on the latch before any GitHub call")
+        finally:
+            unlock_latch_file(handle)
+        stdout, stderr = proc.communicate(timeout=60)
+        self.assertEqual(proc.returncode, 0, stderr)
+        self.assertTrue(json.loads(stdout)["ok"])
+        self.assertGreaterEqual(len(self.calls_made()), 1)
+        self.assertIn("latch", stderr)
 
 
 if __name__ == "__main__":
