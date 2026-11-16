@@ -1,27 +1,27 @@
 ---
-summary: Qualify a shared DeepSeek Harness runner through OpenRouter for automatic reviews and resumable second opinions
+summary: Implement and qualify DeepSeek, Muse, and Hy4 routes for GitHub reviews and resumable second opinions
 kind: plan
 status: open
-read-when: changing either DeepSeek review path or testing the OpenRouter cutover
+read-when: changing DeepSeek, Muse, or Hy4 review routes, credential fallback, or reviewer cutover
 ---
 
-# DeepSeek Harness through OpenRouter
+# DeepSeek, Muse and Hy4 reviewer implementation
 
-Keep automatic DeepSeek reviews and on-demand second opinions working through one review engine. Prove that GitHub receives a verdict, follow-ups remember the prior discussion, and neither path can change reviewed files before switching either path. If a step conflicts with this goal, the goal wins — stop and flag it.
+Keep GitHub reviews and second opinions available even when Meta direct loses access. Give both entry points the same reviewer choices, preserve ongoing discussions, and make every review read-only. Confirm that GitHub publishes each reviewer’s verdict before a route becomes active. If a step conflicts with this goal, the goal wins — stop and flag it.
 
-Tracking: [#2531](https://github.com/popcre/ai-devops/issues/2531). Continuation: [handoff](HANDOFF.d/2026-11-16T1837Z-edge-dev3-codex-deepseek-harness-openrouter.md).
+Tracking: [#2531](https://github.com/popcre/ai-devops/issues/2531). Start with the [current handoff](HANDOFF.d/2026-11-16T2118Z-edge-dev3-codex-reviewer-route-build.md). The [original DeepSeek handoff](HANDOFF.d/2026-11-16T1837Z-edge-dev3-codex-deepseek-harness-openrouter.md) records the initial scope.
 
-## STATUS
+## STATUS — start here
 
-Start at step 1 from current upstream. Planning baseline: `bc7a42c027fb6eadd0d7fa6c42b2213a0ca438c1`. Isolated qualification has run. The candidate wiring and cutover remain open.
+Use current upstream. Planning baseline: `ec4886f57232a1bb2741b7cf66d5fa1a949a1def`. The combined implementation starts at step 1. Runtime tests used disposable setups and the regular workflow on a test branch. No candidate route shipped or became a default.
 
-| Step | Status, 2026-11-16 | Evidence |
+| Step | Status, 2026-11-16 | Evidence or next gate |
 |---|---|---|
-| 1. Pin and qualify the runner | Partial | [Ubuntu and Windows benchmark](https://github.com/popcre/ai-devops/issues/2531#issuecomment-6927912521) |
-| 2. Connect both callers with defaults preserved | Open | — |
-| 3. Prove the candidate in isolation | Partial | [Native TypeScript verdicts in the disposable workflow](https://github.com/popcre/ai-devops/pull/2538#issuecomment-6928212224) |
-| 4. Switch, verify, and retain rollback | On hold | Existing default routing stays enabled while candidate wiring is qualified. |
-| 5. Qualify Muse and Hy4 routes in shared OpenCode | Open | [Routing choices and acceptance tests below](#muse-and-hy4-routing) |
+| 1. Shared route definitions and protected runtime profiles | Open | [Isolated Ubuntu and Windows benchmark](https://github.com/popcre/ai-devops/issues/2531#issuecomment-6927912521) informs pins and controls. |
+| 2. Wire GitHub review and fallback | Partial proof | [DeepSeek and Muse native verdicts on a disposable TypeScript PR](https://github.com/popcre/ai-devops/pull/2538#issuecomment-6928212224). Candidate product wiring and final route proofs remain open. |
+| 3. Wire resumable second opinions | Partial proof | [Read-only native session restart evidence](https://github.com/popcre/ai-devops/issues/2531#issuecomment-6927912521). Cross-route Muse continuation remains open. |
+| 4. Qualify the exact integrated candidate | Open | Run the route, platform and failure matrix in §10. |
+| 5. Enable, verify and retain rollback | On hold | Keep existing defaults during qualification. Follow §13 for the eventual cutover. |
 
 ## 1. Goal
 
@@ -33,50 +33,63 @@ Share execution and safety controls while preserving the two ways people request
 
 ## 3. Trigger
 
-Albert asked to route both review paths through the official DeepSeek Harness via OpenRouter after extensive testing. This is a consolidation request. The planning session established the two entry points from source and did not reproduce an outage.
+Albert selected one DeepSeek Harness route and three OpenCode routes for automatic GitHub review and on-demand second opinions. Intermittent loss of Meta direct access makes a separate Muse connection valuable. Simulate Meta authentication denial in a disposable fixture, then prove Muse can continue through OpenRouter using the same model. The exact vendor reason behind prior denials is outside this investigation.
 
 ## 4. Scope
 
-Included: shared execution adapter, OpenRouter credential and model configuration, both callers, platform qualification, cutover and rollback. Excluded: DeepSeek implementation delegation, other reviewers, changing advisory policy, rewriting stored conversations, and publishing private review content.
+Include shared route and credential selection, both callers, read-only isolation, GitHub publishing, persistent second opinions, fallback, platform qualification and rollback. Hy4 is available for second opinions and used as a GitHub fallback. Exclude changes to advisory merge policy, GLM and StepFun behavior, writable DeepSeek delegation and existing writable Muse commands, migration of stored conversations, provider policy bypasses, and a default switch during this planning or qualification work.
 
 ## 5. Current code
 
-- [GitHub workflow](.github/workflows/ai-review.yml) lines 91–107 calls `ai-review-simple`, tries the rotation and advances when a reviewer is unavailable. [Driver](bin/ai-review-simple) lines 49–61 configures DeepSeek direct. `make_workspace`, `run_once`, `review` and `combine` split isolation, execution and publication.
-- [On-demand wrapper](bin/ai-deepseek-agent) lines 74–76 pins the direct endpoint. `send`, `reply`, `doctor` and `finalize` preserve scope, continuation and recovery. [Repository tools](tools/deepseek_repo_tools.py) govern read access. [Second-opinion skill](skills/shared/deepseek-second-opinion/SKILL.md) describes the public entry point.
-- [Implementation delegation](bin/ai-deepseek) uses its own OpenCode profile. Its writable capability stays outside this project. No runtime or installation changes were made during planning.
+At the planning baseline, [`bin/ai-review-simple`](bin/ai-review-simple) lines 35–61 declares single-route Muse and DeepSeek provider specs. `read_key`, `make_workspace`, `run_once`, `review`, `rotation` and `combine` own credential lookup, OpenCode, one advisory verdict and the existing result shape. [`.github/workflows/ai-review.yml`](.github/workflows/ai-review.yml) lines 91–139 invokes the rotation and posts an exact-head check and comment. The normal workflow uses the trusted toolkit ref for execution.
+
+[`bin/ai-second-opinion`](bin/ai-second-opinion) imports the provider specs from the review driver. Its `start`, `write_config`, `run_opencode`, `load_meta`, `save_meta` and `parse` own workspace copy, session continuation and provider selection. [`bin/ai-muse`](bin/ai-muse) wraps it and must keep existing command forms. The Windows launchers follow the existing `.cmd` pattern.
+
+[`bin/ai-deepseek-agent`](bin/ai-deepseek-agent) lines 74–76 pins the direct endpoint. `send`, `reply`, `doctor` and `finalize` preserve scope, continuation and recovery. [`tools/deepseek_repo_tools.py`](tools/deepseek_repo_tools.py) owns legacy read access. [`bin/ai-deepseek`](bin/ai-deepseek) is writable delegation and remains outside this work.
+
+The routing decision landed in #2545. Native benchmark launches and GitHub proof lived in disposable environments. No integrated reviewer code from those tests is deployed.
 
 ## 6. Findings
 
-The automatic driver creates a fresh remote-less checkout and isolated runtime home. The on-demand wrapper persists conversation and checks source identity when resuming. These are different lifecycle requirements with a shareable execution layer. DeepSeek documents [one-shot runs, JSON events and session resume](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/cli-help.md) and [custom provider configuration](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/user/guide/providers.md). [OpenRouter lists the Flash snapshot](https://openrouter.ai/deepseek). Documentation supports feasibility. Platform isolation, tool calls, provider routing and session recovery need live qualification.
+- [Ubuntu and edge-dev results](https://github.com/popcre/ai-devops/issues/2531#issuecomment-6927912521) prove read-only native launches, two fresh-process resumes, and speed and quality comparisons. DeepSeek Harness was faster with a common upstream, with extra false findings. Hy4 caught all 27 seeded defect instances across five runs with zero false findings. Its median on the eight-defect patch was 88.9 seconds, and it has yet to be scored on real TypeScript PRs.
+- [Regular-workflow test](https://github.com/popcre/ai-devops/actions/runs/43948851731) ran native DeepSeek and native Muse live against a disposable TypeScript PR and [published both verdicts](https://github.com/popcre/ai-devops/pull/2538#issuecomment-6928212224). The tested Muse runtime there was Muse Code, so that run does not qualify either selected OpenCode Muse route.
+- [OpenCode connection smoke test](https://github.com/popcre/ai-devops/issues/2531#issuecomment-6927103076) passed for a custom OpenAI-compatible OpenRouter connection across all three tested models. The built-in OpenRouter connection failed for Muse and DeepSeek at the tested OpenCode version.
+- [Muse cache benchmark](https://github.com/popcre/ai-devops/issues/2531#issuecomment-6928592964) measured roughly 9% model-request cost reduction and no overall speedup with a stable prefix and cache key across changing TypeScript PRs. Leave cache changes outside the initial cutover so unresolved caching behavior cannot confound route proof.
+- [DeepSeek Harness headless execution and resume](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/cli-help.md) and [custom provider setup](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/user/guide/providers.md) cover the native candidate. The reviewer credential's tests observed OpenRouter routing guardrails. Preserve them.
 
 ## 7. Approaches ruled out
 
-A URL swap in the on-demand wrapper hits its endpoint pin and leaves two engines. Replacing the entire GitHub workflow would discard tested advisory rotation and publication. Turning on the new runtime first would make real reviews the test surface. Importing legacy sessions into DeepSeek Harness would introduce a format migration without a demonstrated need. No live migration attempt was made.
+Replacing the whole GitHub workflow would discard known advisory behavior and publication. A DeepSeek URL override would hit the legacy endpoint pin and retain a separate execution engine. OpenCode’s built-in OpenRouter connection failed the earlier live smoke and is excluded from the initial candidate. Muse Code added latency without a demonstrated comparison advantage and is outside the selected routing plan. Silent model substitution would confuse the person asking for a second opinion. Bulk conversion of legacy sessions adds risk without a requirement. Existing sessions retain their original runtime.
 
 ## 8. Decisions
 
-Locked on 2026-11-16: one shared DeepSeek Harness adapter, OpenRouter for both candidate paths, fresh GitHub sessions, resumable on-demand sessions, read-only repository access and existing advisory publishing. Existing sessions continue through their original engine. Default routing changes only after step 3. Open: exact pinned harness release and dated Flash model, selected by live compatibility, isolation and reproducibility. Prefer the same Flash snapshot on both paths. Record the actual serving provider and retention policy before sending any approved repository code.
+Locked 2026-11-16. Every row is available from both interfaces. The same review contract applies throughout.
 
-### Muse and Hy4 routing
+| Route ID | Runtime | Model and endpoint | GitHub selection | Second opinion |
+|---|---|---|---|---|
+| `deepseek-openrouter` | DeepSeek Harness | `deepseek/deepseek-v4.1-flash-1017` at OpenRouter | Existing DeepSeek rotation slot | Explicit DeepSeek selection, native session resume |
+| `muse-meta` | OpenCode | `muse-spark-1.3-contributor` at Meta | First route within the existing Muse slot | Default route inside Muse for new candidate sessions |
+| `muse-openrouter` | Same OpenCode | `meta/muse-spark-1.3-contributor` at OpenRouter | Muse credential or availability fallback, directly selectable in qualification | Explicit selection or automatic Muse continuation fallback |
+| `hy4-openrouter` | Same OpenCode | `tencent/hy4` at OpenRouter | Final eligible fallback after the existing primary rotation, directly selectable in qualification | Explicit, occasional use |
 
-Albert selected DeepSeek Harness through OpenRouter for both GitHub reviews and on-demand second opinions. In the same reviewer setup, one OpenCode installation serves three named routes: Muse Spark through Meta directly, the same Muse model through the tested OpenRouter custom connection, and Hy4 through that OpenRouter connection. Both Muse routes use the same review prompt, read-only controls, and output checks. Hy4 is callable for occasional second opinions and is a GitHub fallback. It stays outside the primary rotation. Retain the existing other providers and their order.
+Use the model identifiers above as the tested candidate pins. Recheck availability before issuing live calls, and record and requalify any proposed replacements. Keep the existing rotation order and one advisory result. Transport or provider unavailability can advance the chain while an accepted verdict ends it. Muse direct and OpenRouter have separate credentials. In automatic Muse mode, a confirmed invalid, revoked, unavailable or exhausted credential, network failure, rate limit above the retry budget or provider outage can use the alternate connection. An ambiguous 403, content or policy refusal, source-identity failure or read-only failure is terminal for that review. Explicit route selection is sticky for reproducible tests and deliberate direct or OpenRouter use. It returns the selected route’s actual failure.
 
-Keep the two Muse credentials separate. Try Meta direct first. On a confirmed invalid or unavailable credential, or classified provider availability failure, continue using Muse through OpenRouter. Preserve the explicit route selector for on-demand use. Treat a completed verdict or content-policy refusal as terminal. Keep the selected model constant through a Muse fallback. Report the route that actually served the review. If OpenRouter is unavailable, Hy4 and DeepSeek share that failure domain. Skip redundant attempts for a confirmed gateway-wide failure and retain available independent routes.
-
-For resumed second opinions, preserve caller and repository identity, the visible conversation, and read-only controls. Qualify the direct-to-OpenRouter continuation in a disposable workspace after a simulated key rejection. If the backend cannot reuse a stored provider session, replay authorized visible history into the fallback session. Persist the new route only after a successful answer, and never replay private reasoning records, credentials, or files outside the authorized review scope. Preserve existing legacy sessions.
-
-Wire the route definitions once and reuse them from `bin/ai-review-simple` and the on-demand entry points identified from current upstream. Test an explicit direct route, an explicit OpenRouter route, credential failure mid-conversation, a GitHub fallback that publishes a valid Muse verdict without repeating a completed review, and a forced Hy4 fallback that publishes an exact-head verdict. Use sanitized provider failures and then live public TypeScript fixtures. Enforce no default switch during candidate qualification. Keep the existing rollback requirement.
-
-Hy4 found all 27 seeded defect instances and added no false findings across five Ubuntu benchmark reviews, including the clean variant. That was comparable to the tested Muse and OpenCode/DeepSeek routes on the same synthetic fixtures. Hy4 was slower, with an 88.9-second median on the eight-defect patch. Its comparative score has yet to be measured on real TypeScript pull requests. [Benchmark details](https://github.com/popcre/ai-devops/issues/2531#issuecomment-6927912521)
+Keep DeepSeek and Hy4 distinct. Hy4 never silently answers a named DeepSeek or Muse second opinion. An OpenRouter account-wide outage can affect both. Continue to available independent providers while skipping duplicate attempts only for confirmed shared outages. Keep benchmark provider restrictions in force. Open for implementation: exact package and checksums, protected per-environment credential bindings, and the smallest supported isolation implementation that passes the Ubuntu and Windows tests.
 
 ## 9. Execution
 
-1. **Pin the runtime and route.** Use reviewer-safety task classification and read the platform brief, `docs/deployment.md`, and both caller contracts. Add the fixed harness version and model to reviewer-owned config under `config/`. Verify released artifacts and reproducible installs on Ubuntu and Windows per existing tooling. Create a protected OpenRouter reviewer key using the secrets skill and obtain it through the existing protected credential pattern. Give the runner a fresh home and explicitly selected provider. Start with public fixtures. Gate: both platforms return the expected fixture marker, with tool output and actual provider recorded, secrets absent from output, and no traffic to the direct DeepSeek API.
-2. **Connect the callers behind explicit candidate selection.** After step 1, add a single adapter under `tools/` for launch, deadlines, validated final events and session IDs; reuse lifecycle and credit helpers where compatible. In `bin/ai-review-simple`, call it only for the DeepSeek candidate, keep exact-head identity and the verdict/report schema, and accept a verdict solely from a successful final assistant event. In `bin/ai-deepseek-agent`, route new candidate sessions and subsequent replies through the adapter. Persist the engine, model, session ID and source identity in private per-session metadata. Reuse scope validation, per-session locking and recovery; keep old sessions on the legacy route, and fail closed on unknown or mismatched sessions. Keep transient workspace and writable session storage distinct. Disable shell, write, external plugins and ambient config for the reviewer; enforce filesystem isolation independent of prompt instructions and constrain model-facing egress to the selected gateway. Verify runtime controls on both platforms, including child cleanup. Gate: offline suites in §10 pass and existing defaults are demonstrated unchanged.
-3. **Qualify in isolation.** After step 2, run the §10 matrix with the candidate explicitly selected. For GitHub, use a controlled fixture PR running the candidate toolkit revision and follow the existing combine-and-publish path. Verify the published check/comment names DeepSeek and the exact head, so a rotation fallback cannot count. For second opinions, start a review, exit the caller, then resume twice from fresh processes with a follow-up answer that depends on an unpredictable marker from the first turn. Record run IDs, exact revisions, route, final outcomes, filesystem receipts and redacted timings on the tracking issue. Gate: every matrix row passes, both platform proofs are available and the reviewer continues to be advisory. A failed case keeps the existing defaults active. Re-run affected cases and end-to-end runs on the final candidate revision after fixes.
-4. **Enable and verify.** After step 3, re-read steps 3–4 against current upstream, then use a small separately revertible default-selection change. Land through the merge queue, apply the protected install where applicable, and confirm the exact landed revision. Verify one actual DeepSeek verdict in the intended GitHub workflow and one resumed local discussion per supported OS. On failure, restore both previous defaults through the same release route, verify both legacy entry points, and retain candidate session data privately. Gate: live receipts are linked to the issue and rollout or rollback is proven on each target.
+### Phase A — Candidate routing and integration
 
-After steps 2 and 3, use a fresh session if context is low and re-read downstream steps before execution.
+1. **Share the route definitions and runtime selection.** Start from current `origin/main` in a dedicated worktree with the reviewer-safety task class. Extract the route definitions and safe outcome mapping from `bin/ai-review-simple` to one module under `tools/` and route data under `config/`, consumed by both current callers. Keep logical reviewer IDs separate from the route IDs in §8. Use one OpenCode installation and one trusted profile builder for all three OpenCode routes. Build fresh private configuration per invocation, with scope limited to the selected route and credential. For DeepSeek, pin the official headless runner and Node using existing lifecycle release conventions. Begin with the tested DeepSeek Harness 0.2.2-rc.1 and OpenCode 1.18.12 and verify platform support before promoting a version. Gate: `test_route_registry_and_secret_scope` enumerates four routes, rejects unknown overrides, and proves every subprocess receives only its own approved credentials and no ambient settings.
+2. **Connect GitHub.** Depends on step 1. Update `bin/ai-review-simple` at `review`, `make_workspace`, `run_once`, `rotation` and `combine`. Add a test-scoped explicit candidate choice, route-aware credential lookup and deadline, and a native DeepSeek dispatch through the shared adapter. Return the existing verdict fields with additive validated route and engine metadata. Keep `review` tied to the requested and checked-out head. In `.github/workflows/ai-review.yml`, consume the trusted toolkit’s plan of attempts, including the two ordered Muse routes and final Hy4 fallback, with a bounded attempt set and a single publication. Count only a successful final assistant event. Use final text and process status rather than tool events or stderr. Keep the check advisory. Gate: `tests/test-ai-review-simple.sh` and the routing/fallback tests below demonstrate one exact-head verdict, correct skip/continue/stop behavior, and existing default behavior when candidate selection is off.
+3. **Connect second opinions.** Depends on step 1. Step 2 can proceed independently. In `bin/ai-second-opinion` add the candidate route choice to `parse`, validate it for read-only `new/ask/review`, and reuse the shared config and outcome logic in `start`, `write_config` and `run_opencode`. Keep `bin/ai-muse` and its Windows launcher as compatibility entry points. Expose Hy4 via the shared provider entry point and register its discovery on both platforms under the existing launcher/install rules. In `bin/ai-deepseek-agent`, add a read-only candidate engine for `send`, `reply`, and `doctor --live`; preserve the existing recovery, report and session commands and legacy on-disk metadata. Use per-session locking, exact source identity and separately writable state. Preserve the actual route and runtime session ID on success. For automatic Muse fallback, first qualify native resume across the two OpenCode providers. If the stored session is route-bound, start a new scoped runtime session from the sanitized visible turns plus the single pending question. Keep private reasoning traces and tool records out of replay. Persist the new binding atomically after a valid answer, preserve the last-good state on failure, and maintain one visible history entry per turn. Gate: `test_second_opinion_route_resume` and `test_muse_failover_is_atomic` prove successful and failed continuation, concurrent rejection, legacy session compatibility and current defaults still intact.
+
+### Phase B — Qualification and release
+
+4. **Qualify both turnkey entry points.** Depends on steps 2–3. Start a fresh session if needed. Re-read §§9–13 and compare with current upstream. Run §10 on the exact candidate revision. Use a trusted disposable workflow ref and TypeScript test PRs. Require GitHub to run inference itself and publish valid verdicts attributed to all four route IDs. Force Meta credential failure using a scoped controlled failure or a mock provider followed by live OpenRouter, and force the Hy4 final fallback without consuming real provider quotas unnecessarily. Use an isolated route test to exercise Meta direct unavailability during a named second opinion. Windows first proof is on edge-dev, with Ubuntu as the CI and local proof target. Compare candidate and current defaults using the same TypeScript scenarios. Gate: attach check and comment links, exact tested revision, fixture SHA, provider receipts, read-only write denial and restart counts on #2531. Any failed mandatory scenario blocks default changes.
+5. **Enable when the rollout is in scope.** Depends on step 4. Re-read §13 and confirm the user's no-switch hold has been lifted. Land candidate work behind opt-in selection and use a separate reversible default change for activation. Use the protected merge queue and OS-specific installers. Verify intended landed SHA, advisory publication and on-demand resume for actual enabled routes. If activation breaks any required route, restore the corresponding prior defaults through the same delivery route and verify the old path; leave successful candidate session state accessible. Gate: complete #2531 only with exact live receipts and verified rollback rehearsal.
+
+Context cut points are after step 3 and after step 4. Re-read downstream steps against current upstream before entering either phase. Record partial progress with a reproducible artifact in STATUS.
 
 ### Adversarial cases
 
@@ -91,14 +104,24 @@ Use disposable fixtures and benign canary files.
 | Session IDs and state | Wrong ID, tampered state, concurrent resumes or interruption before state is committed | `test_candidate_session_identity_and_recovery` |
 | Provider, credentials and errors | Unexpected route, missing key, 401, 402, 429, outage, diagnostic text containing a fake key | `test_candidate_provider_failure_and_redaction` |
 | Runtime ambient environment | Private files, inherited credentials, shell or plugin auto-discovery | `test_candidate_has_no_ambient_access` |
-
-5. **Qualify the shared OpenCode routes.** Use the explicit route controls and acceptance cases in §8. Start in parallel with DeepSeek isolation work when the existing workflow and on-demand boundaries are understood. Gate: preserve the prior defaults, prove credential-failure fallback and continuation, and publish attributable Muse and Hy4 verdicts on a disposable PR. Record each case on #2531. Keep this step independent of turning on the DeepSeek route.
+| Route override or environment | Expired key, credential sent to wrong host, unexpected endpoint or caller tries a different model on retry | `test_route_registry_and_secret_scope` |
+| Fallback response | Valid verdict, policy refusal, ambiguous 403, repeated gateway outage, confirmed Muse credential denial, only Hy4 available | `test_ci_route_fallback_and_stop` |
+| Persisted review and fallback replay | Two replies race, stale workspace identity, duplicate visible question, or alternate route fails midway | `test_second_opinion_route_resume` and `test_muse_failover_is_atomic` |
+| GitHub publication data | Spoofed route name, final output from an earlier head, or missing/malformed authority metadata | `test_route_attribution_matches_exact_head` |
 
 ## 10. Tests
 
-Add the named tests above to the existing caller suites or add a focused shared-adapter suite under `tests/` and invoke it from normal CI. Keep `bash tests/test-ai-review-simple.sh`, `bash tests/test-ai-deepseek-agent.sh`, `bash tests/test-ai-deepseek.sh` and `python3 -m unittest discover -s tests -p test_deepseek_repo_tools.py` green. Run Bash tests through Git Bash on Windows. Check shared runner collision before full local suites.
+Run `bash tests/test-ai-review-simple.sh`, `bash tests/test-ai-deepseek-agent.sh`, `bash tests/test-ai-deepseek.sh`, and `python3 -m unittest discover -s tests -p test_deepseek_repo_tools.py`. Add `tests/test_reviewer_routes.py` (or equivalent tests in the existing suites) for each named regression in §9. Register the tests in the normal CI path. Run Bash through Git Bash on Windows and check the shared runner collision rules before full local suites.
 
-For each OS, run five independent fresh candidate reviews and three separate second-opinion conversations with two restarts each. Cover a seeded finding, a clean patch, file reading with the model tool, injected instructions, and repository paths with spaces in the fixture spread. Require valid verdicts and correct seeded outcomes. Repeat the read-only probes through both entry points on each OS; check repository contents, untracked paths, Git metadata, caller workspace and external canaries before and after. Exercise timeout and provider refusal in CI fixtures. Record one matched baseline run per entry point and OS to expose regression in verdict handling, latency or scope. The controlled GitHub PR publication is required in addition to local runs.
+| Scenario | Required live evidence |
+|---|---|
+| GitHub explicit selection, all four route IDs | Four fresh candidate reviews against test PR heads, real inference and file-tool receipt in Actions, each check and comment attributed correctly. Match the seeded TypeScript finding and clean verdict controls. |
+| GitHub automatic Muse fallback, Hy4 fallback and shared gateway outage | A simulated rejection of the direct credential continues to live Muse on OpenRouter with one published verdict; a bounded forced exhaustion reaches live Hy4; a confirmed shared outage skips redundant routes and retains an independent route. |
+| On-demand fresh review and resume, all four routes on Ubuntu and edge-dev | At least three named read-only conversations per route and OS, two fresh-process restarts per conversation. The follow-up correctly recalls a marker unavailable in the question or current file. Verify mixed-case and spaced paths. |
+| On-demand Muse fallback mid-session on both OSes | First turn succeeds through Meta. Force a classified credential failure for a follow-up. The same named discussion resumes through OpenRouter, with the marker and original review scope intact. Prove a failing fallback leaves the last-good record available. |
+| Read-only and routing integrity | Existing and new file write probes fail, hashes and Git metadata remain stable, no ambient files or credentials are reachable, and private session artifacts remain scoped. Test both clean and seeded changes, fake verdicts in input and untrusted fixture instructions. |
+
+Run a minimum of five independent fresh candidate requests per route on each supported OS in addition to the GitHub runs. Record actual route, verdict, elapsed time, restart receipt and platform. Separate terminal policy outcomes from failed authentication in tests and live receipts. Record baseline timings per entry point and assess Hy4 on previously unscored TypeScript fixtures before declaring it production-ready.
 
 ## 11. Constraints
 
@@ -106,20 +129,22 @@ GitHub AI review remains advisory. Keep a separate candidate selection until evi
 
 ## 12. Access and environment
 
-Use Git, Python 3, Bash or Git Bash, Node and the pinned DeepSeek Harness CLI. Use GitHub access through `bin/ai-gh` with the POP toolkit identity and the installed runner arrangement in `docs/deployment.md`. Ubuntu and Windows targets follow `config/reviewer-platform-brief.txt`. The proposed 1Password location is vault `vibe_coding`, item `OpenRouter DeepSeek Reviewer API Key`; verify existence and policy before provisioning it. Never print the key. No test login is required. Use disposable fixture repositories and the offline commands in §10 before sending a live request.
+Use Python 3, Git, Bash or Git Bash, Node, pinned DeepSeek Harness and the installed OpenCode runtime. GitHub commands use `bin/ai-gh` for `popcre/ai-devops` with the repository’s authorized identity. Qualification uses a sandbox runner, a private temporary checkout/root, and the trusted fixture branch pattern used in PR #2538. Run local review via the candidate selectors at the entry points in §§5 and 9 and use `--prompt-file` or stdin for Windows quoting.
+
+Credential references only. In the `vibe_coding` 1Password vault, resolve Meta direct via the current managed Muse item referenced by `bin/ai-second-opinion`, and use `openrouter key specifically for reviewers` for public fixture qualification. Confirm that the exact deployed credential and its provider/retention rules permit the intended repo and model before any non-public review. Use distinct scoped CI and interactive credentials if available. Provision any new bindings via `secrets-to-1password` and existing protected install routes. No test login is needed. Keep all raw model artifacts private.
 
 ## 13. Done, risks and rollback
 
-- [ ] Candidate and both callers committed, pushed, checked and merged through the repository queue.
-- [ ] Exact candidate revision passes the offline and live matrix before enabling defaults.
-- [ ] Exact landed revision and installed copies verified. Published GitHub verdict, local resume and read-only proof linked on the same issue.
-- [ ] Prior routing restored successfully in rehearsal. OpenRouter outage, harness permission differences, output drift and incompatible continuation each have a failure test.
-- [ ] Update STATUS and user-facing reviewer docs, retire the handoff after live proof, and close the issue.
+- [ ] All four routes are available on both normal entry points after the intended release. Muse can switch connections automatically on confirmed account or service failure. Hy4 remains explicit on demand and a fallback in GitHub.
+- [ ] Exact candidate revision has passing focused and policy-required tests, Ubuntu and edge-dev receipts, and four attributable GitHub verdicts. Keep `- [ ] live proof` on #2531 until completed.
+- [ ] Candidate lands through the protected queue, old defaults remain during qualification, and any later activation has a separately revertible default change. Confirm commit on `origin/main`, installed revisions and one live check per enabled route.
+- [ ] Rehearse restoring previous settings without deleting candidate session state. Verify that a live legacy review can complete after rollback.
+- [ ] Update STATUS, current reviewer docs and tracking issue with live evidence. Retire applicable handoffs only after the acceptance conditions are met.
 
-If a supported OS cannot enforce read-only isolation, or the route cannot satisfy repository disclosure rules, retain current routing and record the blocker on the issue. No cutover on partial evidence.
+Key risks are shared OpenRouter failure, route-bound Muse session history, Windows isolation differences, provider response shape changes and accidental reuse of an earlier GitHub result. Require the tests in §10 for each risk. If a supported platform or an approved disclosure route cannot be verified, keep the existing defaults and record the exact blocker on #2531.
 
 ## Self-audit
 
-1. A fresh session can execute this plan from §§5 and 9–13. The callers, change order, fixtures, release gates and rollback are specified.
-2. §§2–8 preserve the two lifecycle contracts, the direct endpoint pin, advisory policy, alternatives and the open compatibility questions. §9 covers hostile inputs and §12 names only the credential location.
-3. The opening goal and §§8 and 13 preserve both review outcomes and read-only access if a proposed implementation proves unsuitable. The handoff links back here. Fresh-reader review was skipped under the closed pilot policy.
+1. A new session can implement this without the chat by starting at STATUS and following §§5 and 8–13. Those sections identify both callers, all routes, prerequisites, failure outcomes, credential locations, test evidence and release behavior.
+2. §§3–7 retain the Meta interruption, earlier DeepSeek and Muse trials, OpenCode connection failure, cache measurement and Hy4 quality limits. §§8–10 distinguish the earlier native Muse publication evidence from the unqualified OpenCode Muse routes, and specify exact-head publication, policy handling and cross-route continuation.
+3. The opening goal, §8 and §13 preserve availability, exact verdict publishing, session resume and read-only controls when an implementation detail needs revision. All 13 sections and the adversarial matrix are present. The current handoff links back here. The fresh-reader pilot is closed, so no optional external check ran.
