@@ -11,6 +11,8 @@ read-when: understanding the advisory review model and its stages
 - **Handoff:** [HANDOFF.d/2026-10-29T2330Z-edge-dev3-claude-skinny-review-plan.md](HANDOFF.d/2026-10-29T2330Z-edge-dev3-claude-skinny-review-plan.md).
 - **Supersedes** [plan_simple-reviewer-rebuild.md](plan_simple-reviewer-rebuild.md). That plan's history and REVISION section are kept for background only; **this file is the one to execute**.
 
+DeepSeek-specific runner qualification is tracked in the [DeepSeek Harness plan](plan_deepseek-harness-openrouter.md).
+
 ## STATUS (read first; do not re-derive)
 
 | Stage | Child issue | State (2026-10-30) | Evidence |
