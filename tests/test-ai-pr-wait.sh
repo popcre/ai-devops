@@ -269,6 +269,30 @@ check "work that outgrew its declared class still refuses the wait" \
   "test '$RC' -eq 3 && printf '%s' \"$OUT\" | grep -q migration.sql"
 rm -f "$GR/migration.sql"
 
+# A branch rebuilt from newer main must be judged against its real base - the
+# merge base with origin/main - never the worktree's original commit recorded
+# at task start. Otherwise the wait is refused over a file main changed and
+# this pull request never touched (#6319:
+# supabase/tests/mg_category_taxonomy_contracts.sql).
+RB="$TMP/rebuilt"; mkdir -p "$RB"; git -C "$RB" init -q --initial-branch=main
+git -C "$RB" config user.name Test; git -C "$RB" config user.email t@example.com
+git -C "$RB" remote add origin 'https://github.com/popcre/ai-devops.git'
+printf 'base\n' > "$RB/README.md"; git -C "$RB" add -A; git -C "$RB" commit -qm init
+git -C "$RB" update-ref refs/remotes/origin/main "$(git -C "$RB" rev-parse main)"
+( cd "$RB" && "$ROOT/bin/ai-task-gates" start --class prose --reason 'documentation only' ) >/dev/null 2>&1
+git -C "$RB" checkout -qb pr-branch
+printf 'a note\n' > "$RB/docs.md"; git -C "$RB" add docs.md; git -C "$RB" commit -qm 'prose change'
+git -C "$RB" checkout -q main
+mkdir -p "$RB/supabase/tests"; printf 'select 1;\n' > "$RB/supabase/tests/mg_category_taxonomy_contracts.sql"
+git -C "$RB" add supabase; git -C "$RB" commit -qm 'main moves on'
+git -C "$RB" update-ref refs/remotes/origin/main "$(git -C "$RB" rev-parse main)"
+git -C "$RB" checkout -q pr-branch
+git -C "$RB" merge -q --no-edit main
+GATE_OUT="$TMP/gate-rebuilt.txt"
+( cd "$RB" && AI_TASK_GATES_MODE=standard AI_PR_WAIT_TEST_MARKER="$TMP/gate-rebuilt-called" AI_PR_WAIT_TEST_CLOCK="$TMP/gate-rebuilt-clock" PATH="$TMP/bin:$PATH" bash "$CMD" 1 --repo popcre/ai-devops --timeout-minutes 1 --interval 60 ) >"$GATE_OUT" 2>&1; RC=$?
+check "a branch rebuilt from newer main starts a normal wait on its real base" \
+  "test '$RC' -eq 2 && test -e '$TMP/gate-rebuilt-called' && ! grep -q mg_category_taxonomy_contracts.sql '$GATE_OUT' && ! grep -qF 'no wait was started' '$GATE_OUT'"
+
 # Two independent waiters start together on one PR. The shared first status
 # response is OPEN, and each retains its own deadline result.
 cat > "$TMP/bin/gh" <<'EOF'
