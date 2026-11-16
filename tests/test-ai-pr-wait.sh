@@ -775,7 +775,7 @@ if [ "$count" -gt 3 ]; then
   printf '%s\n' '{"data":{"repository":{"pullRequest":{"state":"MERGED","headRefOid":"h1","isInMergeQueue":false,"mergeCommit":{"oid":"landed"}}}}}'
   exit 0
 fi
-printf '%s\n' '{"data":{"repository":{"pullRequest":{"state":"OPEN","headRefOid":"h1",isInMergeQueue":true,"mergeCommit":null,commits:{nodes:[{commit:{oid:"h1",statusCheckRollup:{state:"SUCCESS",contexts:{totalCount:0,pageInfo:{hasPreviousPage:false},nodes:[]}}}}]}}}}}'
+jq -nc '{data:{repository:{pullRequest:{state:"OPEN",headRefOid:"h1",isInMergeQueue:true,mergeCommit:null,commits:{nodes:[{commit:{oid:"h1",statusCheckRollup:{state:"SUCCESS",contexts:{totalCount:0,pageInfo:{hasPreviousPage:false},nodes:[]}}}}]}}}}}'
 EOF
 chmod +x "$TMP/bin/gh"
 rm -f "$TMP/qstall-called" "$TMP/qstall-clock"
@@ -792,15 +792,15 @@ check "a queue entry past the warn window names the stall and the runner causes"
 cat > "$TMP/bin/gh" <<'EOF'
 #!/usr/bin/env bash
 case "$*" in
-  'auth token '*) printf 'test-token
-'; exit 0 ;;
-  'api rate_limit '*) printf '5000
-  'api --include rate_limit '*) printf '5000
-'; exit 0 ;;
+  'auth token '*) printf 'test-token\n'; exit 0 ;;
+  'api rate_limit '*) printf 'core\t4999\t5000\t1730000000\ngraphql\t4999\t5000\t1730000000\n'; exit 0 ;;
+  'api --include rate_limit '*) printf 'core\t4999\t5000\t1730000000\ngraphql\t4999\t5000\t1730000000\n'; exit 0 ;;
 esac
 [[ "$*" == *'isRequired(pullRequestNumber:1)'* && "$*" == *'commit{oid '* ]] || exit 9
-printf '%s
-' '{"data":{"repository":{"pullRequest":{"state":"OPEN","headRefOid":"h1",isInMergeQueue":true,"mergeCommit":null,commits:{nodes:[{commit:{oid:"h1",statusCheckRollup:{state:"SUCCESS",contexts:{totalCount:0,pageInfo:{hasPreviousPage:false},nodes:[]}}}}]}}}}}'
+# Each STATUS call advances the fake clock by 100s (see the fake date below).
+count="$(cat "${AI_PR_WAIT_TEST_MARKER:?}" 2>/dev/null || printf 0)"
+count=$((count + 1)); printf '%s\n' "$count" > "$AI_PR_WAIT_TEST_MARKER"
+jq -nc '{data:{repository:{pullRequest:{state:"OPEN",headRefOid:"h1",isInMergeQueue:true,mergeCommit:null,commits:{nodes:[{commit:{oid:"h1",statusCheckRollup:{state:"SUCCESS",contexts:{totalCount:0,pageInfo:{hasPreviousPage:false},nodes:[]}}}}]}}}}}'
 EOF
 chmod +x "$TMP/bin/gh"
 cat > "$TMP/bin/date" <<'EOF'
