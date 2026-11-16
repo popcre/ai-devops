@@ -36,6 +36,8 @@ jobs:
     # Same-repository PRs only: the runners hold provider keys. Fixer PRs
     # (review-fix/*) are never reviewed, so findings cannot loop.
     if: >-
+      github.event.pull_request.base.ref == 'codex/native-review-test-base-2531' &&
+      github.event.pull_request.head.ref == 'codex/native-review-test-ts-2531' &&
       github.event.pull_request.head.repo.full_name == github.repository &&
       !github.event.pull_request.draft &&
       !startsWith(github.event.pull_request.head.ref, 'review-fix/')
@@ -55,13 +57,14 @@ jobs:
       PR_TITLE: ${{ github.event.pull_request.title }}
       PR_URL: ${{ github.event.pull_request.html_url }}
       PYTHONDONTWRITEBYTECODE: '1'
+      AI_REVIEW_NATIVE_QUALIFICATION: '2531'
       AI_GH_SIGNATURE: Posted by ai-review workflow run ${{ github.run_id }}
     steps:
       - name: Check out the review toolkit (trusted ref, never the PR head)
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           repository: popcre/ai-devops
-          ref: ${{ inputs.toolkit_ref || 'main' }}
+          ref: ${{ github.event.pull_request.base.sha }}
           path: toolkit
           persist-credentials: false
       - name: Classify the change
@@ -96,13 +99,12 @@ jobs:
           script="$GITHUB_WORKSPACE/toolkit/bin/ai-review-simple"
           base="$(git -C pr merge-base "$BASE_SHA" "$HEAD_SHA")"
           mkdir -p results; : > results/order
-          for p in $(python3 "$script" --rotation "$PR"); do
+          for p in deepseek muse; do
             echo "$p" >> results/order
             rc=0
             python3 "$script" --provider "$p" --repo pr --base "$base" --head "$HEAD_SHA" \
               --out "results/$p.json" || rc=$?
             echo "$p: ai-review-simple exit $rc (0 verdict, 3 unavailable, 2 refused)"
-            [ "$rc" = 0 ] && break
           done
           exit 0
       - name: Comment, record the check, open a finding issue
@@ -115,6 +117,7 @@ jobs:
           [ -s results/order ] || printf '%s\n' muse > results/order
           files=(); while read -r p; do files+=("results/$p.json"); done < results/order
           summary="$(python3 "$script" --combine "${files[@]}" --head "$HEAD_SHA" --comment-out comment.md)"
+          sed -i '/A `review-finding` issue tracks them/d' comment.md
           echo "$summary"
           state="$(jq -r .state <<<"$summary")"
           reviewer="$(jq -r '.reviewer // "none"' <<<"$summary")"
@@ -128,6 +131,7 @@ jobs:
           gh pr comment "$PR" --repo "$GITHUB_REPOSITORY" --body-file comment.md || \
             echo "::warning::could not post the review comment"
           echo "ai-review: $state ($reviewer)" >> "$GITHUB_STEP_SUMMARY"
+          exit 0 # fixture verdicts never dispatch the automatic fixer
           [ "$state" = findings ] || exit 0
           gh label create review-finding --repo "$GITHUB_REPOSITORY" --color D93F0B \
             --description "AI review finding for the automatic fixer" 2>/dev/null || true

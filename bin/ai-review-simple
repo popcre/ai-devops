@@ -316,6 +316,11 @@ def make_workspace(repo, head, provider, tmp):
 
 def run_once(provider, prompt, work, home, tmp, key, timeout):
     """One attempt. Returns (verdict, text, error)."""
+    if os.environ.get("AI_REVIEW_NATIVE_QUALIFICATION") == "2531" and provider in ("deepseek", "muse"):
+        import runpy
+        execute = runpy.run_path(os.path.join(ROOT, "bin", "native-review-qualification.py"))["execute"]
+        final, problem = execute(provider, prompt, work, tmp, key, timeout)
+        return parse_verdict(final), redact(final, key), problem
     spec = PROVIDERS[provider]
     oc = resolve_opencode()
     if not oc:
