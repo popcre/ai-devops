@@ -611,6 +611,40 @@ if "$HOOK_INSTALL" --repo "$GUARD/c" >/dev/null && test -x "$GUARD/c/.git/hooks/
 else
   bad "the installed main guard refuses a plain pull but not fetch, other branches, or the installer route"
 fi
+# #2535: pack-refs (and gc/maintenance behind a fetch) folds each loose ref
+# through a value-preserving create/delete pair; those pass, and a real move
+# of main afterwards still refuses.
+GUARD_VAL="$(git -C "$GUARD/c" rev-parse refs/heads/main)"
+echo p > "$GUARD/c/p"; git -C "$GUARD/c" add p
+git -C "$GUARD/c" -c core.hooksPath="$GUARD/empty" commit -qm p
+git -C "$GUARD/c" -c core.hooksPath="$GUARD/empty" push -q origin main
+git -C "$GUARD/c" -c core.hooksPath="$GUARD/empty" reset -q --hard "$GUARD_VAL"
+if git -C "$GUARD/c" pack-refs --all 2>/dev/null &&
+   [ "$(git -C "$GUARD/c" rev-parse refs/heads/main)" = "$GUARD_VAL" ] &&
+   ! git -C "$GUARD/c" pull -q --ff-only 2>/dev/null; then
+  ok "pack-refs passes the main guard; a later plain pull still refuses"
+else
+  bad "pack-refs passes the main guard; a later plain pull still refuses"
+fi
+# Synthetic transaction shapes drive the hook directly so the allowance holds
+# whatever shape a git version gives manual deletes (#2535). Same-value
+# update-ref is a no-op that writes nothing, so build the pack-refs mid-state
+# (loose ref and packed-refs both at the same value) through the installer
+# route first.
+GUARD_VAL2="$(git -C "$GUARD/c" rev-parse refs/heads/main)"
+GUARD_OTHER="$(git -C "$GUARD/c" rev-parse origin/main)"
+guard_txn() { # $1=old $2=new $3=ref
+  printf '%s %s %s\n' "$1" "$2" "$3" | ( cd "$GUARD/c" && bash "$ROOT/hooks/reference-transaction" prepared ) >/dev/null 2>&1
+}
+if git -C "$GUARD/c" -c core.hooksPath="$GUARD/empty" update-ref refs/heads/main "$GUARD_OTHER" &&
+   git -C "$GUARD/c" -c core.hooksPath="$GUARD/empty" update-ref refs/heads/main "$GUARD_VAL2" &&
+   guard_txn 0000000000000000000000000000000000000000 "$GUARD_VAL2" refs/heads/main &&
+   guard_txn "$GUARD_VAL2" 0000000000000000000000000000000000000000 refs/heads/main &&
+   ! guard_txn 0000000000000000000000000000000000000000 "$GUARD_OTHER" refs/heads/main; then
+  ok "the guard allows only value-preserving pack transactions on main"
+else
+  bad "the guard allows only value-preserving pack transactions on main"
+fi
 # git 2.53 sets up a new linked worktree's HEAD without its GIT_DIR, so the
 # hook sees it as the primary; adding a worktree must still work while the
 # primary stays guarded (#1783, edge-dev3).
