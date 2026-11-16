@@ -46,7 +46,7 @@ Use official Ubuntu and Windows runtime/install routes and existing GitHub acces
 
 ## 9. Risks
 
-The two OpenRouter routes share a dependency. A Muse session may require replay of approved visible turns to continue through a new connection. Model results must remain attributable to the exact head and route, and Windows isolation must be proven on edge-dev. See the plan’s failure matrix and rollback gates.
+All three OpenRouter routes share a dependency. A Muse session may require replay of approved visible turns to continue through a new connection. Model results must remain attributable to the exact head and route, and Windows isolation must be proven on edge-dev. See the plan’s failure matrix and rollback gates.
 
 ## Self-audit
 

@@ -121,7 +121,7 @@ Run `bash tests/test-ai-review-simple.sh`, `bash tests/test-ai-deepseek-agent.sh
 | On-demand Muse fallback mid-session on both OSes | First turn succeeds through Meta. Force a classified credential failure for a follow-up. The same named discussion resumes through OpenRouter, with the marker and original review scope intact. Prove a failing fallback leaves the last-good record available. |
 | Read-only and routing integrity | Existing and new file write probes fail, hashes and Git metadata remain stable, no ambient files or credentials are reachable, and private session artifacts remain scoped. Test both clean and seeded changes, fake verdicts in input and untrusted fixture instructions. |
 
-Run a minimum of five independent fresh candidate requests per route across the local platform matrices, on each supported OS in addition to the GitHub runs. Record actual route, verdict, elapsed time, restart receipt and platform. Separate terminal policy outcomes from failed authentication in tests and live receipts. Record baseline timings per entry point and assess Hy4 on previously unscored TypeScript fixtures before declaring it production-ready.
+Run a minimum of five independent fresh candidate requests per route on each supported OS in addition to the GitHub runs. Record actual route, verdict, elapsed time, restart receipt and platform. Separate terminal policy outcomes from failed authentication in tests and live receipts. Record baseline timings per entry point and assess Hy4 on previously unscored TypeScript fixtures before declaring it production-ready.
 
 ## 11. Constraints
 
