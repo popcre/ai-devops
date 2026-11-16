@@ -75,6 +75,11 @@ refused=""; to=""
 while read -r old new ref; do
   # A same-value update (merge --abort, reset --hard HEAD) moves nothing.
   [ "$old" = "$new" ] && continue
+  # A repack may carry a stale packed value as `old` while the effective value
+  # is unchanged (git fetch's auto pack-refs consolidates it - it broke the
+  # protected installer's own fetch). Nothing moves when `new` is already
+  # what the ref resolves to right now.
+  [ "$new" = "$(git rev-parse -q --verify "$ref" 2>/dev/null)" ] && continue
   case "$ref" in
     refs/heads/main) refused="$ref"; to="$new" ;;
     HEAD)
