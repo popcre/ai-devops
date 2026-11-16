@@ -19,14 +19,12 @@ Paired [handoff](HANDOFF.d/2026-11-01T0020Z-edge-dev3-codex-tokeneconomizer-desk
 
 ## STATUS — read before doing work
 
-November 1 closeout: [portable continuation](HANDOFF.d/2026-11-01T1301Z-edge-dev3-codex-optimizer-desktop-continuation.md).
-Start by verifying a supported native desktop control surface, not by repeating
-sign-in repair or CLI warm-ups. This chat's native computer APIs are explicitly
-disabled; current inventory exposes browsers only, and plugin discovery found
-no applicable enablement route. A generic new chat or the documented Computer
-Use setup is not proof of availability on Ubuntu/Windows. No successor has
-accepted execution. #2220 remains blocked, with the named coordinator retaining
-accountability but releasing shared-file editing reservations at closeout.
+November 2 closeout: [#2220](https://github.com/popcre/ai-devops/issues/2220) records
+the owner's decision to end desktop testing and rollout. The
+[matched CLI study](tests/verification/tokeneconomizer-desktops/cli-ten-pair-2026-11-02.md)
+found no net savings at the required threshold. No desktop installation needed
+rollback. The [November 1 handoff](https://github.com/popcre/ai-devops/blob/02762462dc573e9da5ad51a877db61d063380ec4/HANDOFF.d/2026-11-01T1301Z-edge-dev3-codex-optimizer-desktop-continuation.md)
+records the earlier desktop access and qualification limits.
 
 November 1 update: subscription sign-in was repaired and a fresh native model
 request succeeded. The fixed five-loop/four-fact learning schedule and one
