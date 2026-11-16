@@ -1,0 +1,35 @@
+name: Harness verdict publication test 2531
+on:
+  push:
+    branches: [codex/harness-publisher-2531]
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      GH_TOKEN: ${{ github.token }}
+      AI_GH_SIGNATURE: Posted by ai-review publication test run ${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@11d596a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Combine and publish the candidate verdict for the exact draft head
+        shell: bash
+        run: |
+          set -euo pipefail
+          pr=2537
+          receipt=tests/fixtures/harness-publication/deepseek.json
+          sha=$(jq -r .head "$receipt")
+          remote=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$pr")
+          jq -e --arg sha "$sha" '.draft and .state == "open" and .head.sha == $sha' <<<"$remote" >/dev/null
+          python3 bin/ai-review-simple --combine "$receipt" --head "$sha" --comment-out comment.md > summary.json
+          jq -e '.state=="findings" and .reviewer=="deepseek" and .rows[0].verdict=="REVISE"' summary.json >/dev/null
+          sed -i '/A `review-finding` issue tracks them/d' comment.md
+          printf '\nDisposable test. No finding ticket is created.\n' >> comment.md
+          jq -n --arg sha "$sha" --rawfile body comment.md '{name:"ai-review (qualification)",head_sha:$sha,status:"completed",conclusion:"neutral",output:{title:"ai-review: findings (deepseek)",summary:$body}}' |
+            gh api "repos/$GITHUB_REPOSITORY/check-runs" --input - --jq '.html_url'
+          gh pr comment "$pr" --repo "$GITHUB_REPOSITORY" --body-file comment.md
