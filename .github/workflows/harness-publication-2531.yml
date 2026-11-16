@@ -14,7 +14,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       AI_GH_SIGNATURE: Posted by ai-review publication test run ${{ github.run_id }}
     steps:
-      - uses: actions/checkout@11d596a326750d5838078e36cf38b85af677262
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
       - name: Combine and publish the candidate verdict for the exact draft head
