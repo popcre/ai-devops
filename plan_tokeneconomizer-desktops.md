@@ -15,7 +15,7 @@ Sibling: [fresh-reader #2222](https://github.com/popcre/ai-devops/issues/2222),
 with its [separate implementation plan](plan_selective-fresh-reader.md).
 Coordination parent: [#2227](https://github.com/popcre/ai-devops/issues/2227)
 (isolation contract and combined proof only).
-Paired [handoff](HANDOFF.d/2026-11-01T0020Z-edge-dev3-codex-tokeneconomizer-desktops.md).
+Historical [planning handoff](https://github.com/popcre/ai-devops/blob/011493c5bdf3f57fd3123c576440c82fd2f5fd40/HANDOFF.d/2026-11-01T0020Z-edge-dev3-codex-tokeneconomizer-desktops.md).
 
 ## STATUS — read before doing work
 

@@ -86,8 +86,16 @@ Caveats that still hold:
 - Keep exact code/evidence recoverable (`sd_retrieve` or local stash).
 - Cursor currently gets no automatic DietCode optimization.
 
-**Next:** one machine, one week, paired measurement — same work with and
-without SLM history compaction. Do not adopt fleet-wide before that number.
+The proposed [paired pilot](https://github.com/popcre/ai-devops/issues/1751)
+closed without starting or finding an owner. No savings or rollout were
+approved. If the pilot is commissioned again, compare similar sessions on
+one machine, with at least ten baseline sessions. Measure billed input and
+output, cache reads and writes, compaction events, and quality. Test whether
+the original evidence can be recovered and stop if a consequential detail is
+lost. Keep private transcripts and secrets outside the experiment. Record
+the comparison and adoption decision here before considering a wider rollout.
+The [original pilot proposal](https://github.com/popcre/ai-devops/blob/011493c5bdf3f57fd3123c576440c82fd2f5fd40/HANDOFF.d/2026-10-14T1710Z-edge-dev-mimo-slm-compaction-pilot.md)
+preserves the proposed schedule and recovery checks.
 
 ## Process fixes that landed (A–E)
 
