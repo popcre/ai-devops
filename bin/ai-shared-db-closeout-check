@@ -200,6 +200,8 @@ def gh_call(args):
             result.stderr = result.stderr.decode("utf-8", errors="strict")
         except UnicodeDecodeError as exc:
             raise CheckError("GitHub response was not valid UTF-8") from exc
+        if result.returncode == 75:
+            raise CheckError("GitHub request deferred by the shared throttle")
         return result
     except subprocess.TimeoutExpired as exc:
         if call_timeout < GH_CALL_TIMEOUT_SECONDS:
