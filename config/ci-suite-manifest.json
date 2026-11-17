@@ -270,7 +270,28 @@
         "test-mcp-session-guard.sh",
         "test-mcp-launch-lock.sh"
       ]
-    }
+    },
+    "config/reviewer-routes.json": [
+      "test-reviewer-routes.sh"
+    ],
+    "tools/reviewer_routes.py": [
+      "test-reviewer-routes.sh"
+    ],
+    "tools/deepseek_harness_chat.py": [
+      "test-reviewer-routes.sh"
+    ],
+    "bin/ai-hy4*": [
+      "test-reviewer-routes.sh"
+    ],
+    "config/deepseek-harness/version": [
+      "test-reviewer-routes.sh"
+    ],
+    "tests/test_reviewer_routes.py": [
+      "test-reviewer-routes.sh"
+    ],
+    ".github/workflows/ai-review.yml": [
+      "test-reviewer-routes.sh"
+    ]
   },
   "windows_offline_section_count": 12
 }

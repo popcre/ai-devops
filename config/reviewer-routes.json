@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "description": "Candidate reviewer routes (#2549/#2550, plan_deepseek-harness-openrouter.md section 8). Opt-in only: no entry changes a default until a caller selects a route explicitly. Logical reviewer ids (muse, deepseek, hy4) stay separate from these route ids. Model ids are the tested pins; recheck availability before live calls.",
+  "routes": {
+    "deepseek-openrouter": {
+      "engine": "deepseek-harness",
+      "reviewer": "deepseek",
+      "model": "deepseek/deepseek-v4.1-flash-1017",
+      "base_url": "https://openrouter.ai/api/v1",
+      "key_file": "openrouter-reviewer-key",
+      "key_env": "OPENROUTER_API_KEY",
+      "override": "AI_OPENROUTER_KEY",
+      "timeout": 1800
+    },
+    "muse-meta": {
+      "engine": "opencode",
+      "reviewer": "muse",
+      "model": "meta-model-api/muse-spark-1.3-contributor",
+      "key_file": "muse-api-key",
+      "key_env": "MODEL_API_KEY",
+      "override": "AI_MUSE_KEY",
+      "timeout": 1200
+    },
+    "muse-openrouter": {
+      "engine": "opencode",
+      "reviewer": "muse",
+      "model": "openrouter-muse/meta/muse-spark-1.3-contributor",
+      "base_url": "https://openrouter.ai/api/v1",
+      "key_file": "openrouter-reviewer-key",
+      "key_env": "OPENROUTER_API_KEY",
+      "override": "AI_OPENROUTER_KEY",
+      "timeout": 1200
+    },
+    "hy4-openrouter": {
+      "engine": "opencode",
+      "reviewer": "hy4",
+      "model": "openrouter-hy4/tencent/hy4",
+      "base_url": "https://openrouter.ai/api/v1",
+      "key_file": "openrouter-reviewer-key",
+      "key_env": "OPENROUTER_API_KEY",
+      "override": "AI_OPENROUTER_KEY",
+      "timeout": 1200
+    }
+  },
+  "automatic_fallback": {
+    "muse": ["muse-meta", "muse-openrouter"],
+    "final": "hy4-openrouter"
+  }
+}

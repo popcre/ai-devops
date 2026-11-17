@@ -8,9 +8,14 @@
   ai-second-opinion PROVIDER list | show NAME | transcript NAME | diff NAME
   ai-second-opinion PROVIDER abort NAME | delete NAME | doctor [--live] | store-key
 
-PROVIDER is glm, muse or stepfun (deepseek also works). Provider facts, key
-lookup and the OpenCode binary come from bin/ai-review-simple, so the advisory
-CI reviewer and these second opinions share one definition.
+PROVIDER is glm, muse or stepfun (deepseek also works; the candidate
+openrouter providers hy4-openrouter and muse-openrouter work too). Provider
+facts, key lookup and the OpenCode binary come from bin/ai-review-simple, so
+the advisory CI reviewer and these second opinions share one definition.
+Candidate routes (#2549/#2550, config/reviewer-routes.json) are opt-in through
+--route (deepseek-openrouter, muse-meta, muse-openrouter, hy4-openrouter, or
+"auto" for Muse with same-model failover); without --route every default
+behavior is unchanged.
 
 new/ask/review run read-only on a private copy of the repository (HEAD plus
 uncommitted changes, no git remote). implement runs on a private writable copy
@@ -41,6 +46,8 @@ _loader = importlib.machinery.SourceFileLoader("ai_review_simple", os.path.join(
 _spec = importlib.util.spec_from_loader("ai_review_simple", _loader)
 ars = importlib.util.module_from_spec(_spec)
 _loader.exec_module(ars)
+sys.path.insert(0, os.path.join(ars.ROOT, "tools"))
+import reviewer_routes as RR  # shared candidate routes (#2549/#2550)
 
 STATE = os.environ.get("AI_SECOND_OPINION_HOME") or os.path.expanduser(
     "~/.local/state/ai-devops/second-opinion")
@@ -87,9 +94,13 @@ changed and why.
 # by the provider on 2026-11-16 (HTTP 403); the working key lives in the item
 # "Meta ai Muse Spark API Key tied to hello@popcre.com" (field "credential",
 # live-proofed 200 on 2026-11-16). Address it by item id: the title has spaces.
+# The openrouter reviewer key is scoped to the three pinned candidate models.
 OP_REFS = {
     "muse": "op://vibe_coding/6e6ojstxgxu3ol4z2mgxphnjb4/credential",
     "stepfun": os.environ.get("AI_STEPFUN_OP_REF") or "op://vibe_coding/stepfun step5 ai api key/credential",
+    "muse-openrouter": "op://vibe_coding/sssotzy4jpmp4hux7x2vajhana/credential",
+    "hy4-openrouter": "op://vibe_coding/sssotzy4jpmp4hux7x2vajhana/credential",
+    "deepseek-openrouter": "op://vibe_coding/sssotzy4jpmp4hux7x2vajhana/credential",
 }
 
 REVIEW_SUFFIX = """
@@ -143,6 +154,10 @@ def session_dir(provider, name):
     return os.path.join(STATE, provider, name)
 
 
+def meta_route(meta):
+    return (meta or {}).get("route")
+
+
 def load_meta(sdir):
     try:
         with open(os.path.join(sdir, "meta.json")) as fh:
@@ -192,10 +207,10 @@ def copy_repo(repo, work, writable):
     return top
 
 
-def write_config(sdir, provider, agent_name, agent_text):
+def write_config(sdir, provider, agent_name, agent_text, spec=None):
     cfg_dir = os.path.join(sdir, "xdg", "config", "opencode")
     os.makedirs(os.path.join(cfg_dir, "agent"), exist_ok=True)
-    spec = ars.PROVIDERS[provider]
+    spec = spec or ars.PROVIDERS[provider]
     cfg = {"$schema": "https://opencode.ai/config.json", "model": spec["model"],
            "share": "disabled", "autoupdate": False}
     if spec["provider"]:
@@ -223,21 +238,192 @@ def session_id(stdout):
     return None
 
 
-def run_opencode(provider, sdir, meta, prompt):
-    """One turn. Returns the answer text; exits 3 when the provider is unavailable."""
-    key = ars.read_key(provider)
+class SessionLock:
+    """One turn at a time per named session (#2549/#2550): a concurrent resume
+    is rejected instead of racing the transcript or the runtime session."""
+
+    def __init__(self, sdir):
+        self.dir = os.path.join(sdir, ".lock")
+        self.wait = float(os.environ.get("AI_SECOND_OPINION_LOCK_WAIT") or "15")
+
+    def __enter__(self):
+        deadline = time.time() + self.wait
+        while True:
+            try:
+                os.mkdir(self.dir)
+            except FileExistsError:
+                if time.time() >= deadline:
+                    die("session is busy: another turn is running.", 1)
+                time.sleep(0.5)
+                continue
+            try:
+                with open(os.path.join(self.dir, "owner"), "w") as fh:
+                    fh.write(f"{os.getpid()} {time.time()}\n")
+            except OSError:
+                pass
+            return self
+
+    def __exit__(self, *_exc):
+        try:
+            os.remove(os.path.join(self.dir, "owner"))
+            os.rmdir(self.dir)
+        except OSError:
+            pass
+
+
+def kill_process_tree(proc):
+    """Timeout cleanup: take the whole tree, not just the .cmd shim, so no
+    orphaned child keeps the private workspace open (#2549/#2550)."""
+    try:
+        if hasattr(os, "killpg"):
+            os.killpg(proc.pid, signal.SIGKILL)
+        elif os.name == "nt":
+            subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                           capture_output=True)
+        else:
+            proc.kill()
+    except OSError:
+        pass
+    try:
+        proc.communicate(timeout=10)
+    except Exception:
+        pass
+
+
+def harness_session_id(stdout):
+    for line in (stdout or "").splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            ev = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(ev, dict) and ev.get("type") == "session" and ev.get("sessionId"):
+            return ev["sessionId"]
+    return None
+
+
+def write_harness_profile(sdir, spec):
+    """A private, persistent DeepSeek Harness home per named session."""
+    profiles = os.path.join(sdir, "dsh-home", "profiles", "headless")
+    os.makedirs(profiles, exist_ok=True)
+    with open(os.path.join(profiles, "cordis.patch.yml"), "w", encoding="utf-8") as fh:
+        fh.write(RR.harness_patch_yaml(spec))
+
+
+def run_harness_turn(provider, sdir, meta, prompt, spec, route):
+    """One DeepSeek Harness turn with native session resume (#2549)."""
+    key = ars.read_key(spec)
     if not key:
-        die(f"{provider}: no API key (secret file {ars.PROVIDERS[provider]['key_file']}).", 3)
+        die(f"{provider}: no API key (secret file {spec['key_file']}).", 3)
+    dsh = RR.resolve_deepseek_harness()
+    if not dsh:
+        die("deepseek harness binary not found; run bin/setup-deepseek-harness.sh.", 3)
+    write_harness_profile(sdir, spec)
+    env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": os.path.join(sdir, "home"),
+           "DSH_HOME": os.path.join(sdir, "dsh-home"), "PYTHONDONTWRITEBYTECODE": "1",
+           spec["key_env"]: key}
+    for n in ("LANG", "TMPDIR", "TEMP", "TMP", "SYSTEMROOT", "PATHEXT", "COMSPEC", "WINDIR",
+              "SSL_CERT_FILE", "SSL_CERT_DIR", "NODE_EXTRA_CA_CERTS", "AI_REVIEW_SIMPLE_FAKE_STATE"):
+        if os.environ.get(n):
+            env[n] = os.environ[n]
+    if os.name == "nt":
+        env["USERPROFILE"] = env["HOME"]
+    cmd = [dsh, "--profile", "headless", "--json", "--approval-policy", "never"]
+    resume = meta.get("session")
+    if resume:
+        cmd += ["--session-id", resume]
+    cmd.append("-")
+    timeout = int(os.environ.get("AI_SECOND_OPINION_TIMEOUT") or spec["timeout"])
+    meta.update(state="running", pid=os.getpid(), updated=time.time())
+    save_meta(sdir, meta)
+    proc = subprocess.Popen(cmd, cwd=meta["work"], env=env, stdin=subprocess.PIPE,
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                            encoding="utf-8", errors="replace",
+                            start_new_session=hasattr(os, "killpg"))
+    try:
+        out, err = proc.communicate(prompt, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        kill_process_tree(proc)
+        meta.update(state="failed", updated=time.time())
+        save_meta(sdir, meta)
+        die(f"{provider}: no answer within {timeout}s.", 3)
+    final, ev_err = ars.read_harness_events(out)
+    sid = resume or harness_session_id(out)
+    answer = ars.redact((final or "").strip(), key)
+    label = f"{provider} via {route}" if route else provider
+    with open(os.path.join(sdir, "transcript.md"), "a", encoding="utf-8") as fh:
+        fh.write(f"\n\n## Request ({time.strftime('%Y-%m-%d %H:%M:%S')})\n\n{prompt}\n"
+                 f"\n## {label}\n\n{ars.redact((final or '').strip(), key)}\n")
+    return answer, sid, ev_err, err, key, proc.returncode
+
+
+def sanitized_replay(meta):
+    """Visible turns only (request + final answer), never tool records or
+    private reasoning, for a cross-route Muse continuation (plan section 9)."""
+    turns = meta.get("visible") or []
+    if not turns:
+        return ""
+    blocks = ["Prior conversation (sanitized visible turns; tool records omitted):"]
+    for i, turn in enumerate(turns, 1):
+        blocks.append(f"--- turn {i} ---\nRequest: {turn.get('q', '').strip()}\n"
+                      f"Answer: {turn.get('a', '').strip()}")
+    return "\n".join(blocks) + "\n\nAnswer the new request below under the same rules.\n\n"
+
+
+def run_opencode(provider, sdir, meta, prompt, route=None):
+    """One turn. Returns the answer text; exits 3 when the provider is unavailable."""
+    known = RR.routes()
+    auto = route == "auto"
+    if route and route != "auto" and route not in known:
+        die(f"unknown reviewer route: {route}", 2)
+    if auto and provider != "muse":
+        die('route "auto" is only valid for muse (same-model failover).', 2)
+    spec = dict(ars.PROVIDERS[provider])
+    effective = None
+    if route and route != "auto":
+        effective = route
+    elif auto:
+        effective = meta.get("route") if meta.get("route") in known else "muse-meta"
+    elif spec.get("route") in known:
+        effective = spec["route"]
+    if effective:
+        spec = ars.spec_for(provider, effective)
+    with SessionLock(sdir):
+        if spec.get("engine") == "deepseek-harness":
+            answer, sid, ev_err, err, key, rc = run_harness_turn(
+                provider, sdir, meta, prompt, spec, effective)
+            if not answer:
+                problem = ars.redact("\n".join(x for x in (ev_err, (err or "")[-2000:])
+                                               if x.strip()), key)
+                meta.update(state="failed", updated=time.time())
+                save_meta(sdir, meta)
+                kind = "out of credit" if ars.is_credit_error(problem) else f"no answer (exit {rc})"
+                die(f"{provider}: {kind}: {problem[:800]}", 3)
+            if sid:
+                meta["session"] = sid
+            meta.update(state="idle", turns=meta.get("turns", 0) + 1, updated=time.time())
+            meta.pop("pid", None)
+            if effective:
+                meta["route"] = effective
+                meta.setdefault("visible", []).append({"q": prompt, "a": answer})
+            save_meta(sdir, meta)
+            return answer
+        return _run_opencode_turn(provider, sdir, meta, prompt, spec, effective, auto)
+
+
+def _run_opencode_turn(provider, sdir, meta, prompt, spec, effective, auto, new_session=False):
+    key = ars.read_key(spec)
+    if not key:
+        die(f"{provider}: no API key (secret file {spec['key_file']}).", 3)
     oc = ars.resolve_opencode()
     if not oc:
         die("opencode binary not found; run the normal installer.", 3)
-    spec = ars.PROVIDERS[provider]
     xdg = os.path.join(sdir, "xdg")
     env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": os.path.join(sdir, "home"),
-           "XDG_CONFIG_HOME": os.path.join(xdg, "config"),
-           "XDG_DATA_HOME": os.path.join(xdg, "data"),
-           "XDG_STATE_HOME": os.path.join(xdg, "state"),
-           "XDG_CACHE_HOME": os.path.join(xdg, "cache"),
+           "XDG_CONFIG_HOME": os.path.join(xdg, "config"), "XDG_DATA_HOME": os.path.join(xdg, "data"),
+           "XDG_STATE_HOME": os.path.join(xdg, "state"), "XDG_CACHE_HOME": os.path.join(xdg, "cache"),
            "OPENCODE_DISABLE_CLAUDE_CODE": "1", "OPENCODE_DISABLE_EXTERNAL_SKILLS": "1",
            "PYTHONDONTWRITEBYTECODE": "1", spec["key_env"]: key}
     if os.name == "nt":
@@ -250,7 +436,7 @@ def run_opencode(provider, sdir, meta, prompt):
     work = meta["work"]
     cmd = [oc, "run", "--agent", meta["agent"], "--auto", "--format", "json",
            "--model", spec["model"], "--dir", work]
-    if meta.get("session"):
+    if meta.get("session") and not new_session:
         cmd += ["--session", meta["session"]]
     timeout = int(os.environ.get("AI_SECOND_OPINION_TIMEOUT") or spec["timeout"])
     meta.update(state="running", pid=os.getpid(), updated=time.time())
@@ -262,29 +448,59 @@ def run_opencode(provider, sdir, meta, prompt):
     try:
         out, err = proc.communicate(prompt, timeout=timeout)
     except subprocess.TimeoutExpired:
-        try:
-            os.killpg(proc.pid, signal.SIGKILL) if hasattr(os, "killpg") else proc.kill()
-        except OSError:
-            pass
-        proc.communicate()
+        kill_process_tree(proc)
         meta.update(state="failed", updated=time.time())
         save_meta(sdir, meta)
         die(f"{provider}: no answer within {timeout}s.", 3)
     meta["session"] = meta.get("session") or session_id(out)
     full, final, ev_err = ars.read_events(out)
     answer = ars.redact((final or full or "").strip(), key)
+    label = f"{provider} via {effective}" if effective else provider
     with open(os.path.join(sdir, "transcript.md"), "a", encoding="utf-8") as fh:
         fh.write(f"\n\n## Request ({time.strftime('%Y-%m-%d %H:%M:%S')})\n\n{prompt}\n"
-                 f"\n## {provider}\n\n{ars.redact((full or '').strip(), key)}\n")
+                 f"\n## {label}\n\n{ars.redact((full or '').strip(), key)}\n")
     if not answer:
         problem = ars.redact("\n".join(x for x in (ev_err, (err or "")[-2000:]) if x.strip()), key)
+        if auto and effective == "muse-meta" and RR.classify(problem)[0] == "advance":
+            return _muse_failover(provider, sdir, meta, prompt, problem)
         meta.update(state="failed", updated=time.time())
         save_meta(sdir, meta)
         kind = "out of credit" if ars.is_credit_error(problem) else f"no answer (exit {proc.returncode})"
         die(f"{provider}: {kind}: {problem[:800]}", 3)
     meta.update(state="idle", turns=meta.get("turns", 0) + 1, updated=time.time())
     meta.pop("pid", None)
+    if effective:
+        meta["route"] = effective
+        meta.setdefault("visible", []).append({"q": prompt, "a": answer})
     save_meta(sdir, meta)
+    return answer
+
+
+def _muse_failover(provider, sdir, meta, prompt, first_error):
+    """Same-model Muse continuation on a confirmed connection failure.
+
+    The direct session is route-bound, so the OpenRouter turn starts a new
+    scoped runtime session from the sanitized visible turns plus this one
+    question. The new binding is saved only after a valid answer; a failed
+    fallback leaves the last-good record untouched (plan section 9 step 3)."""
+    spec = ars.spec_for(provider, "muse-openrouter")
+    replay = sanitized_replay(meta) + f"New request: {prompt}"
+    meta.update(state="failing-over", updated=time.time())
+    save_meta(sdir, meta)
+    previous_session = meta.get("session")
+    meta["session"] = None
+    try:
+        answer = _run_opencode_turn(provider, sdir, meta, replay, spec, "muse-openrouter",
+                                    False, new_session=True)
+    except SystemExit as exc:
+        meta["session"] = previous_session
+        meta.update(state="failed", updated=time.time())
+        save_meta(sdir, meta)
+        die(f"{provider}: muse-meta failed ({first_error[:300]}) and the muse-openrouter "
+            f"continuation also failed ({exc.code}); last-good session retained.", 3)
+    with open(os.path.join(sdir, "transcript.md"), "a", encoding="utf-8") as fh:
+        fh.write(f"\n\n<!-- route failover: muse-meta -> muse-openrouter "
+                 f"({time.strftime('%Y-%m-%d %H:%M:%S')}) -->\n")
     return answer
 
 
@@ -300,7 +516,7 @@ def read_prompt(args):
     return text
 
 
-def start(provider, name, repo, writable, base=None):
+def start(provider, name, repo, writable, base=None, route=None):
     if name is None:
         name = f"oneshot-{time.strftime('%Y%m%d-%H%M%S')}-{os.getpid()}"
     sdir = session_dir(provider, name)
@@ -314,10 +530,14 @@ def start(provider, name, repo, writable, base=None):
         shutil.rmtree(sdir, ignore_errors=True)
         die("could not copy the repository: " + (exc.stderr or b"").decode(errors="replace")[:300])
     agent = "implement" if writable else "second-opinion"
-    write_config(sdir, provider, agent, WRITE_AGENT if writable else READ_AGENT)
+    spec = (ars.spec_for(provider, route) if route and route in RR.routes()
+            else ars.PROVIDERS[provider])
+    write_config(sdir, provider, agent, WRITE_AGENT if writable else READ_AGENT, spec=spec)
     meta = {"name": name, "provider": provider, "repo": top, "work": work, "agent": agent,
             "mode": "implement" if writable else "read-only", "base": base,
             "created": time.time(), "turns": 0, "state": "idle"}
+    if route and route in RR.routes():
+        meta["route"] = route
     save_meta(sdir, meta)
     return sdir, meta
 
@@ -332,6 +552,7 @@ def parse(argv):
     ap.add_argument("--prompt")
     ap.add_argument("--repo", default=".")
     ap.add_argument("--base")
+    ap.add_argument("--route")
     ap.add_argument("--live", action="store_true")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--json", action="store_true")
@@ -346,6 +567,17 @@ def main(argv):
         return 0
     args = parse(argv)
     p, cmd = args.provider, args.command
+    route = getattr(args, "route", None)
+    if route:
+        known = RR.routes()
+        if route not in known and route != "auto":
+            die(f"unknown reviewer route: {route}", 2)
+        if cmd == "implement":
+            die("--route is read-only: it cannot run implement.", 2)
+        if route == "auto" and p != "muse":
+            die('route "auto" is only valid for muse (same-model failover).', 2)
+        if route in known and RR.route(route)["reviewer"] != p and p != route:
+            die(f"route {route} does not belong to provider {p}.", 2)
 
     if cmd in ("new", "ask", "implement"):
         name = existing = None
@@ -364,11 +596,15 @@ def main(argv):
         if existing:
             if cmd == "new":
                 die(f"session {name} already exists; use ask.")
+            if route and route != "auto" and meta_route(load_meta(os.path.join(STATE, p, name)))                     not in (None, route):
+                bound = meta_route(load_meta(os.path.join(STATE, p, name)))
+                die(f"session {name} is bound to route {bound}; explicit selection is sticky.", 2)
             sdir = os.path.join(STATE, p, name)
             meta = load_meta(sdir)
         else:
-            sdir, meta = start(p, name, args.repo, cmd == "implement", args.base)
-        print(run_opencode(p, sdir, meta, prompt))
+            sdir, meta = start(p, name, args.repo, cmd == "implement", args.base,
+                               route=route if route in RR.routes() else None)
+        print(run_opencode(p, sdir, meta, prompt, route=route))
         if meta["mode"] == "implement":
             git(meta["work"], "add", "-A", check=False)
             diff = git(meta["work"], "diff", "--cached", "HEAD")
@@ -388,8 +624,9 @@ def main(argv):
         fence = "`" * max([3] + [n + 1 for n in runs])
         brief = read_prompt(args) if (args.prompt_file or args.text) else "Review this change."
         prompt = brief + REVIEW_SUFFIX.format(base=base, fence=fence, diff=diff)
-        sdir, meta = start(p, None, repo, False, base)
-        print(run_opencode(p, sdir, meta, prompt))
+        sdir, meta = start(p, None, repo, False, base,
+                           route=route if route in RR.routes() else None)
+        print(run_opencode(p, sdir, meta, prompt, route=route))
         return 0
 
     if cmd == "list":

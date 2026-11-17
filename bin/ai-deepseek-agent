@@ -66,6 +66,12 @@ CFG_DIR="$PROFILE_HOME/.config/ai-devops"
 TOKEN_FILE="$CFG_DIR/op-service-account"
 MCP_ENV="$CFG_DIR/mcp.env"
 KEY_STORE="$CFG_DIR/secrets/deepseek-api-key"
+# Candidate engine (#2549): the OpenRouter reviewer key store, separate
+# from the direct DeepSeek credential.
+OR_KEY_STORE="$CFG_DIR/secrets/openrouter-reviewer-key"
+ROUTE=""
+HARNESS_SID=""
+HARNESS_DSH_HOME=""
 # Pinned model (owner instruction 2026-10-01): deepseek-flash is DeepSeek
 # V4.1 Flash, verified live against https://api.deepseek.com on 2026-09-17
 # (GET /models, then a doctor --live probe). The wrapper accepts only this
@@ -228,7 +234,7 @@ unset DEEPSEEK_API_KEY
 exec 9<<<"$keep_key"
 keep_key=""
 clean=(/usr/bin/env -i "PATH=${PATH:-}" "HOME=${HOME:-}" "AI_DEEPSEEK_SECRET_FD=9" "AI_DEEPSEEK_REEXEC=1")
-for name in USERPROFILE TEMP TMP TMPDIR SYSTEMROOT COMSPEC PATHEXT USER USERNAME LOGNAME LANG LC_ALL DEEPSEEK_MODEL AI_DEEPSEEK_TEST_DIR AI_DEEPSEEK_CALLER AI_DEEPSEEK_CONNECT_TIMEOUT AI_DEEPSEEK_CALL_TIMEOUT AI_DEEPSEEK_LOCK_WAIT AI_REVIEW_SOURCE_RECEIPT_FILE DEEPSEEK_TOOLS_MAX_CALLS DEEPSEEK_TOOLS_MAX_ROUNDS DEEPSEEK_TOOLS_MAX_WALL DEEPSEEK_TOOLS_GREP_SECONDS DEEPSEEK_TOOLS_MAX_OUTPUT_CHARS DEEPSEEK_TOOLS_MAX_GREP_MATCHES DEEPSEEK_TOOLS_COMPACT_BUDGET_CHARS DEEPSEEK_TOOLS_COMPACT_KEEP_RESULTS SOURCE_ATTACH_MAX_BYTES SOURCE_ATTACH_SMALL_BYTES AI_REVIEW_PATCH_MAX_BYTES AI_REVIEW_EVENT_RUN_ID AI_REVIEW_EVENT_DIR AI_REVIEW_TEST_ISOLATION DEEPSEEK_RECOVERY_EVENT_RUN_ID; do
+for name in USERPROFILE TEMP TMP TMPDIR SYSTEMROOT COMSPEC PATHEXT USER USERNAME LOGNAME LANG LC_ALL DEEPSEEK_MODEL AI_DEEPSEEK_TEST_DIR AI_DEEPSEEK_CALLER AI_DEEPSEEK_CONNECT_TIMEOUT AI_DEEPSEEK_CALL_TIMEOUT AI_DEEPSEEK_LOCK_WAIT AI_REVIEW_SOURCE_RECEIPT_FILE DEEPSEEK_TOOLS_MAX_CALLS DEEPSEEK_TOOLS_MAX_ROUNDS DEEPSEEK_TOOLS_MAX_WALL DEEPSEEK_TOOLS_GREP_SECONDS DEEPSEEK_TOOLS_MAX_OUTPUT_CHARS DEEPSEEK_TOOLS_MAX_GREP_MATCHES DEEPSEEK_TOOLS_COMPACT_BUDGET_CHARS DEEPSEEK_TOOLS_COMPACT_KEEP_RESULTS SOURCE_ATTACH_MAX_BYTES SOURCE_ATTACH_SMALL_BYTES AI_REVIEW_SIMPLE_DSH AI_DEEPSEEK_HARNESS_TIMEOUT AGENT_DSH_LOG AI_REVIEW_PATCH_MAX_BYTES AI_REVIEW_EVENT_RUN_ID AI_REVIEW_EVENT_DIR AI_REVIEW_TEST_ISOLATION DEEPSEEK_RECOVERY_EVENT_RUN_ID; do
   [ -z "${!name:-}" ] || clean+=("$name=${!name}")
 done
 exec "${clean[@]}" /usr/bin/bash --noprofile --norc "$script" "$@"
@@ -240,8 +246,8 @@ if [ -n "${AI_DEEPSEEK_SECRET_FD:-}" ]; then
   eval "exec ${AI_DEEPSEEK_SECRET_FD}<&-"
   unset AI_DEEPSEEK_SECRET_FD
 fi
-key_store_path_safe() {
-  local path="$KEY_STORE" parent
+key_store_path_safe() { # [store-path]
+  local path="${1:-$KEY_STORE}" parent
   case "$path" in /*) ;; *) return 1;; esac
   while [ "$path" != / ]; do
     [ ! -L "$path" ] || return 1
@@ -249,19 +255,20 @@ key_store_path_safe() {
     path="$parent"
   done
 }
-key_store_ok() {
-  local dir="$(dirname "$KEY_STORE")" helper ps
-  key_store_path_safe && [ -f "$KEY_STORE" ] && [ -s "$KEY_STORE" ] && [ -d "$dir" ] || return 1
+key_store_ok() { # [store-path]
+  local store="${1:-$KEY_STORE}"
+  local dir="$(dirname "$store")" helper ps
+  key_store_path_safe "$store" && [ -f "$store" ] && [ -s "$store" ] && [ -d "$dir" ] || return 1
   if [ -n "${SYSTEMROOT:-}" ]; then
     ps="$(command -v pwsh.exe 2>/dev/null || command -v pwsh 2>/dev/null || command -v powershell.exe 2>/dev/null || true)"; [ -n "$ps" ] || return 1
     helper="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/windows-private-file.ps1"
-    AI_DEVOPS_PRIVATE_HELPER="$(cygpath -w "$helper")" AI_DEVOPS_PRIVATE_TARGET="$(cygpath -w "$KEY_STORE")" AI_DEVOPS_PRIVATE_PARENT="$(cygpath -w "$dir")" \
+    AI_DEVOPS_PRIVATE_HELPER="$(cygpath -w "$helper")" AI_DEVOPS_PRIVATE_TARGET="$(cygpath -w "$store")" AI_DEVOPS_PRIVATE_PARENT="$(cygpath -w "$dir")" \
       "$ps" -NoProfile -ExecutionPolicy Bypass -Command '. $env:AI_DEVOPS_PRIVATE_HELPER; Assert-AiDevOpsPrivateAcl -Path $env:AI_DEVOPS_PRIVATE_PARENT; Assert-AiDevOpsPrivateAcl -Path $env:AI_DEVOPS_PRIVATE_TARGET' >/dev/null 2>&1
   else
     [ "$(stat -c %a "$dir" 2>/dev/null || stat -f %Lp "$dir" 2>/dev/null)" = 700 ] &&
-    [ "$(stat -c %a "$KEY_STORE" 2>/dev/null || stat -f %Lp "$KEY_STORE" 2>/dev/null)" = 600 ] &&
+    [ "$(stat -c %a "$store" 2>/dev/null || stat -f %Lp "$store" 2>/dev/null)" = 600 ] &&
     [ "$(stat -c %u "$dir" 2>/dev/null || stat -f %u "$dir" 2>/dev/null)" = "$(id -u)" ] &&
-    [ "$(stat -c %u "$KEY_STORE" 2>/dev/null || stat -f %u "$KEY_STORE" 2>/dev/null)" = "$(id -u)" ]
+    [ "$(stat -c %u "$store" 2>/dev/null || stat -f %u "$store" 2>/dev/null)" = "$(id -u)" ]
   fi
 }
 if [ "$SUBCMD" = store-key ] && [ "${1:-}" = --if-missing ] && key_store_ok; then
@@ -1361,6 +1368,65 @@ evidence and return BLOCKED instead of inferring it.
 
 End the response with a literal ## Verdict heading followed on the next line by exactly APPROVE, REJECT, or BLOCKED.'
 
+# --- Candidate engine: DeepSeek Harness through OpenRouter (#2549) --------
+# Opt-in through --route deepseek-openrouter on send/reply/doctor --live.
+# Read-only: the turn runs in a disposable remote-less copy of the repository
+# made non-writable for the turn; the direct engine and every legacy session
+# keep their existing behavior and on-disk format.
+harness_refuse_combinations() {
+  [ "$#" -eq 0 ] || { echo "Error: --route deepseek-openrouter cannot be combined with $*." >&2; exit 2; }
+}
+harness_ready() {
+  [ "$ROUTE" = deepseek-openrouter ] || { echo 'Error: --route accepts only deepseek-openrouter.' >&2; exit 2; }
+  [ -s "$OR_KEY_STORE" ] || { echo "Error: openrouter reviewer key store is missing or empty. Store it with: ai-second-opinion deepseek-openrouter store-key" >&2; exit 1; }
+  key_store_ok "$OR_KEY_STORE" || { echo "Error: openrouter reviewer key store is missing or insecure. Store it with: ai-second-opinion deepseek-openrouter store-key outside a review." >&2; exit 1; }
+}
+harness_run() { # prompt-file session(optional) cwd -> prints reply; sets HARNESS_SID
+  local prompt_file="$1" session="${2:-}" cwd="$3" out rc
+  local tmpdir="${SESS_DIR:-${TMPDIR:-/tmp}}"
+  HARNESS_SID="$session"
+  out="$(mktemp "$tmpdir/.harness.XXXXXX")" || return 1
+  "$PYTHON" "$SOURCE_TOOLS/../tools/deepseek_harness_chat.py" --route "$ROUTE" \
+    --secrets-dir "$(dirname "$OR_KEY_STORE")" \
+    --dsh-home "$HARNESS_DSH_HOME" --home "$HARNESS_DSH_HOME/home" --cwd "$cwd" \
+    --prompt-file "$prompt_file" ${session:+--session "$session"} \
+    --timeout "${AI_DEEPSEEK_HARNESS_TIMEOUT:-1800}" >"$out"
+  rc=$?
+  [ "$rc" -eq 0 ] || { rm -f "$out"; return "$rc"; }
+  HARNESS_SID="$(head -1 "$out" | sed -n 's/^SESSION //p')"
+  [ -n "$HARNESS_SID" ] || HARNESS_SID="$session"
+  [ -z "${HARNESS_SID_FILE:-}" ] || printf '%s' "$HARNESS_SID" > "$HARNESS_SID_FILE"
+  tail -n +2 "$out"
+  rm -f "$out"
+  return 0
+}
+harness_make_readonly() { chmod -R a-w "$1" 2>/dev/null || true; }
+harness_restore_writable() { chmod -R u+w "$1" 2>/dev/null || true; }
+harness_write_session() { # id turns-json-file out
+  "$PYTHON" -c '
+import json, sys
+sid, turns_path, out = sys.argv[1:]
+json.dump({"schema_version": 1, "engine": "deepseek-harness", "route": "deepseek-openrouter",
+           "harness_session": sid, "turns": json.load(open(turns_path, encoding="utf-8"))},
+          open(out, "w", encoding="utf-8"), indent=1)
+' "$1" "$2" "$3"
+}
+harness_append_turns() { # session-json turns-json-file out
+  "$PYTHON" -c '
+import json, sys
+sess, add, out = sys.argv[1:]
+value = json.load(open(sess, encoding="utf-8"))
+value["turns"].extend(json.load(open(add, encoding="utf-8")))
+json.dump(value, open(out, "w", encoding="utf-8"), indent=1)
+' "$1" "$2" "$3"
+}
+harness_turns_json() { # session-file -> prints the turns as a JSON array
+  "$PYTHON" -c '
+import json, sys
+print(json.dumps(json.load(open(sys.argv[1], encoding="utf-8"))["turns"]))
+' "$1"
+}
+
 case "$SUBCMD" in
   balance)
     [ "$#" -eq 0 ] || { echo "Usage: ai-deepseek-agent balance" >&2; exit 2; }
@@ -1454,13 +1520,38 @@ case "$SUBCMD" in
     ;;
   doctor)
     LIVE=0
-    case "${1:-}" in '') ;; --live) LIVE=1;; *) echo "Error: unknown doctor option: $1" >&2; exit 2;; esac
-    [ "$#" -le 1 ] || { echo 'Usage: ai-deepseek-agent doctor [--live]' >&2; exit 2; }
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        '') ;;
+        --live) LIVE=1 ;;
+        --route) [ "$#" -ge 2 ] && [ -n "$2" ] || { echo 'Error: --route requires a value.' >&2; exit 2; }; ROUTE="$2"; shift ;;
+        --route=*) [ -n "${1#--route=}" ] || { echo 'Error: --route requires a value.' >&2; exit 2; }; ROUTE="${1#--route=}" ;;
+        *) echo "Error: unknown doctor option: $1" >&2; exit 2 ;;
+      esac
+      shift
+    done
+    [ -n "$ROUTE" ] && [ "$ROUTE" = deepseek-openrouter ] \
+      || { [ -z "$ROUTE" ] || { echo 'Error: --route accepts only deepseek-openrouter.' >&2; exit 2; }; }
     CREDENTIAL_READY=0
     if [ -n "$DEEPSEEK_PROVIDER_KEY" ] || key_store_ok; then CREDENTIAL_READY=1; fi
     [ "$CREDENTIAL_READY" -eq 1 ] || { echo 'Error: DeepSeek protected key store is unavailable. Run ai-deepseek-agent store-key outside a review.' >&2; exit 1; }
     printf 'PASS  curl available\nPASS  Python available (%s)\nPASS  bounded provider timeout (%ss)\n' "$PYTHON" "$CALL_TIMEOUT"
-    if [ "$LIVE" -eq 1 ]; then
+    if [ "$LIVE" -eq 1 ] && [ -n "$ROUTE" ]; then
+      harness_ready
+      PROBE_HOME="$(mktemp -d)"; PROBE_WORK="$(mktemp -d)"
+      printf 'probe\n' > "$PROBE_WORK/README"
+      printf 'Reply exactly DEEPSEEK_REVIEWER_HEALTHY\n' > "$PROBE_HOME/prompt"
+      chmod -R a-w "$PROBE_WORK" 2>/dev/null || true
+      HARNESS_DSH_HOME="$PROBE_HOME/dsh-home"
+      if ! PROBE_REPLY="$(harness_run "$PROBE_HOME/prompt" "" "$PROBE_WORK")"; then
+        chmod -R u+w "$PROBE_WORK" 2>/dev/null || true; rm -rf "$PROBE_HOME" "$PROBE_WORK"
+        echo 'Error: deepseek-openrouter live probe failed.' >&2; exit 1
+      fi
+      chmod -R u+w "$PROBE_WORK" 2>/dev/null || true; rm -rf "$PROBE_HOME" "$PROBE_WORK"
+      grep -qx 'DEEPSEEK_REVIEWER_HEALTHY' <<<"$PROBE_REPLY" \
+        || { echo 'Error: deepseek-openrouter live probe returned unexpected text.' >&2; exit 1; }
+      printf 'PASS  live provider response (deepseek-openrouter)\n'
+    elif [ "$LIVE" -eq 1 ]; then
       MSGS="$(mktemp)"; REPLY_FILE="$(mktemp)"
       printf '[{"role":"user","content":"Reply exactly DEEPSEEK_REVIEWER_HEALTHY"}]\n' > "$MSGS"
       call_api "$MSGS" "$REPLY_FILE" || { rm -f "$MSGS" "$REPLY_FILE"; reviewer_credit_exit; exit 1; }
@@ -1481,7 +1572,12 @@ case "$SUBCMD" in
     "$PYTHON" -c '
 import json, sys
 sys.stdout.reconfigure(encoding="utf-8")
-for m in json.load(open(sys.argv[1], encoding="utf-8")):
+data = json.load(open(sys.argv[1], encoding="utf-8"))
+if isinstance(data, dict) and data.get("engine") == "deepseek-harness":
+    print("--- HARNESS %s (session %s) ---" % (data.get("route"), data.get("harness_session")))
+    print()
+    data = data.get("turns", [])
+for m in data:
     print("--- " + m["role"].upper() + " ---")
     print(m["content"])
     print()
@@ -1511,6 +1607,12 @@ for m in json.load(open(sys.argv[1], encoding="utf-8")):
           [ "$#" -ge 2 ] && [ -n "$2" ] || exit 2
           if [ "$1" = --base ]; then OPT_BASE="$2"; else OPT_ASSERT_HEAD="$2"; fi
           shift 2 ;;
+        --route)
+          [ "$#" -ge 2 ] && [ -n "$2" ] || { echo 'Error: --route requires a value.' >&2; exit 2; }
+          ROUTE="$2"; shift 2 ;;
+        --route=*)
+          [ -n "${1#--route=}" ] || { echo 'Error: --route requires a value.' >&2; exit 2; }
+          ROUTE="${1#--route=}"; shift ;;
         *) if [ -z "$MSG" ]; then MSG="$1"; else MSG="$MSG $1"; fi; shift ;;
       esac
     done
@@ -1524,6 +1626,44 @@ for m in json.load(open(sys.argv[1], encoding="utf-8")):
     [ "$REVIEW" = 0 ] || MSG="$MSG
 
 $REVIEW_INSTRUCTION"
+
+    if [ -n "$ROUTE" ]; then
+      harness_ready
+      harness_refuse_combinations $([ "$REVIEW" = 1 ] && printf %s --review) $([ -n "$GOVERNED_HEAD" ] && printf %s --governed-verdict) $([ -n "$OPT_BASE" ] && printf %s --base) $([ -n "$OPT_ASSERT_HEAD" ] && printf %s --assert-head) $([ "$REPO_TOOLS" = 1 ] && printf %s --repo-tools)
+      ID="$(new_id)"; F="$(session_path "$ID")" || exit 1
+      while [ -e "$F" ]; do ID="$(new_id)-$RANDOM"; F="$(session_path "$ID")" || exit 1; done
+      acquire_lock "$F" || exit 1
+      HARNESS_DSH_HOME="$(session_path "$ID" .dsh-home)" || exit 1
+      mkdir -p "$HARNESS_DSH_HOME" || exit 1
+      PROMPT_FILE="$(mktemp "$SESS_DIR/.prompt.XXXXXX")" || exit 1
+      printf '%s\n' "$MSG" > "$PROMPT_FILE"
+      HARNESS_SID_FILE="$PROMPT_FILE.sid"
+      WORK="$(make_turn_workspace "$REPO_ROOT")" || exit 1
+      ACTIVE_TURN_WORKSPACE="$WORK"
+      harness_make_readonly "$WORK"
+      if ! REPLY="$(harness_run "$PROMPT_FILE" "" "$WORK")"; then
+        harness_restore_writable "$WORK"; drop_turn_workspace; release_lock
+        echo "Error: deepseek-openrouter turn failed; conversation was not created." >&2
+        exit 1
+      fi
+      harness_restore_writable "$WORK"; drop_turn_workspace
+      HARNESS_SID="$(cat "$HARNESS_SID_FILE" 2>/dev/null || printf '')"
+      rm -f "$HARNESS_SID_FILE"
+      TURNS="$(mktemp "$SESS_DIR/.turns.XXXXXX")" || exit 1
+      printf '[{"role":"user","content":%s},{"role":"assistant","content":%s}]' \
+        "$(jq -Rs . <<<"$MSG")" "$(jq -Rs . <<<"$REPLY")" > "$TURNS"
+      if ! harness_write_session "$HARNESS_SID" "$TURNS" "$F"; then
+        rm -f "$TURNS" "$PROMPT_FILE"; release_lock
+        echo "Error: harness conversation could not be published; nothing was created." >&2
+        exit 1
+      fi
+      rm -f "$TURNS" "$PROMPT_FILE"
+      release_lock
+      echo "SESSION_ID: $ID"
+      echo
+      echo "$REPLY"
+      exit 0
+    fi
 
     ID="$(new_id)"; F="$(session_path "$ID")" || exit 1
     while [ -e "$F" ]; do ID="$(new_id)-$RANDOM"; F="$(session_path "$ID")" || exit 1; done
@@ -1588,6 +1728,12 @@ $REVIEW_INSTRUCTION"
           [ "$#" -ge 2 ] && [ -n "$2" ] || exit 2
           if [ "$1" = --base ]; then OPT_BASE="$2"; else OPT_ASSERT_HEAD="$2"; fi
           shift 2 ;;
+        --route)
+          [ "$#" -ge 2 ] && [ -n "$2" ] || { echo 'Error: --route requires a value.' >&2; exit 2; }
+          ROUTE="$2"; shift 2 ;;
+        --route=*)
+          [ -n "${1#--route=}" ] || { echo 'Error: --route requires a value.' >&2; exit 2; }
+          ROUTE="${1#--route=}"; shift ;;
         *) if [ -z "$MSG" ]; then MSG="$1"; else MSG="$MSG $1"; fi; shift ;;
       esac
     done
@@ -1604,6 +1750,59 @@ $REVIEW_INSTRUCTION"
     [ "$REVIEW" = 0 ] || MSG="$MSG
 
 $REVIEW_INSTRUCTION"
+
+    if [ -n "$ROUTE" ]; then
+      harness_ready
+      harness_refuse_combinations $([ "$REVIEW" = 1 ] && printf %s --review) $([ -n "$GOVERNED_HEAD" ] && printf %s --governed-verdict) $([ -n "$OPT_BASE" ] && printf %s --base) $([ -n "$OPT_ASSERT_HEAD" ] && printf %s --assert-head) $([ "$REPO_TOOLS" = 1 ] && printf %s --repo-tools)
+      HARNESS_SID="$("$PYTHON" -c '
+import json, sys
+try: value = json.load(open(sys.argv[1], encoding="utf-8"))
+except (OSError, ValueError): raise SystemExit(1)
+if not isinstance(value, dict) or value.get("engine") != "deepseek-harness" \
+        or value.get("route") != "deepseek-openrouter" or not value.get("harness_session"):
+    raise SystemExit(1)
+print(value["harness_session"])
+' "$F")" || { echo "Error: session $ID is not a deepseek-openrouter harness conversation; continue it with its original engine." >&2; exit 1; }
+      acquire_lock "$F" || exit 1
+      HARNESS_DSH_HOME="$(session_path "$ID" .dsh-home)" || exit 1
+      PROMPT_FILE="$(mktemp "$SESS_DIR/.prompt.XXXXXX")" || exit 1
+      printf '%s\n' "$MSG" > "$PROMPT_FILE"
+      HARNESS_SID_FILE="$PROMPT_FILE.sid"
+      WORK="$(make_turn_workspace "$REPO_ROOT")" || exit 1
+      ACTIVE_TURN_WORKSPACE="$WORK"
+      harness_make_readonly "$WORK"
+      if ! REPLY="$(harness_run "$PROMPT_FILE" "$HARNESS_SID" "$WORK")"; then
+        harness_restore_writable "$WORK"; drop_turn_workspace; release_lock
+        echo "Error: deepseek-openrouter turn failed; canonical conversation is unchanged." >&2
+        exit 1
+      fi
+      harness_restore_writable "$WORK"; drop_turn_workspace
+      HARNESS_SID="$(cat "$HARNESS_SID_FILE" 2>/dev/null || printf '%s' "$HARNESS_SID")"
+      rm -f "$HARNESS_SID_FILE"
+      TURNS="$(mktemp "$SESS_DIR/.turns.XXXXXX")"; NEWF="$(mktemp "$SESS_DIR/.turns.XXXXXX")" || exit 1
+      printf '[{"role":"user","content":%s},{"role":"assistant","content":%s}]' \
+        "$(jq -Rs . <<<"$MSG")" "$(jq -Rs . <<<"$REPLY")" > "$TURNS"
+      if ! harness_append_turns "$F" "$TURNS" "$NEWF"; then
+        rm -f "$TURNS" "$NEWF" "$PROMPT_FILE"; release_lock
+        echo "Error: harness conversation could not be published; canonical conversation is unchanged." >&2
+        exit 1
+      fi
+      "$PYTHON" -c '
+import json, sys
+value = json.load(open(sys.argv[1], encoding="utf-8"))
+value["harness_session"] = sys.argv[2]
+json.dump(value, open(sys.argv[3], "w", encoding="utf-8"), indent=1)
+' "$NEWF" "$HARNESS_SID" "$NEWF.session" && mv -f "$NEWF.session" "$NEWF"
+      if ! write_atomic "$F" "$NEWF"; then
+        rm -f "$TURNS" "$NEWF" "$PROMPT_FILE"; release_lock
+        echo "Error: harness conversation could not be published; canonical conversation is unchanged." >&2
+        exit 1
+      fi
+      rm -f "$TURNS" "$NEWF" "$PROMPT_FILE"
+      release_lock
+      echo "$REPLY"
+      exit 0
+    fi
 
     acquire_lock "$F" || exit 1
     session_review_identity_matches || exit 1

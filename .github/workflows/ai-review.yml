@@ -21,6 +21,10 @@ on:
         description: JSON list of runner labels for the review job (a self-hosted runner holding the provider keys)
         type: string
         default: '["self-hosted", "ai-devops-linux"]'
+      candidate_routes:
+        description: opt-in candidate route plan (#2549/#2550); empty keeps the normal rotation
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -96,6 +100,15 @@ jobs:
           script="$GITHUB_WORKSPACE/toolkit/bin/ai-review-simple"
           base="$(git -C pr merge-base "$BASE_SHA" "$HEAD_SHA")"
           mkdir -p results; : > results/order
+          # Candidate routes (#2549/#2550) are opt-in: the input is empty and
+          # AI_REVIEW_CANDIDATE_ROUTES is unset on main, so the normal rotation
+          # below is the only default path.
+          candidate_routes="${AI_REVIEW_CANDIDATE_ROUTES:-${{ inputs.candidate_routes || '' }}}}"
+          if [ -n "$candidate_routes" ]; then
+            python3 "$script" --run-plan "$candidate_routes" --repo pr --base "$base" \
+              --head "$HEAD_SHA" --results-dir results
+            exit 0
+          fi
           for p in $(python3 "$script" --rotation "$PR"); do
             echo "$p" >> results/order
             rc=0
