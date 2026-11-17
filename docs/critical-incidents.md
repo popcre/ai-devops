@@ -634,7 +634,11 @@ anything they cannot remove — shared-db `lane-watchdog.mjs --sweep-ghosts`
 (PR #6216) and ai-devops `tools/ci/ghost-run-sweep.mjs` + `ghost-run-sweep.yml`
 (PR #2492). A purge of the 22 standing records was filed with GitHub Support on
 2026-11-12 ~8:05 PM EST (Actions → Stuck workflow; record IDs on
-[popcre/shared-db#6215](https://github.com/popcre/shared-db/issues/6215)).
+[popcre/shared-db#6215](https://github.com/popcre/shared-db/issues/6215)) and
+completed 2026-11-17 — all 22 purged (20 on 2026-11-16, the last 2 on
+2026-11-17); GitHub attributed the wedge to an Actions service incident
+(https://www.githubstatus.com/incidents/dvy0t3mvh1lg). Both sweepers report
+green ("no wedged queued runs").
 
 **Prevention / go-arounds while the purge is pending:** nothing is globally
 jammed — merges land and checks run. A ghost strands at most one workflow on one

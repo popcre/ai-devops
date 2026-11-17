@@ -821,7 +821,7 @@ else
     local token="${OP_SERVICE_ACCOUNT_TOKEN:-}"
     [ -n "$token" ] || token="$(cat "$HOME/.config/ai-devops/op-service-account")"
     OP_SERVICE_ACCOUNT_TOKEN="$token" \
-      "$REPO_ROOT/bin/ai-second-opinion" deepseek-openrouter store-key --if-missing </dev/null
+      "$REPO_ROOT/bin/ai-second-opinion" muse-openrouter store-key --if-missing </dev/null
   }
   run_stage optional "OpenRouter reviewer key store" openrouter_reviewer_key_store
 fi

@@ -1,0 +1,9 @@
+[Unit]
+Description=Check GitHub Actions runner folders and services daily
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+
+[Install]
+WantedBy=timers.target

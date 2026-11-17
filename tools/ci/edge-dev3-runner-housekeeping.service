@@ -1,0 +1,6 @@
+[Unit]
+Description=Check edge-dev3 for stranded GitHub Actions runners
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 %h/.local/libexec/edge-dev3-runner-housekeeping.py

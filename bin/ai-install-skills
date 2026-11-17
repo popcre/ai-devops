@@ -59,6 +59,8 @@ while [ -L "$_self" ]; do _t="$(readlink "$_self")"; case "$_t" in /*) _self="$_
 REPO_ROOT="$(cd "$(dirname "$_self")/.." && pwd)"
 # shellcheck source=../tools/lib/globals-common.sh
 source "$REPO_ROOT/tools/lib/globals-common.sh"
+# shellcheck source=../tools/lib/path-identity.sh
+source "$REPO_ROOT/tools/lib/path-identity.sh"
 SHORT_HOST="${SHORT_HOST:-$(hostname 2>/dev/null | cut -d. -f1 | tr '[:upper:]' '[:lower:]')}"
 
 # On Windows (Git Bash / MSYS) $HOME can be redirected to a mapped network
@@ -642,7 +644,8 @@ find_repo_clone_roots() {
     printf '%s\n' "${_CLONE_ROOTS_CACHE[$key]}"
     return 0
   fi
-  local root clone url identity wt collected=""
+  local root clone url identity wt canonical collected=""
+  local -A seen=()
   while IFS= read -r root; do
     [[ -n "$root" && -d "$root/$key" ]] || continue
     clone="$root/$key"
@@ -654,10 +657,19 @@ find_repo_clone_roots() {
       echo "  ! skip $clone — origin $identity is not an accepted identity for '$key'" >&2
       continue
     fi
-    collected+="$clone"$'\n'
+    # Git lists the starting checkout too. Multiple scan roots can also
+    # discover the same worktree under different path spellings.
     while IFS= read -r wt; do
-      [[ -n "$wt" && -d "$wt" ]] && collected+="$wt"$'\n'
-    done < <(git -C "$clone" worktree list --porcelain 2>/dev/null | awk '/^worktree /{ $1=""; sub(/^ /,""); print }')
+      wt="${wt%$'\r'}"
+      [[ -n "$wt" && -d "$wt" ]] || continue
+      canonical="$(ai_path_canonical "$wt")" || continue
+      [[ -z "${seen[$canonical]:-}" ]] || continue
+      seen[$canonical]=1
+      collected+="$wt"$'\n'
+    done < <(
+      printf '%s\n' "$clone"
+      git -C "$clone" worktree list --porcelain 2>/dev/null | sed -n 's/^worktree //p'
+    )
   done < <(skill_clone_roots)
   _CLONE_ROOTS_CACHE["$key"]="$collected"
   printf '%s' "$collected"
