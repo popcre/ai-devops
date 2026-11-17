@@ -420,6 +420,22 @@ the docs-only exception does not apply; follow the full required review and boun
 PR-wait route for that change. Record the handoff PR on the same existing work
 issue. Open no marker or leftover-proof issue.
 
+## Stranded promotions — list before ending (popcre/shared-db#6561)
+
+Before the handover, run both queries and report the result in the closing
+note, including any stranded PR this session merged or can repair:
+
+```bash
+gh pr list --repo popcre/shared-db --state all --label promotion-parked
+gh pr list --repo popcre/shared-db --state all --label promotion-held
+```
+
+If this session merged a migration PR that is not yet in production, leave
+`- [ ] promotion delivered to production` unchecked on its landing issue and
+put the exact re-check in the HANDOFF.d file (or schedule a self-check where
+the harness can). Never add or remove those labels by hand; the automatic
+trigger owns them. Rule: shared-db `docs/agents/worktrees-and-handoffs.md` §2.1-H.
+
 ## Before you call the handover done
 
 **Release every claim and lock first.** Before the closing report, release
