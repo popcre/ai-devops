@@ -532,7 +532,10 @@ def start(provider, name, repo, writable, base=None, route=None):
         top = copy_repo(repo, work, writable)
     except subprocess.CalledProcessError as exc:
         shutil.rmtree(sdir, ignore_errors=True)
-        die("could not copy the repository: " + (exc.stderr or b"").decode(errors="replace")[:300])
+        detail = exc.stderr or ""
+        if isinstance(detail, bytes):
+            detail = detail.decode(errors="replace")
+        die("could not copy the repository: " + detail[:300])
     agent = "implement" if writable else "second-opinion"
     spec = (ars.spec_for(provider, route) if route and route in RR.routes()
             else ars.PROVIDERS[provider])

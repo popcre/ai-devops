@@ -533,6 +533,17 @@ class SecondOpinionRouteTests(Base):
         self.assertEqual(r.returncode, 2)
         self.assertIn("read-only", r.stderr)
 
+    def test_start_copy_failure_reports_cleanly(self):
+        import subprocess as sp
+        empty = os.path.join(self.tmp.name, "not-a-repo")
+        os.makedirs(empty)
+        r = sp.run([sys.executable, SO, "muse", "--route", "muse-meta", "new", "bx",
+                    "--repo", empty, "hello"], env=self.env, capture_output=True,
+                   text=True, timeout=60)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("could not copy the repository", r.stderr)
+        self.assertNotIn("Traceback", r.stderr)
+
     def test_route_shaped_provider_entry_selects_itself(self):
         self.mode("ok")
         r = self.run_so("hy4-openrouter", "new", "hp", "hello there")
