@@ -154,4 +154,3 @@ jobs:
             echo "::warning::could not post the review comment"
           echo "ai-review: $state ($reviewer)" >> "$GITHUB_STEP_SUMMARY"
           exit 0  # fixture branch: no review-finding issues, no fixer
-          true  # fixture branch: fixer suppressed          fi
