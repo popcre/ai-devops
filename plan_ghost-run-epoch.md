@@ -11,9 +11,9 @@ design: popcre/shared-db#6426 (PRs popcre/shared-db#6427, #6434).
 | 2 | Guard test pinning the suffix | ✅ done | `tests/test-concurrency-epoch.sh` 2/2 pass; fails when one suffix removed (verified locally 2026-11-17) |
 | 3 | Sweep "unreapable" message names the escape | ✅ done | PR #2573; `tests/test-ghost-run-sweep.sh` 3/3 pass |
 | 4 | Runbook `docs/ghost-run-escape.md` | ✅ done | PR #2573; linked from AGENTS.md Critical incidents and ghost-run-sweep.yml header |
-| 5 | PR, merge, post-merge live proof | ⬜ open | — |
+| 5 | PR, merge, post-merge live proof | ✅ done | PR #2573 merged 5650de96 (2026-11-17); post-merge verify run 44084486297 success, doc-health run 44084582486 success; #2367 box ticked |
 
-Fresh session starts at step 1. Written 2026-11-16 3:50 PM EST.
+All steps done 2026-11-17 7:50 AM EST. Written 2026-11-16 3:50 PM EST.
 
 ## 1. Ultimate goal
 
