@@ -23,13 +23,14 @@ Use current upstream. Planning baseline: `ec4886f57232a1bb2741b7cf66d5fa1a949a1d
 | 4. Qualify the exact integrated candidate | Route receipts landed 2026-11-17 (candidate 883e552); activation hold intact | Run the route, platform and failure matrix in §10. |
 | 5. Enable, verify and retain rollback | On hold | Keep existing defaults during qualification. Follow §13 for the eventual cutover. |
 | 6. Qualify caching separately | Started: wiring + first measurements (#2571, off by default) | [Muse baseline](https://github.com/popcre/ai-devops/issues/2531#issuecomment-6928592964). Phase C can start after step 4. |
-| 6a. Correct cache measurement reporting | Implemented 2026-11-17; landing and installed proof pending | `bin/ai-review-simple:cache_receipts`; `python3 tests/test_reviewer_routes.py CacheReceiptTests` reproduces missing versus zero, invalid counters and mixed events. |
+| 6a. Correct cache measurement reporting | Complete 2026-11-17; merged and installed on Ubuntu/Windows | [Acceptance receipt](https://github.com/popcre/ai-devops/issues/2531#issuecomment-6962732060): landed source `7dffdd4845729eac1a29463a60093b94cf134832`, 94 focused checks per OS, matching installed tool hashes and missing/zero/partial smoke results. Reproduce the counter boundary with `python3 tests/test_reviewer_routes.py CacheReceiptTests`. |
 | 6b. Reduce total token spend | Planned, not enabled | Execute the ordered experiments in §9, step 6b under #2551; report acceptance on #2531. No savings forecast or default switch is authorized. |
 
 **Token-efficiency amendment, 2026-11-17.** This amendment fixes reporting and
 specifies future experiments; it does not implement prompt trimming, compaction,
-retention, deduplication, model changes or activation. Fresh sessions start at
-6a's landing evidence, then the still-open Phase C measurements and 6b. The
+retention, deduplication, model changes or activation. Fresh sessions read
+6a's completed acceptance receipt, then start the still-open Phase C measurements
+and 6b when those experiments are in scope. The
 historical route STATUS above is not a substitute for current acceptance:
 [integrated re-check](https://github.com/popcre/ai-devops/issues/2551#issuecomment-6955989936)
 records restart/idle and failover proof; the [parent](https://github.com/popcre/ai-devops/issues/2531)
@@ -344,7 +345,7 @@ Credential references only. In the `vibe_coding` 1Password vault, resolve Meta d
 - [ ] Exact candidate revision has passing focused and policy-required tests, Ubuntu and edge-dev receipts, and four attributable GitHub verdicts. Keep `- [ ] live proof` on #2531 until completed.
 - [ ] Candidate lands through the protected queue, old defaults remain during qualification, and any later activation has a separately revertible default change. Confirm commit on `origin/main`, installed revisions and one live check per enabled route.
 - [ ] Record Phase C separately. If caching is released, verify its measured API usage and rollback without changing the review routes. The initial route release can finish while the cache experiment stays disabled.
-- [ ] Step 6a reporting repair lands with regression tests and installed Ubuntu/Windows proof; missing counters stay unknown, measured zero stays zero and defaults remain unchanged. Attach evidence on #2531; keep any outstanding live proof there rather than opening another issue.
+- [x] Step 6a reporting repair landed with regression tests and installed Ubuntu/Windows proof: [acceptance receipt](https://github.com/popcre/ai-devops/issues/2531#issuecomment-6962732060), source `7dffdd4845729eac1a29463a60093b94cf134832`. Missing counters stay unknown, measured zero stays zero and defaults remain unchanged. The wider rollout and future Phase C experiments remain open on their existing issues.
 - [ ] Step 6b remains planned until its owned experiments have complete billing coverage, repeatable net savings and preserved review/continuation quality. Keep experiment acceptance on #2551 with parent evidence on #2531; no new tracker or default change is implied.
 - [ ] Rehearse restoring previous settings without deleting candidate session state. Verify that a live legacy review can complete after rollback.
 - [ ] Update STATUS, current reviewer docs and tracking issue with live evidence. Retire applicable handoffs only after the acceptance conditions are met.
@@ -377,6 +378,16 @@ plan and returned APPROVE. Its two concrete pre-existing failure/coverage
 findings are addressed by the reporting-contract fixes and tests in §5/6a;
 the plan does not turn its optional experiments into approval or activation
 requirements. Live billing conclusions remain unassessable until measured.
+
+Step 6a delivery audit: #2600 and #2601 landed through the queue; the tested
+and landed source tree is `6614581e71e87ec2530eba443614cd37bdb85753`. Ubuntu
+and Windows each passed 56 route plus 38 legacy checks, both normal installers
+completed at `7dffdd4845729eac1a29463a60093b94cf134832`, and installed smoke
+proved missing, zero and partial counters with matching normalized tool hashes.
+The receipt above records the two Muse APPROVE results and unchanged-default
+proof. This completes only 6a and this plan amendment, not the parent rollout
+or step 6b. Future documentation-only acceptance updates do not change the
+installed runtime bytes or require repeating the same code tests.
 
 ### Lead launch prompt for the token-efficiency amendment
 
