@@ -101,11 +101,24 @@ def candidate_plan(rotation_order):
     return plan
 
 
-def opencode_provider_block(spec):
-    """The OpenCode provider block for an opengine-engine route (plan section 5
-    shapes, custom OpenAI-compatible connection for OpenRouter)."""
+def opencode_provider_block(spec, cache=None):
+    """The OpenCode provider block for an opencode-engine route (plan section 5
+    shapes, custom OpenAI-compatible connection for OpenRouter).
+
+    cache (Phase C, #2551, opt-in only) carries {"prompt_cache_key": str,
+    "session_id": str}; OpenCode merges `body` into every request body and
+    sends `headers` alongside, so Meta's prompt_cache_key rides the body on
+    both Muse connections and OpenRouter's session id rides the header.
+    Nothing is added when cache is None: defaults are unchanged."""
     provider_id = spec["model"].split("/", 1)[0]
     model_id = spec["model"].split("/", 1)[1]
+    key = (cache or {}).get("prompt_cache_key")
+    session = (cache or {}).get("session_id")
+    extra = {}
+    if key:
+        extra["body"] = {"prompt_cache_key": key}
+    if provider_id != "meta-model-api" and session:
+        extra["headers"] = {"x-session-id": session}
     if provider_id == "meta-model-api":  # the direct Muse connection (existing spec)
         return {"meta-model-api": {
             "npm": "@ai-sdk/openai", "name": "Meta Model API",
@@ -113,14 +126,58 @@ def opencode_provider_block(spec):
                         "apiKey": "{env:%s}" % spec["key_env"]},
             "models": {"muse-spark-1.3-contributor": {
                 "name": "Muse Spark 1.3 Contributor",
-                "limit": {"context": 1048576, "output": 65536}}}}}
+                "limit": {"context": 1048576, "output": 65536}}},
+            **extra}}
     return {provider_id: {
         "npm": "@ai-sdk/openai-compatible", "name": provider_id,
         "options": {"baseURL": spec["base_url"] or OPENROUTER_URL,
                     "apiKey": "{env:%s}" % spec["key_env"]},
         "models": {model_id: {
             "name": model_id, "tool_call": True,
-            "limit": {"context": 1048576, "output": 65536}}}}}
+            "limit": {"context": 1048576, "output": 65536}}},
+        **extra}}
+
+
+CACHE_VERSION = "aidv1"
+MUSE_ROUTES = ("muse-meta", "muse-openrouter")
+
+
+def cache_enabled():
+    """Phase C is opt-in and off by default: nothing changes unless a caller
+    sets AI_REVIEW_CACHE=1 for a scoped experiment (#2551)."""
+    return os.environ.get("AI_REVIEW_CACHE") == "1"
+
+
+def cache_scope(repo=None):
+    """The stable scope of a shared review-instructions cache key: the
+    authorized repository (CI name, else the local checkout), never a
+    credential, timestamp or private path."""
+    scope = os.environ.get("GITHUB_REPOSITORY") or (repo or "local")
+    if "/" not in scope and scope != "local":
+        scope = os.path.basename(scope.rstrip("/\\")) or "local"
+    import hashlib
+    return f"{CACHE_VERSION}-" + hashlib.sha256(
+        (scope + "\0" + (os.environ.get("AI_REVIEW_CACHE_NAMESPACE") or "shared")
+         ).encode("utf-8", "replace")).hexdigest()[:32]
+
+
+def cache_session_id(namespace):
+    """An opaque, per-review or per-conversation id: stable across restarts
+    inside one namespace, derived from nothing private (namespace is a head
+    SHA, session name or fixed label)."""
+    import hashlib
+    return CACHE_VERSION + "-s-" + hashlib.sha256(
+        namespace.encode("utf-8", "replace")).hexdigest()[:32]
+
+
+def cache_fields(route_id, repo, namespace):
+    """The cache identifiers for a route run, or None when the experiment is
+    off or the route is not a Muse connection. Keys are scoped per repository
+    and route; the session id is independent of the shared key."""
+    if not cache_enabled() or route_id not in MUSE_ROUTES:
+        return None
+    return {"prompt_cache_key": cache_scope(repo) + "-" + route_id,
+            "session_id": cache_session_id(namespace)}
 
 
 def opencode_spec(route_id):

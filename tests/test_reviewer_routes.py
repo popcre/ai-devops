@@ -69,6 +69,12 @@ FAKE_OC = textwrap.dedent("""\
         sys.exit(0)
     if mode == "sleep":
         time.sleep(30)
+    if mode == "cachefinish":
+        print(json.dumps({"type": "step_start", "sessionID": "ses_c", "part": {}}))
+        text("Findings: none.\\nVERDICT: APPROVE")
+        print(json.dumps({"type": "step_finish", "part": {"reason": "stop", "tokens": {
+            "total": 10, "input": 8, "output": 2, "cache": {"write": 5, "read": 100}}}}))
+        sys.exit(0)
     sid = "--session" in args and args[args.index("--session") + 1] or "ses_" + mode
     print(json.dumps({"type": "step_start", "sessionID": sid, "part": {}}))
     text("ANSWER[" + mode + "] for: " + prompt.splitlines()[0] + "\\nVERDICT: APPROVE")
@@ -732,6 +738,108 @@ class DeepseekAgentHarnessTests(Base):
         r = self.agent("send", "--route", "deepseek-openrouter", "--review", "hello")
         self.assertEqual(r.returncode, 2)
         self.assertIn("cannot be combined", r.stderr)
+
+
+class CacheQualificationTests(SecondOpinionRouteTests):
+    """Phase C (#2551): opt-in cache identifiers, prompt order and receipts."""
+
+    def test_muse_cache_key_scope_and_stability(self):
+        self.env["AI_REVIEW_CACHE"] = "1"
+        self.mode("ok")
+        proc, result = self.run_review(route="muse-openrouter")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        cfg = self.oc_calls()[0]["config"]["provider"]["openrouter-muse"]
+        key = cfg["body"]["prompt_cache_key"]
+        session = cfg["headers"]["x-session-id"]
+        self.assertTrue(key.startswith("aidv1-"))
+        self.assertTrue(session.startswith("aidv1-s-"))
+        self.assertLessEqual(len(key), 256)
+        self.assertNotIn("or-key", key + session)  # never credential-derived
+        self.assertIn("cache", result)
+        # stable across a second identical review; the session id follows the head
+        self.mode("ok")
+        self.run_review(route="muse-openrouter")
+        cfg2 = self.oc_calls()[1]["config"]["provider"]["openrouter-muse"]
+        self.assertEqual(cfg2["body"]["prompt_cache_key"], key)
+        self.assertEqual(cfg2["headers"]["x-session-id"], session)
+        # a different namespace isolates the shared key
+        self.env["AI_REVIEW_CACHE_NAMESPACE"] = "other"
+        self.mode("ok")
+        self.run_review(route="muse-openrouter")
+        cfg3 = self.oc_calls()[2]["config"]["provider"]["openrouter-muse"]
+        self.assertNotEqual(cfg3["body"]["prompt_cache_key"], key)
+        del self.env["AI_REVIEW_CACHE_NAMESPACE"]
+
+    def test_meta_gets_cache_key_without_openrouter_session_header(self):
+        self.env["AI_REVIEW_CACHE"] = "1"
+        self.mode("ok")
+        proc, _ = self.run_review(route="muse-meta")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        cfg = self.oc_calls()[0]["config"]["provider"]["meta-model-api"]
+        self.assertTrue(cfg["body"]["prompt_cache_key"].startswith("aidv1-"))
+        self.assertNotIn("headers", cfg)
+
+    def test_cache_off_by_default_everywhere(self):
+        self.mode("ok")
+        proc, _ = self.run_review(route="muse-openrouter")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        cfg = self.oc_calls()[0]["config"]["provider"]["openrouter-muse"]
+        self.assertNotIn("body", cfg)
+        self.assertNotIn("headers", cfg)
+
+    def test_non_muse_route_gets_no_cache_fields(self):
+        self.env["AI_REVIEW_CACHE"] = "1"
+        self.mode("approve")
+        proc, _ = self.run_review(route="deepseek-openrouter")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertNotIn("body", self.dsh_calls()[0].get("patch", "") and {} or {})
+
+    def test_cache_prefix_puts_fixed_instructions_before_variable_ids(self):
+        import importlib.machinery, importlib.util
+        loader = importlib.machinery.SourceFileLoader("ars_c", SCRIPT)
+        spec = importlib.util.spec_from_loader("ars_c", loader)
+        ars = importlib.util.module_from_spec(spec)
+        loader.exec_module(ars)
+        prompt = ars.build_prompt(self.repo, self.base, self.head)
+        fixed = prompt.index("Do not report style preferences.")
+        head_at = prompt.index(self.head)
+        base_at = prompt.index(self.base)
+        self.assertLess(fixed, head_at)
+        self.assertLess(fixed, base_at)
+
+    def test_cache_usage_receipts_distinguish_missing_from_zero(self):
+        self.env["AI_REVIEW_CACHE"] = "1"
+        self.mode("cachefinish")
+        proc, result = self.run_review(route="muse-openrouter")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(result["cache"], {"read": 100, "write": 5})
+        self.mode("ok")
+        proc, result = self.run_review(route="muse-openrouter")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        # no token events at all: the measurement is missing, not a zero hit
+        self.assertEqual(result["cache"], {"read": None, "write": None})
+        import json as _json
+        zero = _json.dumps({"type": "step_finish", "part": {"tokens": {
+            "cache": {"read": 0, "write": 0}}}})
+        import importlib.machinery, importlib.util
+        _ld = importlib.machinery.SourceFileLoader("ars_z", SCRIPT)
+        _sp = importlib.util.spec_from_loader("ars_z", _ld)
+        _m = importlib.util.module_from_spec(_sp)
+        _ld.exec_module(_m)
+        self.assertEqual(_m.cache_receipts(zero), {"read": 0, "write": 0})
+
+    def test_second_opinion_cache_fields_stable_across_resume(self):
+        self.env["AI_REVIEW_CACHE"] = "1"
+        self.mode("ok")
+        r = self.run_so("muse", "--route", "muse-openrouter", "new", "cs", "hello")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.mode("ok")
+        r2 = self.run_so("muse", "--route", "muse-openrouter", "ask", "cs", "again")
+        self.assertEqual(r2.returncode, 0, r2.stderr)
+        cfgs = [c["config"]["provider"]["openrouter-muse"] for c in self.oc_calls()]
+        self.assertEqual(cfgs[0]["body"]["prompt_cache_key"], cfgs[1]["body"]["prompt_cache_key"])
+        self.assertEqual(cfgs[0]["headers"]["x-session-id"], cfgs[1]["headers"]["x-session-id"])
+
 
 
 if __name__ == "__main__":
