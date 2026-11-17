@@ -8,7 +8,8 @@ name: ghost-run-sweep
 # refused, yet the record holds a per-ref concurrency group and blocks every
 # later run of its workflow on its ref. This sweep cancels and deletes those
 # records; a ghost that cannot be removed turns the job red so a GitHub
-# support purge can be requested instead of staying silent.
+# support purge can be requested instead of staying silent. To unblock the
+# frozen group meanwhile, follow docs/ghost-run-escape.md (bump LANE_EPOCH).
 #
 # ADVISORY: never a required check. A red run is an alarm on the umbrella
 # issue (#2367). A run that is progressing is never touched.
@@ -23,7 +24,7 @@ permissions:
   actions: write
 
 concurrency:
-  group: ghost-run-sweep
+  group: ghost-run-sweep-${{ vars.LANE_EPOCH || '0' }}
   cancel-in-progress: false
 
 jobs:

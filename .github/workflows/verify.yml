@@ -27,7 +27,7 @@ concurrency:
   # merge_group keeps its own per-queue-branch group. Manual verification keeps
   # its immutable source SHA, so duplicate requests serialize without destroying
   # the active proof.
-  group: verify-${{ github.workflow }}-${{ github.event_name }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.event_name == 'merge_group' && github.ref || github.sha }}
+  group: verify-${{ github.workflow }}-${{ github.event_name }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.event_name == 'merge_group' && github.ref || github.sha }}-${{ vars.LANE_EPOCH || '0' }}
   # New commits may supersede obsolete PR proof. Manual evidence must never be
   # destroyed by another start.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}

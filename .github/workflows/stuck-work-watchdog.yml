@@ -32,7 +32,7 @@ permissions:
   actions: write
 
 concurrency:
-  group: stuck-work-watchdog
+  group: stuck-work-watchdog-${{ vars.LANE_EPOCH || '0' }}
   cancel-in-progress: false
 
 jobs:

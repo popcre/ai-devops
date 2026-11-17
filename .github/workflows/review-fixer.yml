@@ -82,7 +82,7 @@ jobs:
     # lock. Replaced pending jobs lose no finding: the next sweep lists every
     # still-open unhandled issue, rather than relying on a one-shot event.
     concurrency:
-      group: review-fixer-${{ github.repository }}-${{ matrix.key }}
+      group: review-fixer-${{ github.repository }}-${{ matrix.key }}-${{ vars.LANE_EPOCH || '0' }}
       cancel-in-progress: false
     runs-on: ${{ fromJSON(inputs.runner_labels || '["self-hosted", "ai-devops-linux"]') }}
     timeout-minutes: 45

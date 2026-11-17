@@ -7,10 +7,10 @@ design: popcre/shared-db#6426 (PRs popcre/shared-db#6427, #6434).
 
 | # | Step | State | Evidence |
 |---|------|-------|----------|
-| 1 | Suffix every concurrency group with LANE_EPOCH | ⬜ open | — |
-| 2 | Guard test pinning the suffix | ⬜ open | — |
-| 3 | Sweep "unreapable" message names the escape | ⬜ open | — |
-| 4 | Runbook `docs/ghost-run-escape.md` | ⬜ open | — |
+| 1 | Suffix every concurrency group with LANE_EPOCH | ✅ done | PR #2573: all 8 groups suffixed (plan's "9" was a miscount; §5 lists 8); grep gate prints 0 |
+| 2 | Guard test pinning the suffix | ✅ done | `tests/test-concurrency-epoch.sh` 2/2 pass; fails when one suffix removed (verified locally 2026-11-17) |
+| 3 | Sweep "unreapable" message names the escape | ✅ done | PR #2573; `tests/test-ghost-run-sweep.sh` 3/3 pass |
+| 4 | Runbook `docs/ghost-run-escape.md` | ✅ done | PR #2573; linked from AGENTS.md Critical incidents and ghost-run-sweep.yml header |
 | 5 | PR, merge, post-merge live proof | ⬜ open | — |
 
 Fresh session starts at step 1. Written 2026-11-16 3:50 PM EST.

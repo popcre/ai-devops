@@ -20,7 +20,8 @@
 // Adapted as a standalone tool because ai-devops has no lane-watchdog.
 //
 // EXIT CODES: 0 swept (no unreapable ghosts); 1 an unreapable ghost remains
-// (red — a GitHub support purge is the only route left); 2 the state could
+// (red — it may hold its concurrency group: escape per docs/ghost-run-escape.md
+// by draining, then bumping repo variable LANE_EPOCH; file a support purge too); 2 the state could
 // not be read (an instrument that could not read must never be mistaken for
 // "no findings").
 //
@@ -104,7 +105,8 @@ function transportIo({ log = console.log } = {}) {
  * then deleted; the queued listing is read once more to see what actually
  * survived. Ghosts that remain are returned in `remaining` — the caller
  * should go red on them, because an unremovable ghost keeps holding its
- * concurrency group and only GitHub support can purge it.
+ * concurrency group until GitHub support purges it; escape meanwhile by
+ * bumping LANE_EPOCH (docs/ghost-run-escape.md).
  */
 export function runGhostSweep({
   repo,
@@ -147,7 +149,7 @@ export function runGhostSweep({
   if (!dryRun) {
     const survivors = new Set(readQueued().map((run) => Number(run?.id)))
     for (const ghost of reap) if (survivors.has(ghost.id)) remaining.push(ghost)
-    for (const ghost of remaining) log(`ghost sweep: UNREAPABLE run ${ghost.id} (${ghost.workflow} on ${ghost.head_branch}) still queued; a GitHub support purge is the only route left`)
+    for (const ghost of remaining) log(`ghost sweep: UNREAPABLE run ${ghost.id} (${ghost.workflow} on ${ghost.head_branch}) still queued; it may hold its concurrency group. Escape: follow docs/ghost-run-escape.md (drain, then bump repo variable LANE_EPOCH); file a GitHub support purge for the record`)
   }
   return { reap, remaining, notes }
 }

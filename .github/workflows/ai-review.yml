@@ -30,7 +30,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ai-review-${{ github.repository }}-${{ github.event.pull_request.number || github.run_id }}
+  group: ai-review-${{ github.repository }}-${{ github.event.pull_request.number || github.run_id }}-${{ vars.LANE_EPOCH || '0' }}
   cancel-in-progress: true
 
 jobs:

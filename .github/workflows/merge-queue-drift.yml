@@ -29,7 +29,7 @@ permissions:
 
 # A cron run and a manual dispatch must not race the same standing issue.
 concurrency:
-  group: merge-queue-drift-alert
+  group: merge-queue-drift-alert-${{ vars.LANE_EPOCH || '0' }}
   cancel-in-progress: false
 
 jobs:

@@ -26,7 +26,7 @@ on:
 concurrency:
   # Keyed on the ref, not the input as a whole: a second dispatch against the
   # same branch supersedes the first rather than paying for two runs at once.
-  group: windows-offline-hosted-${{ github.event.inputs.ref }}
+  group: windows-offline-hosted-${{ github.event.inputs.ref }}-${{ vars.LANE_EPOCH || '0' }}
   cancel-in-progress: true
 
 permissions:
