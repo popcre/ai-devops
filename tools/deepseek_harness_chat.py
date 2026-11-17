@@ -69,7 +69,8 @@ def main():
     if os.name == "nt":
         env["USERPROFILE"] = args.home
 
-    cmd = [dsh, "--profile", "headless", "--json", "--approval-policy", "never"]
+    cmd = [dsh, "--profile", "headless", "--json", "--permission-mode", "read-only",
+           "--approval-policy", "never"]
     if args.session:
         cmd += ["--session-id", args.session]
     cmd.append("-")

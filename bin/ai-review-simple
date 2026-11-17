@@ -105,7 +105,7 @@ def spec_for(provider, route=None):
     unknown is refused, never defaulted."""
     if route:
         rspec = RR.route(route)  # RouteError on unknown ids
-        if rspec["reviewer"] != provider:
+        if rspec["reviewer"] != provider and provider != route:
             raise RR.RouteError(f"route {route} does not belong to reviewer {provider!r}")
         spec = {"model": rspec["model"], "key_file": rspec["key_file"],
                 "key_env": rspec["key_env"], "override": rspec["override"],
@@ -458,7 +458,8 @@ def run_harness_once(spec, prompt, work, tmp, key, timeout):
                 "NODE_EXTRA_CA_CERTS", "AI_REVIEW_SIMPLE_FAKE_STATE") if os.environ.get(n)})
     if os.name == "nt":
         env["USERPROFILE"] = env["HOME"]
-    cmd = [dsh, "--profile", "headless", "--json", "--approval-policy", "never", "-"]
+    cmd = [dsh, "--profile", "headless", "--json", "--permission-mode", "read-only",
+           "--approval-policy", "never", "-"]
     proc = subprocess.Popen(cmd, cwd=work, env=env, stdin=subprocess.PIPE,
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                             text=True, encoding="utf-8", errors="replace",
