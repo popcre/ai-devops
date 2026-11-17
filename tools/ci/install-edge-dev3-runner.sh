@@ -8,9 +8,18 @@ set -euo pipefail
 repo="$1"
 labels="${2:-ai-devops-linux}"
 name="$(printf '%s' "$repo" | tr / -)"
-dir="$HOME/actions-runner-$name"
+root="$HOME/actions-runners"
+dir="$root/actions-runner-$name"
+legacy="$HOME/actions-runner-$name"
 unit="actions-runner-$name.service"
-template="${EDGE_DEV3_RUNNER_TEMPLATE:-$HOME/actions-runner-ai-devops}"
+template="${EDGE_DEV3_RUNNER_TEMPLATE:-$root/actions-runner-ai-devops}"
+if [ -e "$legacy" ] || [ -L "$legacy" ]; then
+  printf 'Move the existing runner at %s before installing %s\n' "$legacy" "$repo" >&2
+  exit 1
+fi
+if [ ! -d "$template" ] && [ -z "${EDGE_DEV3_RUNNER_TEMPLATE:-}" ]; then
+  template="$HOME/actions-runner-ai-devops"
+fi
 if [ ! -f "$dir/.runner" ]; then
   mkdir -p "$dir"
   # The runner bundle is copied from an existing healthy runner (same version).
