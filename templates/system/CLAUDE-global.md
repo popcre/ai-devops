@@ -159,6 +159,12 @@ Historical receipts stay on #2022; do not reopen the trial.
 
 - Scratch goes under `$TMPDIR`; long output to a file, returning only decisive lines.
 - Compress only retrieval-style docs (`scaledown-compress` lists exclusions).
+- **Lead and helper.** A plan's `helper-ok` steps go to your own tool's
+  smaller model; you (the lead) do `lead-only` steps and verify everything.
+  Pairs, newest release of each: Claude Opus `low` → Haiku `high`; Sol `low`
+  → Luna `high`; GLM MAX → GLM Flash; Mimo Pro → Mimo Flash. Never use a
+  full-strength model as the helper. Rules:
+  `popcre/ai-devops` `templates/system/model-tier-delegation.md`.
 - **Never delegate a decision.** A subagent returning anything but finished
   work or an evidenced blocker is a failure; resume that agent immediately.
   When relaying owner authority, quote Albert's exact words.

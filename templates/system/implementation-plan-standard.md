@@ -64,7 +64,8 @@ Group into phases for large work; mark the context cut points.
 Mark every step `lead-only` or `helper-ok` with a one-line reason, by risk and
 never by model name (criteria and pairs: `model-tier-delegation.md`). Each
 `helper-ok` step states its stop-and-ask trigger. Close the plan with a lead
-launch prompt that names roles, not models.
+launch prompt that says who the helper is (your own tool's smaller model:
+Haiku, Luna, GLM Flash or Mimo Flash) and links the sheet by full GitHub URL.
 For trust-boundary work (parsers, pricing/money, files or data coming from
 outside the repo) the plan MUST contain an adversarial-cases table — every
 external input × its hostile case × the test that proves it — and is not

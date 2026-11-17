@@ -101,8 +101,12 @@ rulings, verbatim: `docs/owner-rulings.md`.
 - AI performs every manual step itself (access, tooling, sign-in, keys); never
   ask Albert to run, click, or set up anything. Define an observable success
   check and prove it: commit, PR, passing check, live result, or screenshot.
-- With a plan that passes the standard and mechanical steps left, dispatch them
-  per `templates/system/model-tier-delegation.md`; you keep verification.
+- **Lead and helper.** A plan's `helper-ok` steps go to your own tool's
+  smaller model; you (the lead) do `lead-only` steps and verify everything.
+  Pairs, newest release of each: Claude Opus `low` → Haiku `high`; Sol `low`
+  → Luna `high`; GLM MAX → GLM Flash; Mimo Pro → Mimo Flash. Never use a
+  full-strength model as the helper. Rules:
+  `popcre/ai-devops` `templates/system/model-tier-delegation.md`.
 
 ## Safety rules that apply everywhere
 

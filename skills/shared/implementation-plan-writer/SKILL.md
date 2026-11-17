@@ -210,8 +210,13 @@ When asked whether the plan is comprehensive/detailed enough:
   it hands to its helper and in what order, the helper's rules (finished work
   or an evidenced blocker; no design decisions; no merges or posts; ask the
   lead when a stop-and-ask trigger fires; taken back after 30 minutes
-  stuck), and the checks the lead runs itself. It names roles, not models —
-  the pair comes from `templates/system/model-tier-delegation.md`.
+  stuck), and the checks the lead runs itself. The plan's steps name roles,
+  not models, but the prompt must say in these words who the helper is:
+  "Your helper is your own tool's smaller model — Haiku (high effort) for
+  Claude Opus, Luna (high) for Sol, GLM Flash for GLM MAX, Mimo Flash for
+  Mimo Pro. Never a full-strength model." Point to the sheet by its full
+  address, `https://github.com/popcre/ai-devops/blob/main/templates/system/model-tier-delegation.md`,
+  because the lead may be working in another repository.
 
 - Write to a repo file — `IMPLEMENTATION-PLAN.md`, or `plan_<topic>.md` for a
   scoped piece of work — then commit and push. A plan that lives only in chat is
