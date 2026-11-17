@@ -104,6 +104,18 @@ jobs:
           # AI_REVIEW_CANDIDATE_ROUTES is unset on main, so the normal rotation
           # below is the only default path.
           candidate_routes="${AI_REVIEW_CANDIDATE_ROUTES:-${{ inputs.candidate_routes || '' }}}}"
+          # Fixture-only override (#2549/#2550 Phase B): the PR title prefix
+          # picks the route plan; two prefixes force a scoped Meta failure.
+          case "$PR_TITLE" in
+            r-deepseek:*) candidate_routes="deepseek-openrouter" ;;
+            r-muse-meta:*) candidate_routes="muse-meta" ;;
+            r-muse-openrouter:*) candidate_routes="muse-openrouter" ;;
+            r-hy4:*) candidate_routes="hy4-openrouter" ;;
+            r-muse-fallback:*) candidate_routes="muse-meta muse-openrouter"
+              export AI_MUSE_KEY="sk-fixture-scoped-controlled-failure" ;;
+            r-hy4-fallback:*) candidate_routes="muse-meta hy4-openrouter"
+              export AI_MUSE_KEY="sk-fixture-scoped-controlled-failure" ;;
+          esac
           if [ -n "$candidate_routes" ]; then
             python3 "$script" --run-plan "$candidate_routes" --repo pr --base "$base" \
               --head "$HEAD_SHA" --results-dir results
@@ -141,22 +153,5 @@ jobs:
           gh pr comment "$PR" --repo "$GITHUB_REPOSITORY" --body-file comment.md || \
             echo "::warning::could not post the review comment"
           echo "ai-review: $state ($reviewer)" >> "$GITHUB_STEP_SUMMARY"
-          [ "$state" = findings ] || exit 0
-          gh label create review-finding --repo "$GITHUB_REPOSITORY" --color D93F0B \
-            --description "AI review finding for the automatic fixer" 2>/dev/null || true
-          {
-            printf 'PR: %s\nHead SHA: `%s`\nReviewer: %s\n\n## Findings\n\n' "$PR_URL" "$HEAD_SHA" "$reviewer"
-            jq -r '.findings // "No findings text recorded."' "results/$reviewer.json"
-            printf '\n\n%s\n' "$AI_GH_SIGNATURE"
-          } > issue.md
-          url="$(gh issue create --repo "$GITHUB_REPOSITORY" --label review-finding \
-            --title "Review finding: $GITHUB_REPOSITORY#$PR $PR_TITLE" --body-file issue.md)" || {
-            echo "::warning::could not open the review-finding issue"; exit 0; }
-          echo "Opened $url"
-          # Issues opened with the workflow token fire no `issues` event, so
-          # start the fixer directly; the 2-hour schedule is the backstop.
-          if [ -f .github/workflows/review-fixer.yml ] || \
-             gh api "repos/$GITHUB_REPOSITORY/contents/.github/workflows/review-fixer.yml" >/dev/null 2>&1; then
-            gh workflow run review-fixer.yml --repo "$GITHUB_REPOSITORY" -f issue="${url##*/}" || \
-              echo "::warning::could not start the review fixer; the schedule will pick it up"
-          fi
+          exit 0  # fixture branch: no review-finding issues, no fixer
+          true  # fixture branch: fixer suppressed          fi
