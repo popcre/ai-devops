@@ -80,6 +80,17 @@ yield **observed subtotals**, not complete-run usage or billing. The existing
 receipt shape stays unchanged. `tests/test_reviewer_routes.py:CacheReceiptTests`
 covers this boundary; `CacheQualificationTests` covers default-off behavior.
 
+The requested whole-plan Muse review approved this amendment and identified
+two pre-existing coverage defects also repaired here: `run_harness_once` now
+returns the same four-field result on missing-runtime/timeout failures as on
+other outcomes, so callers report unavailability instead of crashing; and
+`test_non_muse_route_gets_no_cache_fields` now inspects the actual harness
+profile rather than an always-empty dictionary. Harness cache usage is still
+unavailable through this receipt path, never inferred as zero. New
+`FailureTests.test_missing_harness_is_unavailable_with_unknown_cache` and
+`test_harness_timeout_returns_unavailable_instead_of_crashing` cover the
+failure contract. None changes the selected runtime or fallback policy.
+
 `bin/ai-second-opinion:_run_opencode_turn` resumes the stored runtime session;
 `sanitized_replay` supplies visible turns on Muse failover. Session persistence
 proves continuity, not reduced billed input. There is no wrapper-owned
@@ -158,7 +169,10 @@ the lead retains all design, merge and release decisions.
    - **Gate.** Add the cache tests in §10 and use the existing public fixture and exact-head publication path. Prove the same verdict and resume contract, report changes in false findings, and publish paired hit rate, time and cost results under #2531. Confirm the cached billing improvement on representative requests before proposing opt-in release. If savings are immaterial or any review regression appears, keep the cache experiment disabled. Rollback removes only the cache settings and restores the previous prompt order.
 
 6a. **Repair missing cache measurements (`lead-only`; external usage parsing).**
-   Change only `bin/ai-review-simple:cache_receipts` and its regression tests.
+   Change `bin/ai-review-simple:cache_receipts` and its regression tests;
+   normalize the two pre-existing `run_harness_once` failure returns to the
+   caller's four-field result contract and make the existing non-Muse cache
+   exclusion test inspect the real profile, as identified by Muse.
    Missing/null counters remain unknown; explicit zero remains zero; accept
    nonnegative integer counters, excluding booleans. Ignore malformed events
    and nested shapes without failing a review. Sum only actual reported values
@@ -357,6 +371,12 @@ November 17 amendment self-audit passed for the added scope:
 3. The opening goal plus §§4, 9 and 13 require useful reviews with lower
    measured spend, not a cache percentage target. Evidence and recoverability
    take priority, and the owner's unchanged-default instruction is explicit.
+
+The owner-requested Muse review assessed the finished change and the whole
+plan and returned APPROVE. Its two concrete pre-existing failure/coverage
+findings are addressed by the reporting-contract fixes and tests in §5/6a;
+the plan does not turn its optional experiments into approval or activation
+requirements. Live billing conclusions remain unassessable until measured.
 
 ### Lead launch prompt for the token-efficiency amendment
 

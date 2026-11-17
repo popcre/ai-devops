@@ -350,6 +350,29 @@ class SecretScopeTests(Base):
 
 
 class FailureTests(Base):
+    def test_missing_harness_is_unavailable_with_unknown_cache(self):
+        # Force resolver absence without depending on the machine's installed runtime.
+        import importlib.machinery, importlib.util
+        from unittest import mock
+        loader = importlib.machinery.SourceFileLoader("ars_no_harness", SCRIPT)
+        spec = importlib.util.spec_from_loader("ars_no_harness", loader)
+        ars = importlib.util.module_from_spec(spec)
+        loader.exec_module(ars)
+        with mock.patch.object(ars.RR, "resolve_deepseek_harness", return_value=None):
+            verdict, text, error, cache = ars.run_harness_once({}, "review", self.repo,
+                                                             self.tmp.name, "fixture-key", 1)
+        self.assertEqual((verdict, text, cache), (None, "", None))
+        self.assertTrue(error.startswith("local:"))
+
+    def test_harness_timeout_returns_unavailable_instead_of_crashing(self):
+        self.env["AI_REVIEW_CACHE"] = "1"
+        self.mode("sleep")
+        proc, result = self.run_review("--timeout", "1", route="deepseek-openrouter")
+        self.assertEqual(proc.returncode, 3, proc.stderr)
+        self.assertEqual(result["error"], "timeout after 1s")
+        self.assertEqual(result["cache"], {"read": None, "write": None})
+        self.assertEqual(len(self.dsh_calls()), 1)
+
     def test_credit_is_unavailable(self):
         self.mode("credit")
         proc, result = self.run_review(route="deepseek-openrouter")
@@ -862,7 +885,10 @@ class CacheQualificationTests(SecondOpinionRouteTests):
         self.mode("approve")
         proc, _ = self.run_review(route="deepseek-openrouter")
         self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertNotIn("body", self.dsh_calls()[0].get("patch", "") and {} or {})
+        patch = self.dsh_calls()[0]["patch"]
+        self.assertIn("openrouter", patch)  # prove we inspected the actual profile
+        for field in ("prompt_cache_key", "session_id", "x-session-id"):
+            self.assertNotIn(field, patch)
 
     def test_cache_prefix_puts_fixed_instructions_before_variable_ids(self):
         import importlib.machinery, importlib.util
