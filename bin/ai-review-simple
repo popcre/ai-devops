@@ -408,7 +408,14 @@ def run_once(provider, prompt, work, home, tmp, key, timeout, spec=None):
            "OPENCODE_DISABLE_CLAUDE_CODE": "1", "OPENCODE_DISABLE_EXTERNAL_SKILLS": "1",
            "PYTHONDONTWRITEBYTECODE": "1", spec["key_env"]: key}
     env.update({n: os.environ[n] for n in ("LANG", "TMPDIR", "SSL_CERT_FILE", "SSL_CERT_DIR",
-                "NODE_EXTRA_CA_CERTS", "AI_REVIEW_SIMPLE_FAKE_STATE") if os.environ.get(n)})
+                "NODE_EXTRA_CA_CERTS", "AI_REVIEW_SIMPLE_FAKE_STATE", "SYSTEMROOT", "WINDIR",
+                "TEMP", "TMP", "PATHEXT", "COMSPEC") if os.environ.get(n)})
+    # Windows fail-fast repair (#2531, 2026-11-17): without SYSTEMROOT the pinned
+    # OpenCode binary dies with 0xC0000409 before any output, so every
+    # OpenCode-engine review route crashed on Windows (the deepseek-harness
+    # engine and bin/ai-second-opinion were unaffected). Same qualified
+    # passthrough set as bin/ai-second-opinion:_run_opencode_turn; on Linux the
+    # vars are absent and nothing is added.
     seed_models(xdg, env)
     cmd = [oc, "run", "--agent", "simple-review", "--auto", "--format", "json",
            "--model", spec["model"], "--dir", work]
