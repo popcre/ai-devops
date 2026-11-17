@@ -23,6 +23,19 @@ Use current upstream. Planning baseline: `ec4886f57232a1bb2741b7cf66d5fa1a949a1d
 | 4. Qualify the exact integrated candidate | Route receipts landed 2026-11-17 (candidate 883e552); activation hold intact | Run the route, platform and failure matrix in §10. |
 | 5. Enable, verify and retain rollback | On hold | Keep existing defaults during qualification. Follow §13 for the eventual cutover. |
 | 6. Qualify caching separately | Started: wiring + first measurements (#2571, off by default) | [Muse baseline](https://github.com/popcre/ai-devops/issues/2531#issuecomment-6928592964). Phase C can start after step 4. |
+| 6a. Correct cache measurement reporting | Implemented 2026-11-17; landing and installed proof pending | `bin/ai-review-simple:cache_receipts`; `python3 tests/test_reviewer_routes.py CacheReceiptTests` reproduces missing versus zero, invalid counters and mixed events. |
+| 6b. Reduce total token spend | Planned, not enabled | Execute the ordered experiments in §9, step 6b under #2551; report acceptance on #2531. No savings forecast or default switch is authorized. |
+
+**Token-efficiency amendment, 2026-11-17.** This amendment fixes reporting and
+specifies future experiments; it does not implement prompt trimming, compaction,
+retention, deduplication, model changes or activation. Fresh sessions start at
+6a's landing evidence, then the still-open Phase C measurements and 6b. The
+historical route STATUS above is not a substitute for current acceptance:
+[integrated re-check](https://github.com/popcre/ai-devops/issues/2551#issuecomment-6955989936)
+records restart/idle and failover proof; the [parent](https://github.com/popcre/ai-devops/issues/2531)
+retains the unchanged-default hold and live-proof checklist. The existing
+#2551 implementation owner owns the future experiments; this amendment creates
+no new issue, service or parallel plan.
 
 ## 1. Goal
 
@@ -40,6 +53,11 @@ Albert selected one DeepSeek Harness route and three OpenCode routes for automat
 
 Include shared route and credential selection, both callers, read-only isolation, GitHub publishing, persistent second opinions, fallback, platform qualification and rollback. Hy4 is available for second opinions and used as a GitHub fallback. Exclude changes to advisory merge policy, GLM and StepFun behavior, writable DeepSeek delegation and existing writable Muse commands, migration of stored conversations, provider policy bypasses, and a default switch during this planning or qualification work.
 
+Albert's November 17 amendment authorizes the cache-reporting repair and this
+plan update, with **defaults unchanged**. Steps 6 and 6b describe later scoped
+qualification, not authorization to run or release all token-saving experiments
+as part of this repair.
+
 ## 5. Current code
 
 At the planning baseline, [`bin/ai-review-simple`](bin/ai-review-simple) lines 35–61 declares single-route Muse and DeepSeek provider specs. `read_key`, `make_workspace`, `run_once`, `review`, `rotation` and `combine` own credential lookup, OpenCode, one advisory verdict and the existing result shape. [`.github/workflows/ai-review.yml`](.github/workflows/ai-review.yml) lines 91–139 invokes the rotation and posts an exact-head check and comment. The normal workflow uses the trusted toolkit ref for execution.
@@ -50,17 +68,46 @@ At the planning baseline, [`bin/ai-review-simple`](bin/ai-review-simple) lines 3
 
 The routing decision landed in #2545. Native benchmark launches and GitHub proof lived in disposable environments. No integrated reviewer code from those tests is deployed.
 
+**Current efficiency code at amendment baseline `7539097a` (historical planning
+baseline above retained):** `tools/reviewer_routes.py:cache_enabled`,
+`cache_fields` and `opencode_provider_block` implement the off-by-default Muse
+cache identifiers. `bin/ai-review-simple:build_prompt` uses the fixed-prefix
+template, and `cache_receipts` reads OpenCode step-finish usage. Before 6a,
+that parser converted absent counters on a completed step to zero. It now
+accepts only reported nonnegative integers independently for reads and writes;
+an entirely unreported counter remains `null`. Mixed measured/unmeasured steps
+yield **observed subtotals**, not complete-run usage or billing. The existing
+receipt shape stays unchanged. `tests/test_reviewer_routes.py:CacheReceiptTests`
+covers this boundary; `CacheQualificationTests` covers default-off behavior.
+
+`bin/ai-second-opinion:_run_opencode_turn` resumes the stored runtime session;
+`sanitized_replay` supplies visible turns on Muse failover. Session persistence
+proves continuity, not reduced billed input. There is no wrapper-owned
+token-aware compaction, complete-conversation cost ledger or lean-context
+experiment implemented by this amendment. Existing diff/stat size limits are
+transport safeguards, not measured token optimization.
+
 ## 6. Findings
 
 - [Ubuntu and edge-dev results](https://github.com/popcre/ai-devops/issues/2531#issuecomment-6927912521) prove read-only native launches, two fresh-process resumes, and speed and quality comparisons. DeepSeek Harness was faster with a common upstream, with extra false findings. Hy4 caught all 27 seeded defect instances across five runs with zero false findings. Its median on the eight-defect patch was 88.9 seconds, and it has yet to be scored on real TypeScript PRs.
 - [Regular-workflow test](https://github.com/popcre/ai-devops/actions/runs/43948851731) ran native DeepSeek and native Muse live against a disposable TypeScript PR and [published both verdicts](https://github.com/popcre/ai-devops/pull/2538#issuecomment-6928212224). The tested Muse runtime there was Muse Code, so that run does not qualify either selected OpenCode Muse route.
 - [OpenCode connection smoke test](https://github.com/popcre/ai-devops/issues/2531#issuecomment-6927103076) passed for a custom OpenAI-compatible OpenRouter connection across all three tested models. The built-in OpenRouter connection failed for Muse and DeepSeek at the tested OpenCode version.
 - [Muse cache benchmark](https://github.com/popcre/ai-devops/issues/2531#issuecomment-6928592964) measured roughly 9% model-request cost reduction and no overall speedup with a stable prefix and cache key across changing TypeScript PRs. Use these results as Phase C baseline. Keep caching outside initial route activation so cache behavior cannot confound delivery proof.
+- The same benchmark scales to roughly $0.06 saved per 1,000 sampled reviews, not a forecast of whole-workflow spend. Output length varied and some verdicts were invalid; measure cost per usable completed review, including retries, before claiming business savings. A high cache-hit percentage is not a total-cost saving percentage.
+- The [harness comparison](https://github.com/popcre/ai-devops/issues/2531#issuecomment-6927912521) observed roughly 24,000 first-request input tokens for native Muse versus 9,000 in OpenCode. Effort and harness overhead were not controlled, so this is a reason to investigate lean inputs, not evidence of a 62.5% saving for the selected implementation. The [later re-check](https://github.com/popcre/ai-devops/issues/2551#issuecomment-6955989936) proves continuity after restart/idle and cache reads across heads; it does not supply paired growing-thread billing or long-retention acceptance.
 - [DeepSeek Harness headless execution and resume](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/cli-help.md) and [custom provider setup](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/user/guide/providers.md) cover the native candidate. The reviewer credential's tests observed OpenRouter routing guardrails. Preserve them.
 
 ## 7. Approaches ruled out
 
 Replacing the whole GitHub workflow would discard known advisory behavior and publication. A DeepSeek URL override would hit the legacy endpoint pin and retain a separate execution engine. OpenCode’s built-in OpenRouter connection failed the earlier live smoke and is excluded from the initial candidate. Muse Code added latency without a demonstrated comparison advantage and is outside the selected routing plan. Silent model substitution would confuse the person asking for a second opinion. Bulk conversion of legacy sessions adds risk without a requirement. Existing sessions retain their original runtime.
+
+For token efficiency, do not reuse mutable snapshots, serve a verdict from an
+earlier head, impose arbitrary turn budgets, or cut off a review's access to
+required evidence. Do not send review verdicts, private transcripts or code
+through a compression service. Do not enable longer retention or server-stored
+history merely to obtain a cache hit. These shortcuts conflict with existing
+evidence, privacy or continuity requirements. Reuse the shared adapters and
+existing #2551 receipts instead of adding another cache/reporting service.
 
 ## 8. Decisions
 
@@ -78,6 +125,15 @@ Use the model identifiers above as the tested candidate pins. Recheck availabili
 Keep DeepSeek and Hy4 distinct. Hy4 never silently answers a named DeepSeek or Muse second opinion. An OpenRouter account-wide outage can affect both. Continue to available independent providers while skipping duplicate attempts only for confirmed shared outages. Keep benchmark provider restrictions in force. Open for implementation: exact package and checksums, protected per-environment credential bindings, and the smallest supported isolation implementation that passes the Ubuntu and Windows tests.
 
 ## 9. Execution
+
+**Execution roles:** steps 1–3 and 6a are `lead-only` because they cross
+credential, session, source-identity or untrusted-usage boundaries. Steps 4–6
+and 6b are `lead-only` because they select comparison policy or judge live
+evidence, billing, privacy and activation. No helper implementation is needed
+for the reporting repair. If a later lead extracts a mechanical `helper-ok`
+substep, first name its exact files, edits and test, and require it to stop and
+return evidence on any scope, privacy, missing-metric or correctness question;
+the lead retains all design, merge and release decisions.
 
 ### Phase A — Candidate routing and integration
 
@@ -101,6 +157,114 @@ Keep DeepSeek and Hy4 distinct. Hy4 never silently answers a named DeepSeek or M
    - **Measure billing and correctness together.** Start with an identical cold/warm pair, then matched different TypeScript PRs and growing second-opinion threads. Capture input, cached reads, cache writes when reported, output, wall time, and actual route. Compare the provider usage with OpenRouter’s generation record and cache discount when present. Use provider-reported charges or separately identified estimates. An isolated repeat is a wiring check. Use changing PRs and conversations for savings estimates. Include the observed 9% cost reduction and absence of a speedup as the baseline to reproduce or explain. Benchmark Hy4 through its selected OpenRouter route on distinct TypeScript PRs and resumed sessions. Prior 99.1% warm reuse was on repeated inputs. Capture the DeepSeek route’s existing cache metrics as a baseline and preserve its tested routing configuration. Keep all telemetry free of prompt content, credentials and private session identifiers. [Hy4 cache pricing](https://openrouter.ai/tencent/hy4/)
    - **Gate.** Add the cache tests in §10 and use the existing public fixture and exact-head publication path. Prove the same verdict and resume contract, report changes in false findings, and publish paired hit rate, time and cost results under #2531. Confirm the cached billing improvement on representative requests before proposing opt-in release. If savings are immaterial or any review regression appears, keep the cache experiment disabled. Rollback removes only the cache settings and restores the previous prompt order.
 
+6a. **Repair missing cache measurements (`lead-only`; external usage parsing).**
+   Change only `bin/ai-review-simple:cache_receipts` and its regression tests.
+   Missing/null counters remain unknown; explicit zero remains zero; accept
+   nonnegative integer counters, excluding booleans. Ignore malformed events
+   and nested shapes without failing a review. Sum only actual reported values
+   independently for reads/writes, retaining `null` when none were reported.
+   Mixed coverage is an observed subtotal: never price missing calls as free.
+   **Dependencies:** none on activation or paid inference. **Gate:**
+   `python3 tests/test_reviewer_routes.py CacheReceiptTests`,
+   `bash tests/test-reviewer-routes.sh` and `bash tests/test-ai-review-simple.sh`
+   pass on Ubuntu and through the Windows CI route; a real invocation of the
+   repaired parser distinguishes a completed event without usage from an
+   explicit zero. Keep the existing route, prompt, cache-enable and session
+   defaults byte-for-byte unchanged. Land through the queue and attach the
+   exact revision and installed smoke evidence on #2531.
+
+6b. **Measure and reduce total tokens (`lead-only`; cost and quality judgments).**
+   This is a future opt-in workstream owned under #2551, after 6a lands and
+   the relevant step-4 route is qualified. Re-read this whole phase before
+   implementation. Run the following experiments in order, one change at a
+   time, reusing the existing fixture/receipt paths. Nothing here activates a
+   setting or claims savings before measurement.
+
+   1. **Establish complete billing first.** Extend the existing shared receipts
+      around `bin/ai-review-simple:run_once`, `run_harness_once`, `review` and
+      `bin/ai-second-opinion:run_opencode` as needed after inspecting the current
+      implementation. Record route/model, input, cached reads/writes, output,
+      reasoning where supplied, tool-loop requests, retries/failovers, elapsed
+      time and actual charges or separately labelled estimates. Correlate with
+      provider/gateway billing without publishing prompts or private IDs.
+      Show measured coverage per field; incomplete observed subtotals cannot
+      establish a full-run saving. **Gate:** planned
+      `test_usage_coverage_and_failed_attempt_costs` in
+      `tests/test_reviewer_routes.py` covers missing one step, missing one
+      counter and charged unsuccessful attempts. Publish a reproducible
+      baseline per route, including Hy4 and DeepSeek's unknowns.
+   2. **Reduce redundant input before adding caching machinery.** Benchmark
+      `templates/review-prompt-simple.md`, `bin/ai-review-simple:build_prompt`
+      and `bin/ai-second-opinion:READ_AGENT` with a shorter stable instruction
+      prefix, then independently test a compact changed-file map without
+      duplicated full-file content. Keep the complete exact-head patch and
+      repository available, preserve every safety instruction and required
+      finding, and let the reviewer expand its reads when needed. Inspect the
+      pinned runtime's system/tool overhead before attributing the historical
+      24k/9k difference to our prompt. Stable tools/order and the current model
+      and effort remain controlled. **Gate:** planned
+      `test_lean_prompt_preserves_review_contract` and
+      `test_context_expansion_keeps_required_evidence` prove source identity,
+      full evidence access and hostile-input handling; paired live seeded,
+      clean and real TypeScript cases measure all model/tool requests, not
+      just the first prompt. Never trade missing evidence for a smaller input.
+   3. **Reduce unnecessary output.** Separately test concise findings in the
+      same prompt/agent definitions: location, defect, impact and final verdict;
+      omit repeated instructions, progress narration and repeated patch text.
+      Do not lower a hard output limit or truncate the model's reasoning or
+      final findings as a substitute for concision. **Gate:** planned
+      `test_concise_report_preserves_findings_and_verdict` plus paired live
+      scoring shows no lost required findings, no extra false findings and
+      intact publication. Count provider output and hidden reasoning when
+      reported. The current 4,000-character publication cap occurs after
+      generation and does not itself save model tokens.
+   4. **Measure growing sessions, then test compaction only if justified.**
+      At `bin/ai-second-opinion:_run_opencode_turn`, `run_harness_turn` and
+      `sanitized_replay`, compare one named session with repeated fresh
+      sessions for the same bounded multi-turn task, across two restarts, an
+      idle interval and forced Muse failover. Same-route turns should append
+      only the new question; failover should replay each permitted visible
+      turn and the pending question once. Never replay private reasoning or
+      tool records, and detect nested replay duplication. First observe the
+      pinned runtime's existing compaction; only then consider an opt-in
+      evidence-preserving summary/checkpoint experiment. Preserve original
+      protected history for recovery; checkpoint identity, decisions, open
+      questions and source references must survive. Any compaction policy
+      change is a separate proposal, not part of this repair. **Gate:** planned
+      `test_session_replay_is_linear`,
+      `test_checkpoint_preserves_source_and_recovery` (only if implemented),
+      and live marker/decision recall with complete per-turn billing. Include
+      the cost of summaries and cache rewarming; persistence alone is not a
+      discount and summaries must not substitute for re-reading changed code.
+   5. **Avoid paying twice for identical completed work, only if measured.**
+      Inspect existing exact-work controls before adding any in the shared
+      adapters. A later opt-in deduplication experiment may reuse only a
+      verified successful result for identical authorized repository/source
+      digest, base/head, prompt/tool/policy versions, route/model and effort.
+      New heads, changed permissions, failed or incomplete attempts and stale
+      source always require fresh work. This is result deduplication, separate
+      from provider prompt caching; never reuse a mutable checkout.
+      **Gate:** planned `test_exact_work_reuse_rejects_changed_identity`
+      covers changed source, head, prompt, policy, model and incomplete work,
+      including a race between callers. If duplicate spend is absent or the
+      existing controls suffice, record that and add no new machinery.
+
+   **Common acceptance:** use at least five distinct public TypeScript changes,
+   seeded and clean controls, and one growing discussion per selected route.
+   Repeat paired comparisons in reversed order with identical model, effort,
+   provider policy and task; separate synthetic correctness from real-PR
+   generalization. Report total tokens, actual total cost per usable completed
+   review/discussion, invalid answers, retries, false findings, wall time and
+   measurement coverage. Include first/cold requests and idle/cache-expiry
+   behavior; a new namespace cannot prove an account-wide cold cache. Require
+   no regression on the frozen controls and repeatable positive net savings
+   before proposing a separately reversible opt-in release; otherwise leave
+   it disabled. State absolute dollars and sample size alongside percentages.
+   A different interface, 24-hour retention, reasoning-effort change or model
+   substitution is a separate experiment, never bundled into a prompt result.
+   **Rollback:** remove only the tested opt-in variant, verify the prior
+   prompt/behavior, preserve existing named sessions and private evidence.
+
 Context cut points are after steps 3 and 4 and before a caching release. Re-read downstream steps against current upstream before beginning them. Record partial progress with a reproducible artifact in STATUS.
 
 ### Adversarial cases
@@ -122,6 +286,10 @@ Use disposable fixtures and benign canary files.
 | GitHub publication data | Spoofed route name, final output from an earlier head, or missing/malformed authority metadata | `test_route_attribution_matches_exact_head` |
 | Cache identifiers and telemetry | Caller tries to share keys across unauthorized repos, uses per-request volatile IDs, exposes secrets in metrics, or misreports cached billing | `test_muse_cache_key_scope_and_redaction` and `test_cache_usage_receipts` |
 | Cached input order and replay | PR diff alters the fixed prefix, tool definitions reorder, restart changes routing ID, or fallback replays private state | `test_cache_prefix_and_resume_stability` |
+| Step-finish usage | Missing/null counters, booleans, negatives, invalid nested shapes, one missing field or mixed events | Implemented `CacheReceiptTests`: `test_missing_cache_counters_remain_unknown`, `test_cache_counters_are_independent_and_preserve_zero`, `test_invalid_cache_counters_and_shapes_are_ignored`, `test_only_reported_cache_counters_are_summed`, `test_unrelated_or_malformed_events_do_not_invent_usage` |
+| Token-saving experiment evidence | Unreported or failed charged call omitted from totals; lean input omits necessary context | Planned `test_usage_coverage_and_failed_attempt_costs`, `test_lean_prompt_preserves_review_contract`, `test_context_expansion_keeps_required_evidence` |
+| Concise output and persisted history | Missing finding/verdict, nested replay duplication, lost source/decision after summary | Planned `test_concise_report_preserves_findings_and_verdict`, `test_session_replay_is_linear`, conditional `test_checkpoint_preserves_source_and_recovery` |
+| Exact-work result reuse | Different source/head/policy/model, partial result or concurrent caller | Planned `test_exact_work_reuse_rejects_changed_identity` |
 
 ## 10. Tests
 
@@ -139,6 +307,13 @@ Run a minimum of five independent fresh candidate requests per route on each sup
 
 Phase C adds exact request-capture tests for the three cache cases above. Verify Muse direct receives the upstream key, Muse through OpenRouter receives both fields, and stable/reordered and switched-route cases obey their scope. Use paired cache-disabled and cache-enabled fixtures with identical input policy, model and effort. Each route receipt distinguishes a missing measurement from a zero hit, and reports the no-switch control. Replay a cold/warm pair, five distinct TypeScript PRs and one growing second opinion across restart per Muse route. Run the long-context and retention comparisons independently so an inconclusive test cannot masquerade as measured savings. Record Hy4 and DeepSeek separately from Muse.
 
+For this reporting-only amendment run the three suites in step 6a; broader
+DeepSeek suites above apply when their execution paths change. The new
+`CacheReceiptTests` tests are implemented and run via the existing
+`tests/test-reviewer-routes.sh` Ubuntu/Windows CI entry point. All step-6b test
+names are acceptance specifications for future implementation, not tests
+already present. Do not report their planned outcomes as passing evidence.
+
 ## 11. Constraints
 
 GitHub AI review remains advisory. Keep a separate candidate selection until evidence passes. Preserve existing reviewer scopes and receipts. Sandbox and inspect only authorized repositories. Keep private prompts, transcripts, key material and sensitive logs out of the public repo and GitHub comments. Limit diagnostics to redacted summaries and artifacts suitable for public consumption. Use protected release routes and the repository Git identity. Avoid edits to installed or shared checkouts.
@@ -155,6 +330,8 @@ Credential references only. In the `vibe_coding` 1Password vault, resolve Meta d
 - [ ] Exact candidate revision has passing focused and policy-required tests, Ubuntu and edge-dev receipts, and four attributable GitHub verdicts. Keep `- [ ] live proof` on #2531 until completed.
 - [ ] Candidate lands through the protected queue, old defaults remain during qualification, and any later activation has a separately revertible default change. Confirm commit on `origin/main`, installed revisions and one live check per enabled route.
 - [ ] Record Phase C separately. If caching is released, verify its measured API usage and rollback without changing the review routes. The initial route release can finish while the cache experiment stays disabled.
+- [ ] Step 6a reporting repair lands with regression tests and installed Ubuntu/Windows proof; missing counters stay unknown, measured zero stays zero and defaults remain unchanged. Attach evidence on #2531; keep any outstanding live proof there rather than opening another issue.
+- [ ] Step 6b remains planned until its owned experiments have complete billing coverage, repeatable net savings and preserved review/continuation quality. Keep experiment acceptance on #2551 with parent evidence on #2531; no new tracker or default change is implied.
 - [ ] Rehearse restoring previous settings without deleting candidate session state. Verify that a live legacy review can complete after rollback.
 - [ ] Update STATUS, current reviewer docs and tracking issue with live evidence. Retire applicable handoffs only after the acceptance conditions are met.
 
@@ -165,3 +342,44 @@ Key risks are shared OpenRouter failure, route-bound Muse session history, Windo
 1. A new session can implement this without the chat by starting at STATUS and following §§5 and 8–13. Those sections identify both callers, all routes, prerequisites, failure outcomes, credential locations, test evidence and release behavior.
 2. §§3–7 retain the Meta interruption, earlier DeepSeek and Muse trials, OpenCode connection failure, cache measurement and Hy4 quality limits. §§8–10 distinguish the earlier native Muse publication evidence from the unqualified OpenCode Muse routes, and specify exact-head publication, policy handling and cross-route continuation.
 3. The opening goal, §8 and §13 preserve availability, exact verdict publishing, session resume and read-only controls when an implementation detail needs revision. All 13 sections and the adversarial matrix are present. Phase C and §10 now capture OpenRouter’s Muse guidance, its unproven claims, and separate opt-in release and rollback. The current handoff links back here. The fresh-reader pilot is closed, so no optional external check ran.
+
+November 17 amendment self-audit passed for the added scope:
+
+1. A fresh implementer can distinguish the implemented reporting repair from
+   future experiments using STATUS, §§4–6, steps 6a/6b and §10. Each new step
+   names its files, dependency, role, observable gate and rollback; planned
+   tests are explicitly labelled rather than claimed as delivered.
+2. §§6–8 and step 6b retain the measured 9%/$0.06-per-1,000 baseline, uncontrolled
+   24k/9k comparison, continuity-versus-cost distinction, observed-subtotal
+   caveat, complete-job billing and rejected privacy/evidence shortcuts. All
+   13 sections and the existing handoff/router links remain; this amendment
+   adds no new plan or handoff and does not restart the closed fresh-reader pilot.
+3. The opening goal plus §§4, 9 and 13 require useful reviews with lower
+   measured spend, not a cache percentage target. Evidence and recoverability
+   take priority, and the owner's unchanged-default instruction is explicit.
+
+### Lead launch prompt for the token-efficiency amendment
+
+```text
+Continue popcre/ai-devops #2531/#2551 from the STATUS of
+plan_deepseek-harness-openrouter.md, then read AGENTS.md and §§4–13 here.
+Keep every current default unchanged. Confirm step 6a's exact landed revision
+and installed proof before treating the reporting repair as complete. Future
+work is step 6b, not an instruction to reimplement already landed route work.
+Do all listed lead-only judgments yourself: untrusted usage, scope, privacy,
+provider billing, quality, merges and release. Follow numbered dependencies;
+re-read the downstream phase at each context cut. Do not invent measurements
+or infer whole-job savings from partial counters or session continuity.
+Your helper is your own tool's smaller model — Haiku (high effort) for
+Claude Opus, Luna (high) for Sol, GLM Flash for GLM MAX, Mimo Flash for
+Mimo Pro. Never a full-strength model.
+Routing authority:
+https://github.com/popcre/ai-devops/blob/main/templates/system/model-tier-delegation.md
+No helper-ok work is currently specified. If you extract a mechanical substep,
+give exact files/edits/tests and stop-and-ask triggers first. The helper returns
+finished work with test evidence or a verbatim blocker, never a design decision;
+no merges or posts. Take work back after 30 minutes without progress.
+The lead runs the §10 checks, verifies both platforms and complete live billing
+with unchanged defaults, and records any outstanding live proof on the same
+issues. Never release a token-saving variant as part of this amendment.
+```

@@ -756,6 +756,60 @@ class DeepseekAgentHarnessTests(Base):
         self.assertIn("cannot be combined", r.stderr)
 
 
+class CacheReceiptTests(unittest.TestCase):
+    """Usage is external input: absent or invalid counters are not zeroes."""
+
+    @classmethod
+    def setUpClass(cls):
+        import importlib.machinery, importlib.util
+        loader = importlib.machinery.SourceFileLoader("ars_receipts", SCRIPT)
+        spec = importlib.util.spec_from_loader("ars_receipts", loader)
+        cls.ars = importlib.util.module_from_spec(spec)
+        loader.exec_module(cls.ars)
+
+    def receipts(self, *parts):
+        return self.ars.cache_receipts("\n".join(
+            json.dumps({"type": "step_finish", "part": part}) for part in parts))
+
+    def test_missing_cache_counters_remain_unknown(self):
+        for part in (None, {}, {"reason": "stop"}, {"tokens": {}},
+                     {"tokens": {"cache": {}}}, {"tokens": {"cache": None}},
+                     {"tokens": {"cache": {"read": None, "write": None}}}):
+            with self.subTest(part=part):
+                self.assertEqual(self.receipts(part), {"read": None, "write": None})
+
+    def test_cache_counters_are_independent_and_preserve_zero(self):
+        for counters, expected in (
+                ({"read": 0, "write": 0}, {"read": 0, "write": 0}),
+                ({"read": 0}, {"read": 0, "write": None}),
+                ({"write": 5}, {"read": None, "write": 5})):
+            with self.subTest(counters=counters):
+                self.assertEqual(self.receipts({"tokens": {"cache": counters}}), expected)
+
+    def test_invalid_cache_counters_and_shapes_are_ignored(self):
+        for part in ([], "invalid", {"tokens": []}, {"tokens": "invalid"},
+                     {"tokens": {"cache": []}}, {"tokens": {"cache": "invalid"}}):
+            with self.subTest(part=part):
+                self.assertEqual(self.receipts(part), {"read": None, "write": None})
+        for value in (-1, True, False, 1.5, "10", [], {}):
+            with self.subTest(value=value):
+                self.assertEqual(self.receipts({"tokens": {"cache": {
+                    "read": value, "write": value}}}), {"read": None, "write": None})
+
+    def test_only_reported_cache_counters_are_summed(self):
+        self.assertEqual(self.receipts(
+            {"tokens": {"cache": {"read": 100, "write": 5}}},
+            {"reason": "stop"},
+            {"tokens": {"cache": {"read": 0}}},
+            {"tokens": {"cache": {"read": 25, "write": 0}}}),
+            {"read": 125, "write": 5})
+
+    def test_unrelated_or_malformed_events_do_not_invent_usage(self):
+        self.assertEqual(self.ars.cache_receipts(
+            'not json\n{broken\n[]\n{"type":"text","part":{"tokens":'
+            '{"cache":{"read":99,"write":99}}}}'), {"read": None, "write": None})
+
+
 class CacheQualificationTests(SecondOpinionRouteTests):
     """Phase C (#2551): opt-in cache identifiers, prompt order and receipts."""
 

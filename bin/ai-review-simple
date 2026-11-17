@@ -255,9 +255,11 @@ def read_events(stdout):
 
 
 def cache_receipts(stdout):
-    """Cache-token receipts from step_finish events: counts only, never
-    content, so a cache experiment can report a missing measurement as
-    distinct from a zero hit."""
+    """Sum reported cache counters, leaving unreported fields unknown.
+
+    These are observed subtotals, not estimates for unreported steps. Only
+    nonnegative integer counts are usable; an explicit zero is a measurement.
+    """
     reads = writes = None
     for line in (stdout or "").splitlines():
         line = line.strip()
@@ -267,13 +269,18 @@ def cache_receipts(stdout):
             ev = json.loads(line)
         except ValueError:
             continue
-        if isinstance(ev, dict) and ev.get("type") == "step_finish":
-            tokens = ((ev.get("part") or {}).get("tokens") or {})
-            cache = tokens.get("cache") or {}
-            if isinstance(cache, dict):
-                read, write = cache.get("read"), cache.get("write")
-                reads = (reads or 0) + (read or 0)
-                writes = (writes or 0) + (write or 0)
+        if not isinstance(ev, dict) or ev.get("type") != "step_finish":
+            continue
+        part = ev.get("part")
+        tokens = part.get("tokens") if isinstance(part, dict) else None
+        cache = tokens.get("cache") if isinstance(tokens, dict) else None
+        if not isinstance(cache, dict):
+            continue
+        read, write = cache.get("read"), cache.get("write")
+        if type(read) is int and read >= 0:
+            reads = (reads or 0) + read
+        if type(write) is int and write >= 0:
+            writes = (writes or 0) + write
     return {"read": reads, "write": writes}
 
 
