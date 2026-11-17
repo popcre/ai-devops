@@ -382,6 +382,16 @@ class FailureTests(Base):
 
 
 class RunPlanTests(Base):
+    def test_empty_plan_warns_and_runs_legacy_rotation(self):
+        self.env["PR"] = "0"
+        self.mode("ok")
+        proc = self.run_plan([])
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("::warning::empty candidate plan", proc.stderr)
+        self.assertTrue(self.plan_results())
+        self.assertTrue(any(r.get("verdict") == "APPROVE"
+                            for r in self.plan_results().values()))
+
     def test_meta_failure_falls_through_to_openrouter_and_stops(self):
         self.mode("credit", "ok")
         proc = self.run_plan(["muse-meta", "muse-openrouter", "hy4-openrouter"])
@@ -478,6 +488,31 @@ class SecondOpinionRouteTests(Base):
         r3 = self.run_so("muse", "--route", "muse-meta", "ask", "s1", "wrong route")
         self.assertEqual(r3.returncode, 2)
         self.assertIn("bound to route", r3.stderr)
+
+    def test_default_muse_resume_fails_over_and_stays_on_fallback(self):
+        self.mode("ok", "credit", "ok", "ok")
+        for command, question in (("new", "first"), ("ask", "second"), ("ask", "third")):
+            r = self.run_so("muse", command, "default-failover", question)
+            self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.meta("muse", "default-failover")["route"], "muse-openrouter")
+        calls = self.oc_calls()
+        self.assertNotIn("--session", calls[2]["args"])
+        self.assertIn("--session", calls[3]["args"])
+        self.assertEqual(sorted(calls[3]["config"]["provider"]), ["openrouter-muse"])
+
+    def test_default_muse_cache_profile_matches_explicit_route(self):
+        self.env["AI_REVIEW_CACHE"] = "1"
+        for name, route in (("default-cache", []), ("explicit-cache", ["--route", "muse-meta"])):
+            r = self.run_so("muse", *route, "new", name, "hello")
+            self.assertEqual(r.returncode, 0, r.stderr)
+            cfg = self.oc_calls()[-1]["config"]["provider"]["meta-model-api"]
+            self.assertTrue(cfg["body"]["prompt_cache_key"].startswith("aidv1-"))
+
+    def test_muse_review_defaults_to_candidate_with_failover(self):
+        self.mode("credit", "ok")
+        r = self.run_so("muse", "review", "--base", self.base)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(sorted(self.oc_calls()[-1]["config"]["provider"]), ["openrouter-muse"])
 
     def test_auto_failover_is_atomic(self):
         self.mode("ok", "credit", "ok")
@@ -587,6 +622,10 @@ class SecondOpinionRouteTests(Base):
         self.assertEqual(r2.returncode, 0, r2.stderr)
         self.assertEqual(self.meta("muse", "nd")["route"], "muse-meta")
         self.assertIn("--session", self.oc_calls()[-1]["args"])
+        call = self.oc_calls()[-1]
+        self.assertEqual(call["args"][call["args"].index("--model") + 1],
+                         "meta-model-api/muse-spark-1.3-contributor")
+        self.assertEqual(sorted(call["config"]["provider"]), ["meta-model-api"])
 
     def test_legacy_routeless_session_stays_legacy(self):
         # A conversation created before the activation (meta without a route)
@@ -623,6 +662,39 @@ class WorkflowDefaultTests(Base):
         self.assertIn('python3 "$script" --candidate-plan "$PR"', wf)
         self.assertNotIn('python3 "$script" --rotation "$PR"', wf)
         self.assertIn('AI_REVIEW_CANDIDATE_ROUTES', wf)
+
+    def test_workflow_executes_default_and_recovers_failed_expansion(self):
+        with open(self.WF, encoding="utf-8") as fh:
+            wf = fh.read()
+        block = wf.split("      - name: Review with one rotating reviewer\n", 1)[1]
+        block = block.split("        run: |\n", 1)[1].split("      - name:", 1)[0]
+        block = textwrap.dedent(block).replace("${{ inputs.candidate_routes || '' }}", "")
+        for fail in (False, True):
+            workspace = os.path.join(self.tmp.name, "workflow-" + str(fail))
+            bindir = os.path.join(workspace, "toolkit", "bin")
+            os.makedirs(bindir)
+            # Exercise the real workflow shell and runner; only plan-generation
+            # failure is injected, with no provider or network access.
+            with open(os.path.join(bindir, "ai-review-simple"), "w") as fh:
+                fh.write("import subprocess, sys\n")
+                if fail:
+                    fh.write("if '--candidate-plan' in sys.argv: sys.exit(1)\n")
+                fh.write("sys.exit(subprocess.call([sys.executable, %r] + sys.argv[1:]))\n" % SCRIPT)
+            block_run = block.replace('git -C pr', 'git -C "$TEST_REPO"')
+            block_run = block_run.replace('--repo pr', '--repo "$TEST_REPO"')
+            env = dict(self.env, GITHUB_WORKSPACE=workspace, TEST_REPO=self.repo,
+                       BASE_SHA=self.base, HEAD_SHA=self.head, PR="0",
+                       AI_REVIEW_CANDIDATE_ROUTES="")
+            self.mode("ok")
+            proc = subprocess.run(["bash", "-c", block_run], cwd=workspace, env=env,
+                                  capture_output=True, text=True, timeout=60)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            with open(os.path.join(workspace, "results", "order")) as fh:
+                order = fh.read().split()
+            self.assertTrue(order)
+            with open(os.path.join(workspace, "results", order[-1] + ".json")) as fh:
+                self.assertEqual(json.load(fh)["verdict"], "APPROVE")
+            self.assertEqual("::warning::empty candidate plan" in proc.stderr, fail)
 
 
 

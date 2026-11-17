@@ -615,8 +615,12 @@ def run_plan(args):
     order_path = os.path.join(args.results_dir, "order")
     with open(order_path, "w") as fh:
         pass
+    entries = (args.run_plan or "").split()
+    if not entries:
+        print("::warning::empty candidate plan; falling back to legacy rotation", file=sys.stderr)
+        entries = rotation(os.environ.get("PR") or 0)
     shared_outage = False
-    for entry in (args.run_plan or "").split():
+    for entry in entries:
         rid = entry if entry in known else None
         with open(order_path, "a") as fh:
             fh.write(entry + "\n")

@@ -15,7 +15,7 @@ the advisory CI reviewer and these second opinions share one definition.
 Candidate routes (#2549/#2550, config/reviewer-routes.json) are opt-in through
 --route (deepseek-openrouter, muse-meta, muse-openrouter, hy4-openrouter, or
 "auto" for Muse with same-model failover). Since the #2531 activation
-(2026-11-17) NEW Muse conversations default to that candidate route ("auto");
+(2026-11-17) NEW Muse questions and reviews default to that candidate route ("auto");
 existing conversations keep their stored route, and every other provider keeps
 its legacy default without --route.
 
@@ -527,6 +527,8 @@ def read_prompt(args):
 
 
 def start(provider, name, repo, writable, base=None, route=None):
+    if route == "auto":
+        route = "muse-meta"
     if name is None:
         name = f"oneshot-{time.strftime('%Y%m%d-%H%M%S')}-{os.getpid()}"
     sdir = session_dir(provider, name)
@@ -616,6 +618,8 @@ def main(argv):
                 die(f"session {name} is bound to route {bound}; explicit selection is sticky.", 2)
             sdir = os.path.join(STATE, p, name)
             meta = load_meta(sdir)
+            if route is None and meta.get("route") in RR.routes():
+                route = "auto" if p == "muse" else meta["route"]
         else:
             if p == "muse" and route is None and cmd != "implement":
                 # Activation (#2531, 2026-11-17): NEW Muse second opinions
@@ -625,7 +629,7 @@ def main(argv):
                 # reverting this hunk restores the legacy default exactly.
                 route = "auto"
             sdir, meta = start(p, name, args.repo, cmd == "implement", args.base,
-                               route=route if route in RR.routes() else None)
+                               route=route)
         print(run_opencode(p, sdir, meta, prompt, route=route))
         if meta["mode"] == "implement":
             git(meta["work"], "add", "-A", check=False)
@@ -636,6 +640,8 @@ def main(argv):
         return 0
 
     if cmd == "review":
+        if p == "muse" and route is None:
+            route = "auto"
         repo = git(args.repo, "rev-parse", "--show-toplevel").strip()
         base = args.base or "origin/main"
         mb = git(repo, "merge-base", base, "HEAD").strip()
@@ -647,7 +653,7 @@ def main(argv):
         brief = read_prompt(args) if (args.prompt_file or args.text) else "Review this change."
         prompt = brief + REVIEW_SUFFIX.format(base=base, fence=fence, diff=diff)
         sdir, meta = start(p, None, repo, False, base,
-                           route=route if route in RR.routes() else None)
+                           route=route)
         print(run_opencode(p, sdir, meta, prompt, route=route))
         return 0
 
