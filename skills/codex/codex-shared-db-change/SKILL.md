@@ -99,6 +99,27 @@ app-repo-only migration. **Author it in `popcre/shared-db` first.** App repos
 only get updated (models, generated types, adapters, API code) AFTER the shared-db
 change is applied.
 
+## Stranded promotions — list at start, watch your own delivery (popcre/shared-db#6561)
+
+At the start of any shared-db structural work, list the stranded promotions:
+
+```bash
+gh pr list --repo popcre/shared-db --state all --label promotion-parked
+gh pr list --repo popcre/shared-db --state all --label promotion-held
+```
+
+`promotion-parked` means out of automatic attempts or permanently refused;
+`promotion-held` means blocked over 8h by open review findings. The automatic
+trigger adds and clears both labels itself; never add or remove them by hand.
+Report any you merged or can repair. Repair routes are fix-forward under a new
+version or retire-and-reissue; never re-run a failed run; no manual production
+command.
+
+After you merge a migration PR, leave its delivery check behind: a scheduled
+self-check where your harness supports one, otherwise the exact re-check in
+your HANDOFF.d file and `- [ ] promotion delivered to production` on the
+landing issue. Rule: shared-db `docs/agents/worktrees-and-handoffs.md` §2.1-H.
+
 ## Successor issues must be routed from scratch
 
 Never inherit the route of a predecessor issue. Classify the successor's own
