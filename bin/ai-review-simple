@@ -488,7 +488,7 @@ def run_harness_once(spec, prompt, work, tmp, key, timeout):
     credential."""
     dsh = RR.resolve_deepseek_harness()
     if not dsh:
-        return None, "", "local: deepseek harness binary not found"
+        return None, "", "local: deepseek harness binary not found", None
     env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": os.path.join(tmp, "home"),
            "DSH_HOME": os.path.join(tmp, "dsh"), spec["key_env"]: key,
            "PYTHONDONTWRITEBYTECODE": "1", "OPENCODE_DISABLE_CLAUDE_CODE": "1",
@@ -515,7 +515,7 @@ def run_harness_once(spec, prompt, work, tmp, key, timeout):
         except OSError:
             pass
         proc.communicate()
-        return None, "", f"timeout after {timeout}s"
+        return None, "", f"timeout after {timeout}s", None
     final, ev_err = read_harness_events(out)
     verdict = parse_verdict(final)
     if verdict:
