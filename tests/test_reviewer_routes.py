@@ -36,7 +36,8 @@ FAKE_OC = textwrap.dedent("""\
             rest = lines[1:]
             open(mpath, "w").write("\\n".join(rest + (["ok"] if not rest else [])))
     watched = ("OPENROUTER_API_KEY", "MODEL_API_KEY", "DEEPSEEK_API_KEY", "ZHIPU_API_KEY",
-               "STEPFUN_API_KEY", "AI_MUSE_KEY", "AI_OPENROUTER_KEY", "HOME", "USERPROFILE")
+               "STEPFUN_API_KEY", "AI_MUSE_KEY", "AI_OPENROUTER_KEY", "HOME", "USERPROFILE",
+               "SYSTEMROOT", "TEMP", "WINDIR")
     env_seen = {k: os.environ.get(k) for k in watched if os.environ.get(k)}
     cfg = {}
     cp = os.path.join(os.environ.get("XDG_CONFIG_HOME", ""), "opencode", "opencode.json")
@@ -331,6 +332,21 @@ class SecretScopeTests(Base):
             for tool in ("write:", "edit:", "patch:", "bash:"):
                 self.assertIn(f"{tool} false", agent)
             ars._force_rmtree(wtmp)
+
+    def test_windows_required_env_reaches_opencode(self):
+        # 2026-11-17 crash repair: without SYSTEMROOT the pinned OpenCode binary
+        # fail-fasts (0xC0000409) on Windows before any output. The review path
+        # must pass the same qualified Windows vars through as second opinions.
+        self.mode("ok")
+        self.env["SYSTEMROOT"] = "C:\\Windows"
+        self.env["WINDIR"] = "C:\\Windows"
+        self.env["TEMP"] = os.path.join(self.tmp.name, "warm")
+        proc, _ = self.run_review(route="muse-openrouter")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        env = self.oc_calls()[0]["env"]
+        self.assertEqual(env.get("SYSTEMROOT"), "C:\\Windows")
+        self.assertEqual(env.get("WINDIR"), "C:\\Windows")
+        self.assertTrue(env.get("TEMP", "").endswith("warm"))
 
 
 class FailureTests(Base):
