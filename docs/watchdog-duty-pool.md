@@ -148,3 +148,19 @@ Mechanism (no secret values in this file):
 
 Keep this runbook as the **contract** the tools and docs must match. When a row
 of the plan’s STATUS turns done, update §7 here in the same PR.
+
+## edge-dev3 runner housekeeping
+
+Keep new runner installations under `~/actions-runners/` using
+`tools/ci/install-edge-dev3-runner.sh`. Update the per-repository heartbeat
+roster when relocating a service. For a move, wait for the runner's current
+job to finish, preserve its registration and service settings, and verify
+that it reconnects and accepts work under the new path.
+
+On edge-dev3, install `tools/ci/edge-dev3-runner-housekeeping.py` in
+`~/.local/libexec/` and its matching service and timer in
+`~/.config/systemd/user/`. Reload the user systemd manager and enable the
+timer. Its daily check reports old paths, unowned folders, missing or unhealthy
+services, and duplicate registrations in the service journal. Findings leave
+the check in a failed state for inspection. The check makes no changes to
+services, folders, or GitHub registrations.
