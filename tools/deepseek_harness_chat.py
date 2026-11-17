@@ -27,7 +27,8 @@ def main():
     ap.add_argument("--dsh-home", required=True,
                     help="private DSH_HOME for this conversation (persistent for resume)")
     ap.add_argument("--home", required=True, help="private HOME for the child process")
-    ap.add_argument("--cwd", required=True, help="read-only disposable workspace")
+    ap.add_argument("--cwd", default=os.getcwd(),
+                    help="read-only disposable workspace (default: this process's cwd)")
     ap.add_argument("--prompt-file", help="task text file (default: stdin)")
     ap.add_argument("--session", help="harness session id to resume")
     ap.add_argument("--timeout", type=int, default=1800)

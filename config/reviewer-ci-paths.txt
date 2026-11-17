@@ -135,3 +135,6 @@ tests/test_ai_second_opinion.py
 bin/ai-hy4*
 tools/reviewer_routes.py
 tools/deepseek_harness_chat.py
+config/reviewer-routes.json
+config/deepseek-harness/version
+bin/setup-deepseek-harness.sh

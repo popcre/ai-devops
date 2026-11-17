@@ -1386,11 +1386,13 @@ harness_run() { # prompt-file session(optional) cwd -> prints reply; sets HARNES
   local tmpdir="${SESS_DIR:-${TMPDIR:-/tmp}}"
   HARNESS_SID="$session"
   out="$(mktemp "$tmpdir/.harness.XXXXXX")" || return 1
-  "$PYTHON" "$SOURCE_TOOLS/../tools/deepseek_harness_chat.py" --route "$ROUTE" \
+  # The workspace travels as the child's own working directory, never as a
+  # directory flag handed to the runtime (test-ai-review-sandbox guard).
+  ( cd "$cwd" && "$PYTHON" "$SOURCE_TOOLS/../tools/deepseek_harness_chat.py" --route "$ROUTE" \
     --secrets-dir "$(dirname "$OR_KEY_STORE")" \
-    --dsh-home "$HARNESS_DSH_HOME" --home "$HARNESS_DSH_HOME/home" --cwd "$cwd" \
+    --dsh-home "$HARNESS_DSH_HOME" --home "$HARNESS_DSH_HOME/home" \
     --prompt-file "$prompt_file" ${session:+--session "$session"} \
-    --timeout "${AI_DEEPSEEK_HARNESS_TIMEOUT:-1800}" >"$out"
+    --timeout "${AI_DEEPSEEK_HARNESS_TIMEOUT:-1800}" ) >"$out"
   rc=$?
   [ "$rc" -eq 0 ] || { rm -f "$out"; return "$rc"; }
   HARNESS_SID="$(head -1 "$out" | sed -n 's/^SESSION //p')"
