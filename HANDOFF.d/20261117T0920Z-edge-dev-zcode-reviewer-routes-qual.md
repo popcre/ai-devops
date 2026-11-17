@@ -1,7 +1,7 @@
 ---
 issue: "2531, 2549, 2550, 2551"
 status: OPEN
-owner: zcode/sess_cf627505
+owner: successor session (switch decision taken 2026-11-17; Albert will run the switch in a new session)
 ---
 # Reviewer routes: Phase A+B landed, Phase C started — activation hold intact
 
@@ -68,15 +68,39 @@ cold run hard, scope keys per experiment namespace.
 
 ## 6. Exact next steps
 
-1. Finish Phase C (#2551): Hy4 and DeepSeek cache baselines,
+0. **The switch (decided 2026-11-17, runs in a NEW session on Albert's go).**
+   Stage activation as ONE separate revertible default change per plan §13:
+   the normal GitHub rotation uses the candidate expansion (muse ->
+   muse-meta with same-model OpenRouter failover, deepseek -> the OpenRouter
+   route, Hy4 final fallback) and new Muse second opinions default to the
+   candidate route; everything else stays opt-in. Flip ON = merge that PR;
+   flip OFF = revert it (one queue run, ~20-30 min). Before merging: run the
+   §10 activation matrix rows that remain (restart-recall phrasing pass),
+   rehearse the rollback (revert on a fixture PR, verify a live LEGACY
+   review completes and candidate session state stays readable), and keep
+   the no-switch env defaults intact inside the same commit so the revert is
+   a pure default flip. Albert's go is the trigger; he has been told both
+   directions are one pipeline run each.
+1. **Per-model re-check (caching + session persistence), before or with the
+   switch.** For each of muse-meta, muse-openrouter, hy4-openrouter and
+   deepseek-openrouter, re-verify and record receipts: (a) caching — with
+   AI_REVIEW_CACHE=1, cache receipts present and stable across two restarts
+   of one named session and across an idle interval (>=15 min), a cold/warm
+   pair per route, and a distinct-head run per route (namespaced so
+   account-level prefix reuse cannot mask a cold run); (b) session
+   persistence — a named conversation recalls a file-read marker after two
+   fresh-process restarts (phrase the ask neutrally: models refused the
+   earlier "repeat what you printed" phrasing), the harness conversation
+   resumes via --session-id, and the Muse failover continuation keeps the
+   prior visible turns. Post receipts on #2551 and #2531.
+2. Finish Phase C (#2551): Hy4 and DeepSeek cache baselines,
    Chat-Completions vs Responses API comparison (24h retention on Responses
    only), growing second-opinion thread across restart, idle-interval probe;
    publish paired hit-rate/time/cost tables; keep the experiment off by
    default and separately revertible.
-2. Restart-recall phrasing pass, then the activation matrix (§10) when the
-   no-switch hold is lifted; activation is a separate revertible default
-   change per §13.
-3. Close out the Ubuntu interactive install step and record the receipt.
+3. Close out the Ubuntu interactive install step and record the receipt (see
+   §5; one on-machine terminal session, prompt file
+   `Install-reviewer-routes-edge-dev3.md` on the Desktop of edge-dev).
 
 ## 7. Constraints
 
