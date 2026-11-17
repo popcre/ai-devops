@@ -13,11 +13,20 @@ tier and verify the result yourself. Money is saved on every planned task;
 quality does not change, because every step keeps its verification gate and the
 session that wrote the plan is the one checking the result.
 
-| Harness | Frontier (plans, verifies) | Lower tier (implements) |
+| Harness | Lead (plans, does lead-only steps, verifies) | Helper (does helper-ok steps) |
 |---|---|---|
-| Codex | GPT-5.6-Sol (medium) | GPT-6 Luna when the plan exposes it; today `gpt-5.6-luna` |
-| ZCode | GLM 5.3 MAX | GLM 5.3 Flash |
-| MiMo | Mimo v2.6 pro | Mimo v2.6 flash |
+| Claude | Opus, `low` effort | Haiku, `high` effort |
+| Codex | latest Sol model, `low` reasoning (`medium` allowed) | Luna, `high` reasoning |
+| ZCode | GLM MAX | GLM Flash |
+| MiMo | Mimo Pro | Mimo Flash |
+
+Use the newest release of each named line. The Claude pair was reasoned
+through on a real plan on 2026-11-17 (popcre/shared-db#6561); the other
+three pairs are owner-chosen and unproven as lead-and-helper — treat the
+first plan run on each as a trial and record the result on its issue.
+
+Plans mark each step `lead-only` or `helper-ok` (see the plan standard). The
+lead does every `lead-only` step itself and dispatches only `helper-ok` steps.
 
 Judgment-heavy work stays on the frontier tier by design — read the
 do-not-handoff list before dispatching anything.
@@ -88,6 +97,14 @@ The frontier session verifies; the lower tier never grades its own work.
 - You own the commit and the pull request either way. An unverified
   lower-tier result cannot land.
 
+## The helper may ask
+
+A helper that hits its step's stop-and-ask trigger, or anything the packet
+does not answer, stops and asks the lead instead of deciding. The lead
+answers from the plan's locked decisions; if they do not settle it, the lead
+decides and records the decision on the issue. A helper stuck or silent for
+30 minutes loses the step: the lead takes it back and does it.
+
 ## The implementer-agnostic rule
 
 - Implementation plans never name their implementer. The model lineup rotates;
@@ -107,6 +124,7 @@ Anything not proven stays marked unverified — never guess a command.
 |---|---|---|
 | Codex → Luna | `codex exec -m gpt-5.6-luna` — the only Luna the ChatGPT plan accepts today (probe returned `PONG`). Also `-c model="…"`. `~/.codex/config.toml` pins a frontier default, so pass `-m` explicitly | Two live probes 2026-09-25 (quotes on #782): `gpt-6-luna` (new generation) rejected — "not supported when using Codex with a ChatGPT account"; `gpt-5.6-luna` works headlessly (levels up to `max`, no `ultra`). Re-probe `gpt-6-luna` when the lineup updates; never guess slugs |
 | ZCode → GLM 5.3 Flash | Manual: open the ZCode app, switch the model to GLM 5.3 Flash, hand it the plan file path | Verified impossible 2026-09-25 on the newest CLI core (0.16.9): no `--model` flag, config `defaultModelSelection` ignored in headless runs, app-server registry has no subscription provider (evidence on [#828](https://github.com/popcre/ai-devops/issues/828#issuecomment-5837096435)). Retest when a newer core advertises a model flag |
+| Claude → Haiku | Agent tool with model `haiku` and effort `high`, or a new session set to Haiku at high effort, given the task packet | Available in Claude Code; not live-probed for this sheet (unverified) |
 | MiMo → Mimo v2.6 flash | Manual: open the Xiaomi MiMo AI app, select Mimo v2.6 flash, hand it the plan file path | No `mimo` CLI on PATH; gap tracked in [#829](https://github.com/popcre/ai-devops/issues/829) |
 
 When a gap issue closes with a supported selector, update this table in the

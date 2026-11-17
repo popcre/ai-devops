@@ -134,7 +134,7 @@ codex exec \
 ```
 
 `-c model_reasoning_effort` is **not optional**: Albert's standing rule
-(2026-07-16) is GPT-5.6 at `low` or `medium` ONLY, never `high` or `none`. Pass
+(updated 2026-11-17) is: the latest Sol model defaults to `low`; `medium` is allowed; never `high` or `none`. Pass
 it explicitly — an unset effort has been observed to start a run at `none`.
 Judgement work like a second opinion wants `medium`. Check the `reasoning
 effort:` line in the stdout header and kill the run if it says anything else.

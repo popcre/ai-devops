@@ -34,7 +34,7 @@ for bad in ("high", "none", "minimal", ""):
     except ValueError:
         pass
     else:
-        fail(f"effort {bad!r} was accepted; the standing rule caps GPT-5.6 at low/medium")
+        fail(f"effort {bad!r} was accepted; the standing rule allows the latest Sol model only low (default) or medium")
 
 # Rule 2: the sandbox is read-only, passed as a flag, not a -c key.
 argv = m.build_command("q", "low")

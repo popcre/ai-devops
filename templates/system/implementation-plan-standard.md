@@ -61,6 +61,10 @@ Mark each LOCKED (do not relitigate) or OPEN (implementer's judgment).
 Per step: target files (file:line/function), intended behavior when done,
 dependencies, and a verification gate — "you'll know it worked when ___."
 Group into phases for large work; mark the context cut points.
+Mark every step `lead-only` or `helper-ok` with a one-line reason, by risk and
+never by model name (criteria and pairs: `model-tier-delegation.md`). Each
+`helper-ok` step states its stop-and-ask trigger. Close the plan with a lead
+launch prompt that names roles, not models.
 For trust-boundary work (parsers, pricing/money, files or data coming from
 outside the repo) the plan MUST contain an adversarial-cases table — every
 external input × its hostile case × the test that proves it — and is not
@@ -91,6 +95,9 @@ What could break, the rollback, what's still uncertain and how to decide it.
 - [ ] A fresh session could execute it without asking a single question.
 - [ ] Rejected approaches and failed attempts included, with why.
 - [ ] Every step names concrete files and has a verification gate.
+- [ ] Every step is marked `lead-only` or `helper-ok` with a reason; no step
+      names a model; every `helper-ok` step has a stop-and-ask trigger.
+- [ ] The plan ends with a lead launch prompt.
 - [ ] Trust-boundary work carries an adversarial-cases table — every external
       input × its hostile case × the test that proves it, every row naming a test.
 - [ ] Locked vs. open decisions labeled.

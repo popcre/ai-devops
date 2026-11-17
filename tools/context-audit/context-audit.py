@@ -51,7 +51,7 @@ SAFETY_MARKERS = {
     "capability preservation": list(CAPABILITY_REPAIR_PATTERNS),
     "completion honesty": list(CLOSEOUT_CONTRACT_PATTERNS),
     "Git identity": [r"GIT_COMMITTER_IDENT|Git identity", r"Albert Hazan|users\.noreply\.github\.com"],
-    "GPT-5.6 effort": [r"GPT-5\.6", r"low.*medium|medium.*low"],
+    "Sol reasoning effort": [r"latest Sol model", r"low.*medium|medium.*low"],
     "system binaries": [r"system binaries|operating-system binaries", r"never replace|without overwriting|never live-edit a server or replace"],
 }
 
@@ -87,8 +87,8 @@ SAFETY_REASONS = {
         "no always-loaded rule requires verifying GIT_COMMITTER_IDENT, so Git can "
         "silently invent a wrong commit identity"
     ),
-    "GPT-5.6 effort": (
-        "no always-loaded rule pins GPT-5.6 reasoning to low or medium, so a run "
+    "Sol reasoning effort": (
+        "no always-loaded rule sets the latest Sol model to low reasoning by default (medium allowed), so a run "
         "could start at high or none"
     ),
     "system binaries": (
@@ -107,7 +107,7 @@ PARITY_RULES = {
     "closeout contract: preparation is not delivery": r"Preparation is not delivery",
     "closeout contract: keep working when unfinished": r"Ending\s+the turn(?: there)? is the error",
     "closeout contract: do not promise future action instead of acting": r"Do not end a turn by describing work you are about to do|a promise,\s+not work",
-    "GPT-5.6 low or medium only": r"GPT-5\.6",
+    "Sol defaults to low reasoning": r"latest Sol model",
     "production infrastructure safety": r"production infrastructure safety|\*\*Production:\*\* read-only by default",
     # #1912 replaced the named terraform/gcloud list with "every technical production action".
     "no terraform apply against prod": r"terraform apply|gates every\s+technical production action",
@@ -139,7 +139,7 @@ PARITY_RULES = {
 
 # Client-only text that is allowed to appear in exactly one global. If one of
 # these ever appears in both, the allowlist entry is stale and is reported.
-# A shared rule that merely *mentions* the other client (the GPT-5.6 rule names
+# A shared rule that merely *mentions* the other client (the Sol reasoning rule names
 # ~/.codex/config.toml in the Claude global) is not a divergence, so these
 # patterns anchor on text that is genuinely one client's own.
 PARITY_DIVERGENCE_ALLOWLIST = {

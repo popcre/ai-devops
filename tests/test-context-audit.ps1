@@ -16,7 +16,7 @@ $safetyLines = [ordered]@{
     "capability preservation" = "Preserve the capability. A repair is complete only when the problem is gone and the original capability still works; removal is symptom suppression."
     "completion honesty"      = "Account for the whole job before ending a turn. Preparation is not delivery, so if a deliverable is unfinished keep working: Ending the turn is the error. Do not end a turn by describing work you are about to do. Say nothing is needed only after that check passes for every deliverable."
     "Git identity"            = "Check GIT_COMMITTER_IDENT for Albert Hazan at users.noreply.github.com."
-    "GPT-5.6 effort"          = "GPT-5.6 must use low or medium effort."
+    "Sol reasoning effort"    = "The latest Sol model defaults to low reasoning; medium is allowed."
     "system binaries"         = "Never replace operating-system binaries or overwrite system commands."
 }
 
@@ -341,15 +341,15 @@ try {
     if ($result.exit -eq 0 -or $result.report.crossClientParity.mismatches -notcontains 'revoked automatic child-stop mandate') {
         throw 'Strict mode accepted the revoked child-stop mandate beside the continuation rule.'
     }
-    New-AuditFixture -Path $fixture -OmitSafetyFromCodexOnly @("GPT-5.6 effort")
+    New-AuditFixture -Path $fixture -OmitSafetyFromCodexOnly @("Sol reasoning effort")
     $result = Invoke-Audit -Path $fixture -Strict
-    if ($result.report.crossClientParity.mismatches -notcontains "GPT-5.6 low or medium only") {
+    if ($result.report.crossClientParity.mismatches -notcontains "Sol defaults to low reasoning") {
         throw "A rule present only in the Claude global was not reported as a parity mismatch."
     }
-    $rule = $result.report.crossClientParity.rules | Where-Object { $_.name -eq "GPT-5.6 low or medium only" }
+    $rule = $result.report.crossClientParity.rules | Where-Object { $_.name -eq "Sol defaults to low reasoning" }
     if ($rule.reason -notmatch "Codex") { throw "The parity reason does not name the client that is missing the rule." }
     if ($result.exit -eq 0) { throw "Strict mode passed with a cross-client parity mismatch." }
-    if ($result.report.safetyMarkers."GPT-5.6 effort" -ne $true) {
+    if ($result.report.safetyMarkers."Sol reasoning effort" -ne $true) {
         throw "Parity fixture unexpectedly cleared the safety marker; the two checks must be independent."
     }
 
