@@ -543,7 +543,7 @@ applying the decision table above reaches the same owner for each row.
 
 | # | Rule or fact (real) | Canonical owner | Pointer or adapter elsewhere |
 |---|---|---|---|
-| 1 | GPT-5.6 reasoning must stay `low`/`medium`, never `high`/`none`, every machine and session | Global (`CLAUDE-global.md` "AI model settings"; matched in `AGENTS-global-codex.md`) | Restated as a standing constraint in the plan, section 11 |
+| 1 | The latest Sol model defaults to `low` reasoning; `medium` is allowed; never `high`/`none`, every machine and session | Global (`CLAUDE-global.md` "AI model settings"; matched in `AGENTS-global-codex.md`) | Restated as a standing constraint in the plan, section 11 |
 | 2 | Never run `terraform apply` or mutating `gcloud` against prod (`lithe-breaker-323913`) with personal credentials | Global ("Production infrastructure safety") | Incident detail in `docs/cloud-build-prod-trigger-incident-2026-07-20.md` |
 | 3 | `codex exec` can look healthy and silently write nothing on Windows; fix is `…\.codex\packages\standalone\current\bin` first on PATH | Machine atlas ("Codex on Windows — the junction trap") | Summarized in `AGENTS.md` "Critical incidents" (a pointer, not a second owner) |
 | 4 | Toolkit home is `/worksp/ai-devops`; never `/opt/ai-devops` | Repo router (`AGENTS.md`, Data model) | Restated in `CLAUDE.md` and `machine-atlas.md` as adapters |
@@ -659,8 +659,8 @@ covered by the parity check.
 
 Eight categories must be present in the always-loaded and startup-routed text:
 production mutation, shared database routing, secret handling, destructive
-actions, capability preservation during repair, Git identity, the GPT-5.6
-low/medium limit, and the prohibition on replacing operating-system binaries.
+actions, capability preservation during repair, Git identity, the Sol
+low-by-default reasoning rule, and the prohibition on replacing operating-system binaries.
 Removing any one of
 them from a fixture produces a plain-English failure naming that category and
 what protection was lost. `tests/test-context-audit.ps1` proves all eight
@@ -670,7 +670,7 @@ independently, and proves that removing one does not disturb the other seven.
 
 Claude and Codex load different global files, so identical behavior has to be
 asserted rather than assumed. Sixteen rules must appear in both globals: the
-response-style contract, GPT-5.6 low/medium, production infrastructure safety,
+response-style contract, Sol low-by-default reasoning, production infrastructure safety,
 no `terraform apply` against prod, verifying the Git committer identity, secrets
 in 1Password, serialized 1Password access, the shared-database change gate,
 Synology long-read safety, the handoff quality standard, and (added in step 5)
@@ -683,8 +683,8 @@ Text that genuinely belongs to one client only lives in a small divergence
 allowlist (each client's own install line, and the Codex edition framing). If an
 allowlisted, supposedly client-only string later appears in both globals, the
 allowlist entry itself is reported as stale. A rule that merely *mentions* the
-other client — the Claude global names `~/.codex/config.toml` inside the GPT-5.6
-rule — is not a divergence, so the allowlist patterns anchor on text each client
+other client — the Claude global names `~/.codex/config.toml` inside the Sol
+reasoning rule — is not a divergence, so the allowlist patterns anchor on text each client
 actually owns.
 
 ### Duplicate startup text
@@ -819,7 +819,7 @@ doc. No global had ever carried the rule. It is now in both and is a parity rule
 
 What deliberately stayed always-loaded: the response-style contract, who Albert
 is, the start-immediately and no-approval-loop rules, secret and 1Password-serialization
-rules, the GPT-5.6 low/medium limit, production and shared-cloud read-only
+rules, the Sol low-by-default reasoning limit, production and shared-cloud read-only
 safety, the shared-database read-open/change-gated split, branch and commit-
 identity gates, the engineering standards, and the session-start routing
 contract. Each of those either governs behavior on every turn or is the gate

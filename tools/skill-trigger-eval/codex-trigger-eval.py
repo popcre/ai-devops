@@ -60,7 +60,7 @@ def build_command(query: str, effort: str) -> list[str]:
     if effort not in ALLOWED_EFFORTS:
         raise ValueError(
             f"reasoning effort {effort!r} is not allowed; use one of {ALLOWED_EFFORTS}. "
-            "Albert's standing rule caps GPT-5.6 at low or medium, and an unset "
+            "Albert's standing rule defaults the latest Sol model to low and allows medium, and an unset "
             "effort can start a run at none."
         )
     return [
@@ -154,7 +154,7 @@ def main() -> int:
     ap.add_argument("--project", type=Path, default=None)
     ap.add_argument("--codex-home", type=Path, default=Path.home() / ".codex")
     ap.add_argument("--effort", default="low", choices=list(ALLOWED_EFFORTS),
-                    help="GPT-5.6 reasoning effort. Only low or medium are allowed.")
+                    help="Reasoning effort for the latest Sol model. Default low; medium is allowed.")
     ap.add_argument("--runs", type=int, default=1)
     ap.add_argument("--workers", type=int, default=2)
     ap.add_argument("--timeout", type=int, default=240)

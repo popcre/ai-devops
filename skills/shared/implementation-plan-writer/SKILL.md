@@ -88,6 +88,18 @@ thin plan costs a whole session of rediscovery and a wrong build.
      table** — every external input × its hostile case × the test that proves
      it — and is not complete until every row names a test.
    - Where a step is genuinely a judgment call, say so and give the criteria.
+   - **Who does it: `lead-only` or `helper-ok`, with a one-line reason.** The
+     plan is written to be run by a lead session that dispatches the
+     mechanical steps to its harness's lower-tier helper and verifies them
+     (pairs and rules: `templates/system/model-tier-delegation.md`). Mark by
+     risk, never by model name. A step is `lead-only` when it is on that
+     sheet's do-NOT-handoff list, when it reshapes logic that decides a
+     production outcome, when a mistake would not be caught by the step's own
+     gate, or when it is a live-proof judgment. Everything else is
+     `helper-ok` only if its files, edits and gate are named so exactly that
+     the helper needs no decision. For each `helper-ok` step state its
+     **stop-and-ask trigger**: what the helper must bring back to the lead
+     instead of deciding.
    Group steps into **phases** when the work is large enough that a session
    would run out of context; mark the natural cut points (see `fresh-session`).
 10. **Tests required** — the specific unit tests to add for the new code, and
@@ -120,6 +132,8 @@ could always be more detailed" is NOT an item on this list.
       without reading the planning chat.
 - [ ] Rejected approaches and failed attempts are written down, with why.
 - [ ] Every step names concrete files/functions and has a verification gate.
+- [ ] Every step is marked `lead-only` or `helper-ok` with a reason, no step
+      names a model, and every `helper-ok` step has a stop-and-ask trigger.
 - [ ] Trust-boundary work carries an **adversarial-cases table** — every
       external input × its hostile case × the test that proves it, every row
       naming a test.
@@ -184,10 +198,20 @@ When asked whether the plan is comprehensive/detailed enough:
 - Sending the first draft of trust-boundary work to review without the
   adversarial-cases table.
 - A plan that only lives in chat. It must be a file (see Mechanics).
+- Naming a model as a step's implementer, or leaving a step without a
+  `lead-only` / `helper-ok` mark.
 - Three bullet points called a plan. Under a screen of text for non-trivial work
   is almost certainly too thin — re-audit.
 
 ## Mechanics
+
+- **End the plan with a lead launch prompt.** A fenced, self-contained prompt
+  for the lead session: what to read first, which steps it does itself, which
+  it hands to its helper and in what order, the helper's rules (finished work
+  or an evidenced blocker; no design decisions; no merges or posts; ask the
+  lead when a stop-and-ask trigger fires; taken back after 30 minutes
+  stuck), and the checks the lead runs itself. It names roles, not models —
+  the pair comes from `templates/system/model-tier-delegation.md`.
 
 - Write to a repo file — `IMPLEMENTATION-PLAN.md`, or `plan_<topic>.md` for a
   scoped piece of work — then commit and push. A plan that lives only in chat is

@@ -233,3 +233,19 @@ Linux.
 Current rule: recall-ai stays retired from the machine-wide catalog, but the
 Oracle project's own tracked `.mcp.json` entry is authorized on every machine.
 The Linux remote launcher allows its `op://` reference (#2324).
+
+## 2026-11-17 — Sol reasoning default; lead-and-helper plans
+
+Verbatim, from Albert's chat: "wherever there's a standing rule naming
+GPT-5.6, take it out and replace it with 'latest sol model'. don't block
+anyone from using medium, just have it default to low."
+
+Current rule: the latest Sol model defaults to `low` reasoning; `medium` is
+allowed. `high` and `none` stay excluded — that part of the 2026-07-16 rule
+was not withdrawn (session's reading; change it if Albert says otherwise).
+
+Same day, on implementation plans, Albert chose the lead-and-helper pairs:
+"opus low+haiku high / glm max + GLM flash / Mimo Pro + Mimo Flash /
+gpt-6.1 low + Luna high". Plans mark steps `lead-only` or `helper-ok` and
+never name a model; the pairs live in
+`templates/system/model-tier-delegation.md`.

@@ -98,7 +98,7 @@ codex exec \
 
 Notes on the flags:
 - `-c model_reasoning_effort='medium'` is **not optional**. Albert's standing rule
-  (2026-07-16): GPT-5.6 runs at `low` or `medium` ONLY — never `high`, never
+  (updated 2026-11-17): the latest Sol model defaults to `low`; `medium` is allowed — never `high`, never
   `none`/`minimal`. Pass it explicitly every time; omitting it is not safe,
   because an unset effort has been observed to start a run at `none` (the header
   prints `reasoning effort: none`). Use `low` for mechanical grinding, `medium`

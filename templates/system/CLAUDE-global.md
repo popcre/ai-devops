@@ -134,7 +134,7 @@ Historical receipts stay on #2022; do not reopen the trial.
 
 ## Engineering and Git
 
-- **GPT-5.6 uses `low` or `medium` reasoning only.** Split a harder task.
+- **The latest Sol model defaults to `low` reasoning; `medium` is allowed.** Split a harder task.
 - Prefer permanent, fewest-moving-parts fixes; test code, verify UI visually.
   GitHub is the source of truth; never live-edit a server. Never replace
   operating-system binaries.

@@ -28,7 +28,7 @@ python tools/completion-eval/completion-eval.py --client codex --runs 3 \
 `--client claude` uses the same scenarios. `--print-command` prints the exact
 argv and calls no model. Both clients run **read-only**, and Codex runs at `low`
 or `medium` reasoning only — an eval must never write, and Albert's standing rule
-caps GPT-5.6 effort.
+defaults the latest Sol model to low (medium allowed).
 
 ## What a number here means, and what it does not
 
