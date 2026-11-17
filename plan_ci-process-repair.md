@@ -62,10 +62,13 @@ are recorded here so no session re-derives or re-fixes them:
 | Documents-only gate false reds ("Lightweight authorization refused" on ordinary code PRs) | ✅ done | shared-db PR #6216: status-history read retried once before a revocation verdict (a transient blip manufactured the red); an unreadable change set reports "Not applicable" green and routes to the guarded checks. Red on that gate now means revocation and nothing else (#2838 follow-through) |
 | no-progress alarm dead on arrival (`actions: read` missing) | ✅ done | shared-db PR #6216 adds the permission (review finding popcre/shared-db#5922 item 1; that issue's other findings stay open) |
 
-Still outside this plan's checklist: GitHub Support purge of the 22 standing
-ghost records (ticket filed 2026-11-12 ~8:05 PM EST; sweepers red meanwhile —
-they hold nothing globally; see `docs/critical-incidents.md` 2026-11-11 for the
-go-arounds).
+Completed 2026-11-17: GitHub Support purged all 22 standing ghost records
+(owner tickets; 20 cleared 2026-11-16, the last 2 on 2026-11-17; same-window
+incident https://www.githubstatus.com/incidents/dvy0t3mvh1lg). Both sweepers
+now report green ("no wedged queued runs") — live proof on
+[popcre/shared-db#6215](https://github.com/popcre/shared-db/issues/6215).
+They hold nothing globally; `docs/critical-incidents.md` 2026-11-11 keeps the
+go-arounds for any future wedge.
 
 ## Part 1: Why
 
