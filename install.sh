@@ -775,6 +775,8 @@ elif [ -s "$HOME/.config/ai-devops/op-service-account" ]; then
     "$REPO_ROOT/bin/setup-opencode-glm.sh"
   run_stage required "Protected Muse review profile" \
     "$REPO_ROOT/bin/setup-opencode-muse.sh"
+  run_stage optional "DeepSeek Harness (candidate reviewer engine, pinned $(tr -d ' \t\r\n' < "$REPO_ROOT/config/deepseek-harness/version"))" \
+    "$REPO_ROOT/bin/setup-deepseek-harness.sh"
 else
   stage_results+=("SKIP\toptional\tOpenCode GLM server (no protected token)")
   stage_results+=("SKIP\toptional\tProtected Muse review profile (OpenCode unavailable)")
@@ -813,6 +815,15 @@ else
       "$REPO_ROOT/bin/ai-muse" store-key --if-missing </dev/null
   }
   run_stage optional "Muse key store" muse_key_store
+  # Candidate OpenRouter reviewer key (#2549/#2550): scoped to the three pinned
+  # models. Same protected flow as the Muse store.
+  openrouter_reviewer_key_store() {
+    local token="${OP_SERVICE_ACCOUNT_TOKEN:-}"
+    [ -n "$token" ] || token="$(cat "$HOME/.config/ai-devops/op-service-account")"
+    OP_SERVICE_ACCOUNT_TOKEN="$token" \
+      "$REPO_ROOT/bin/ai-second-opinion" deepseek-openrouter store-key --if-missing </dev/null
+  }
+  run_stage optional "OpenRouter reviewer key store" openrouter_reviewer_key_store
 fi
 
 # StepFun key store (Linux only; StepCode has no Windows build yet). Same

@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """ai-review-simple: review one PR head with one reviewer, statelessly (#2041).
 
-  ai-review-simple --provider {muse,glm,deepseek,stepfun} --repo DIR --base SHA --head SHA --out FILE.json
+  ai-review-simple --provider {muse,glm,deepseek,stepfun,...} --repo DIR --base SHA --head SHA --out FILE.json
+  ai-review-simple --route ROUTE --repo DIR --base SHA --head SHA --out FILE.json
+  ai-review-simple --run-plan "ROUTE..." --repo DIR --base SHA --head SHA --results-dir DIR
   ai-review-simple --combine [--head SHA] [--comment-out FILE] RESULT.json...
-  ai-review-simple --rotation PR_NUMBER
+  ai-review-simple --rotation PR_NUMBER | --candidate-plan PR_NUMBER
   ai-review-simple --docs-only FILE_LIST
 
 Review exits 0 for a verdict, 3 unavailable, 2 refused. The verdict comes from
@@ -11,6 +13,12 @@ the reviewer's own words only. Review is advisory (plan REVISION rule 1):
 combine reports the first finished verdict as {state: pass|findings|neutral}
 and never fails. --rotation prints the provider try order for a PR;
 --docs-only prints "true" when every listed path is docs (REVISION rule 4).
+
+Candidate routes (#2549/#2550, config/reviewer-routes.json) are opt-in through
+--route / --run-plan / --candidate-plan; without them every default behavior
+is unchanged. --run-plan executes an ordered attempt plan: a verdict ends it,
+a terminal refusal stops it, and a confirmed shared OpenRouter outage skips
+the remaining OpenRouter routes.
 """
 import argparse
 import json
@@ -25,6 +33,9 @@ import tempfile
 import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+sys.path.insert(0, os.path.join(ROOT, "tools"))
+import reviewer_routes as RR  # shared candidate routes (#2549/#2550)
+
 TEMPLATE = os.path.join(ROOT, "templates", "review-prompt-simple.md")
 VERDICTS = ("APPROVE", "REJECT", "REVISE")
 MAX_DIFF, MAX_STAT, MAX_FINDINGS = 300_000, 20_000, 4000
@@ -76,6 +87,39 @@ PROVIDERS = {
         "override": "ZAI_API_KEY", "timeout": 1200, "provider": {},
     },
 }
+
+# Candidate reviewer entries built from the shared route registry
+# (config/reviewer-routes.json; #2549/#2550). Explicitly selectable, never in
+# ROTATION: existing defaults are unchanged. The deepseek-openrouter route
+# swaps the engine per call; see spec_for().
+for _rid in ("muse-openrouter", "hy4-openrouter"):
+    _spec = RR.opencode_spec(_rid)
+    PROVIDERS[_spec["route"]] = _spec
+del _rid, _spec
+
+
+def spec_for(provider, route=None):
+    """The runtime spec for a provider call, or an explicit candidate route.
+
+    A route overrides the legacy provider spec (engine included); anything
+    unknown is refused, never defaulted."""
+    if route:
+        rspec = RR.route(route)  # RouteError on unknown ids
+        if rspec["reviewer"] != provider:
+            raise RR.RouteError(f"route {route} does not belong to reviewer {provider!r}")
+        spec = {"model": rspec["model"], "key_file": rspec["key_file"],
+                "key_env": rspec["key_env"], "override": rspec["override"],
+                "timeout": int(rspec["timeout"]), "route": route, "engine": rspec["engine"],
+                "reviewer": rspec["reviewer"], "base_url": rspec.get("base_url")}
+        if rspec["engine"] == "opencode":
+            spec["provider"] = RR.opencode_provider_block(rspec)
+        else:
+            spec["provider"] = None
+        return spec
+    spec = dict(PROVIDERS[provider])
+    spec.setdefault("engine", "opencode")
+    return spec
+
 
 AGENT = """---
 description: Read-only simple reviewer
@@ -240,7 +284,7 @@ def resolve_opencode():
 
 
 def read_key(name):
-    spec = PROVIDERS[name]
+    spec = PROVIDERS[name] if isinstance(name, str) else name
     if os.environ.get(spec["override"]):
         return os.environ[spec["override"]]
     secrets = os.environ.get("AI_REVIEW_SIMPLE_SECRETS_DIR",
@@ -286,7 +330,7 @@ def _force_rmtree(path):
     shutil.rmtree(path, onerror=onerror)
 
 
-def make_workspace(repo, head, provider, tmp):
+def make_workspace(repo, head, provider, tmp, spec=None):
     work = os.path.join(tmp, "work")
     subprocess.run(["git", "clone", "--quiet", "--no-checkout", "--no-hardlinks", repo, work],
                    check=True, capture_output=True)
@@ -298,9 +342,18 @@ def make_workspace(repo, head, provider, tmp):
             p = os.path.join(d, f)
             if not os.path.islink(p):
                 os.chmod(p, stat.S_IRUSR | stat.S_IRGRP)
+    spec = spec or PROVIDERS[provider]
+    home = os.path.join(tmp, "home")
+    os.makedirs(home)
+    if spec.get("engine") == "deepseek-harness":
+        # A fresh private harness profile: only this route's adapter and model.
+        profiles = os.path.join(tmp, "dsh", "profiles", "headless")
+        os.makedirs(profiles)
+        with open(os.path.join(profiles, "cordis.patch.yml"), "w") as fh:
+            fh.write(RR.harness_patch_yaml(spec))
+        return work, home
     cfg_dir = os.path.join(tmp, "xdg", "config", "opencode")
     os.makedirs(os.path.join(cfg_dir, "agent"))
-    spec = PROVIDERS[provider]
     cfg = {"$schema": "https://opencode.ai/config.json", "model": spec["model"],
            "share": "disabled", "autoupdate": False}
     if spec["provider"]:
@@ -309,14 +362,14 @@ def make_workspace(repo, head, provider, tmp):
         json.dump(cfg, fh, indent=1)
     with open(os.path.join(cfg_dir, "agent", "simple-review.md"), "w") as fh:
         fh.write(AGENT)
-    home = os.path.join(tmp, "home")
-    os.makedirs(home)
     return work, home
 
 
-def run_once(provider, prompt, work, home, tmp, key, timeout):
+def run_once(provider, prompt, work, home, tmp, key, timeout, spec=None):
     """One attempt. Returns (verdict, text, error)."""
-    spec = PROVIDERS[provider]
+    spec = spec or PROVIDERS[provider]
+    if spec.get("engine") == "deepseek-harness":
+        return run_harness_once(spec, prompt, work, tmp, key, timeout)
     oc = resolve_opencode()
     if not oc:
         return None, "", "local: opencode binary not found"
@@ -359,10 +412,91 @@ def run_once(provider, prompt, work, home, tmp, key, timeout):
     return None, text, (f"no verdict (exit {proc.returncode}): " + problem[:500]).strip()
 
 
+def read_harness_events(stdout):
+    """Split dsh --json NDJSON into (final text, error text).
+
+    Only a completed final assistant event counts: tool narration, error
+    events and a final error reason are never a verdict."""
+    final, errors = "", []
+    for line in (stdout or "").splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            ev = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(ev, dict):
+            continue
+        if ev.get("type") == "error":
+            errors.append(json.dumps(ev.get("error", ev.get("message", ev)))[:2000])
+        elif ev.get("type") == "final":
+            reason = (ev.get("reason") or {})
+            if isinstance(reason, dict) and reason.get("kind") == "completed":
+                final = ev.get("text") or ""
+            else:
+                detail = reason.get("error") if isinstance(reason, dict) else reason
+                errors.append(json.dumps(detail or reason or "final without completion")[:2000])
+    return final, "\n".join(errors)
+
+
+def run_harness_once(spec, prompt, work, tmp, key, timeout):
+    """One DeepSeek Harness attempt through the shared route adapter (#2549).
+
+    Runs the pinned headless profile with a private DSH_HOME, the task on
+    stdin, no approvals and a minimal environment holding only this route's
+    credential."""
+    dsh = RR.resolve_deepseek_harness()
+    if not dsh:
+        return None, "", "local: deepseek harness binary not found"
+    env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": os.path.join(tmp, "home"),
+           "DSH_HOME": os.path.join(tmp, "dsh"), spec["key_env"]: key,
+           "PYTHONDONTWRITEBYTECODE": "1", "OPENCODE_DISABLE_CLAUDE_CODE": "1",
+           "OPENCODE_DISABLE_EXTERNAL_SKILLS": "1"}
+    env.update({n: os.environ[n] for n in ("LANG", "TMPDIR", "TEMP", "TMP", "SYSTEMROOT",
+                "COMSPEC", "PATHEXT", "WINDIR", "SSL_CERT_FILE", "SSL_CERT_DIR",
+                "NODE_EXTRA_CA_CERTS", "AI_REVIEW_SIMPLE_FAKE_STATE") if os.environ.get(n)})
+    if os.name == "nt":
+        env["USERPROFILE"] = env["HOME"]
+    cmd = [dsh, "--profile", "headless", "--json", "--approval-policy", "never", "-"]
+    proc = subprocess.Popen(cmd, cwd=work, env=env, stdin=subprocess.PIPE,
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            text=True, encoding="utf-8", errors="replace",
+                            start_new_session=True)
+    try:
+        out, err = proc.communicate(prompt, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        try:
+            if hasattr(os, "killpg"):
+                os.killpg(proc.pid, signal.SIGKILL)
+            else:  # Windows
+                proc.kill()
+        except OSError:
+            pass
+        proc.communicate()
+        return None, "", f"timeout after {timeout}s"
+    final, ev_err = read_harness_events(out)
+    verdict = parse_verdict(final)
+    if verdict:
+        return verdict, final_report(final, final), None
+    problem = redact("\n".join(x for x in (ev_err, (err or "")[-2000:]) if x.strip()), key)
+    if is_credit_error(problem):
+        return None, final_report(final, final), "out-of-credit: " + problem[:500]
+    return None, final_report(final, final), (f"no verdict (exit {proc.returncode}): "
+                                              + problem[:500]).strip()
+
+
 def review(args):
     start = time.monotonic()
-    result = {"provider": args.provider, "head": args.head, "verdict": None,
+    route = getattr(args, "route", None)
+    provider = args.provider
+    if route and not provider:
+        provider = RR.route(route)["reviewer"]
+    spec = spec_for(provider, route)
+    result = {"provider": route or provider, "head": args.head, "verdict": None,
               "findings": "", "elapsed": 0, "error": None}
+    if route:
+        result["route"], result["engine"] = route, spec["engine"]
 
     def finish(code):
         result["elapsed"] = round(time.monotonic() - start, 1)
@@ -382,19 +516,21 @@ def review(args):
         result["error"] = f"refused: head mismatch (checkout {actual}, requested {head})"
         return finish(2)
     result["head"] = head
-    key = read_key(args.provider)
+    key = read_key(spec)
     if not key:
         result["error"] = "local: credential missing"
         return finish(3)
-    timeout = args.timeout or PROVIDERS[args.provider]["timeout"]
+    timeout = args.timeout or spec["timeout"]
     tmp = None
     try:
         prompt = build_prompt(args.repo, base, head)
-        tmp = tempfile.mkdtemp(prefix=f"ai-review-simple-{args.provider}-")
-        work, home = make_workspace(args.repo, head, args.provider, tmp)
-        for _attempt in range(2):  # retry once, never on credit or timeout
-            verdict, text, error = run_once(args.provider, prompt, work, home, tmp, key, timeout)
-            if verdict or (error or "").startswith(("out-of-credit", "timeout", "local:")):
+        tmp = tempfile.mkdtemp(prefix=f"ai-review-simple-{result['provider']}-")
+        work, home = make_workspace(args.repo, head, provider, tmp, spec=spec)
+        for _attempt in range(2):  # retry once, never on credit, timeout or refusal
+            verdict, text, error = run_once(provider, prompt, work, home, tmp, key, timeout,
+                                            spec=spec)
+            if verdict or (error or "").startswith(("out-of-credit", "timeout", "local:")) \
+                    or (error and RR.classify(error)[0] == "terminal"):
                 break
     except (subprocess.CalledProcessError, OSError, UnicodeError) as exc:
         detail = getattr(exc, "stderr", None) or str(exc)
@@ -410,6 +546,10 @@ def review(args):
     if error and error.startswith("out-of-credit"):
         result["error"] = "out-of-credit"
         result["detail"] = error[len("out-of-credit: "):]
+    if route and not verdict and error and RR.classify(error)[0] == "terminal":
+        result["error"] = "refused: " + (result.get("detail") or error)[:300]
+        result.pop("detail", None)
+        return finish(2)  # a policy or read-only refusal is terminal, never retried elsewhere
     return finish(0 if verdict else 3)
 
 
@@ -420,6 +560,56 @@ def rotation(pr):
     """REVISION rule 2: one reviewer per PR, PR number mod 4, then fall through."""
     start = int(pr) % len(ROTATION)
     return list(ROTATION[start:] + ROTATION[:start])
+
+
+def run_plan(args):
+    """Candidate mode (#2549/#2550): run an ordered route plan against one head.
+
+    One result file per attempt plus results/order. A verdict ends the plan, a
+    terminal refusal stops it, and a confirmed shared OpenRouter outage skips
+    the remaining OpenRouter routes without spending their attempts."""
+    os.makedirs(args.results_dir, exist_ok=True)
+    known = RR.routes()
+    openrouter_routes = {rid for rid, spec in known.items()
+                         if spec.get("base_url") == RR.OPENROUTER_URL}
+    order_path = os.path.join(args.results_dir, "order")
+    with open(order_path, "w") as fh:
+        pass
+    shared_outage = False
+    for entry in (args.run_plan or "").split():
+        rid = entry if entry in known else None
+        with open(order_path, "a") as fh:
+            fh.write(entry + "\n")
+        out = os.path.join(args.results_dir, f"{entry}.json")
+        if shared_outage and rid in openrouter_routes:
+            with open(out, "w") as fh:
+                json.dump({"provider": entry, "head": args.head, "verdict": None, "findings": "",
+                           "elapsed": 0, "error": "skipped: shared OpenRouter outage"}, fh)
+            print(f"{entry}: skipped (shared OpenRouter outage)")
+            continue
+        one = argparse.Namespace(provider=RR.route(rid)["reviewer"] if rid else entry,
+                                 route=rid, repo=args.repo, base=args.base, head=args.head,
+                                 out=out, timeout=args.timeout)
+        try:
+            code = review(one)
+        except RR.RouteError as exc:
+            code = 2
+            with open(out, "w") as fh:
+                json.dump({"provider": entry, "head": args.head, "verdict": None, "findings": "",
+                           "elapsed": 0, "error": f"refused: {exc}"}, fh, indent=1)
+        print(f"{entry}: exit {code} (0 verdict, 3 unavailable, 2 refused)")
+        if code == 0 or code == 2:
+            break
+        if rid in openrouter_routes:
+            try:
+                with open(out) as fh:
+                    error = (json.load(fh) or {}).get("error") or ""
+            except (OSError, ValueError):
+                error = ""
+            if RR.classify(error)[1] == "shared-outage":
+                shared_outage = True
+    return 0
+
 
 
 def is_docs_path(path):
@@ -438,24 +628,36 @@ def is_docs_only(paths):
     return bool(paths) and all(is_docs_path(p) for p in paths)
 
 
-def combine(results, head=None):
+def combine(results, head=None, routes=None):
     """Advisory rule: the first finished verdict for this head decides.
     APPROVE is pass, REJECT or REVISE is findings, none is neutral.
-    No state is ever a failure."""
+    No state is ever a failure. In candidate mode (routes given) a verdict is
+    counted only when its row's route id is one of the registry routes asked
+    to run: a spoofed route name publishes nothing."""
     rows, approve, reject, state = [], 0, 0, "neutral"
     for r in results:
         v = (r.get("verdict") or "").upper()
         if v not in VERDICTS or (head and r.get("head") != head):
             v = ""
+        spoofed = False
+        if routes is not None and r.get("route"):
+            spoofed = r["route"] not in routes or r.get("provider") != r["route"]
+            if spoofed:
+                v = ""
         if v and state == "neutral":
             state = "pass" if v == "APPROVE" else "findings"
         if v == "APPROVE":
             approve += 1
         elif v:
             reject += 1
-        rows.append({"provider": r.get("provider", "?"), "verdict": v or "unavailable",
-                     "error": r.get("error") if not v else None,
-                     "elapsed": r.get("elapsed"), "findings": r.get("findings") or ""})
+        row = {"provider": r.get("provider", "?"), "verdict": v or "unavailable",
+               "error": r.get("error") if not v else None,
+               "elapsed": r.get("elapsed"), "findings": r.get("findings") or ""}
+        if r.get("route"):
+            row["route"] = r["route"]
+            if spoofed:
+                row["error"] = "unverified route attribution"
+        rows.append(row)
     reviewer = next((x["provider"] for x in rows if x["verdict"] != "unavailable"), None)
     return {"state": state, "approve": approve, "reject": reject,
             "finished": approve + reject, "reviewer": reviewer, "rows": rows}
@@ -471,11 +673,17 @@ def render_comment(summary, head):
     state = summary["state"]
     title = {"pass": "approved", "findings": "has findings",
              "neutral": "unavailable (no reviewer answered)"}[state]
-    out = [f"## AI review {title}", "", f"Head `{head or '?'}`", "",
-           "| Reviewer | Verdict | Time |", "|---|---|---|"]
+    out = [f"## AI review {title}", "", f"Head `{head or '?'}`", ""]
+    candidate = any(r.get("route") for r in summary["rows"])
+    out += ["| Reviewer | Verdict | Time |", "|---|---|---|"] if not candidate else \
+           ["| Reviewer | Route | Verdict | Time |", "|---|---|---|---|"]
     for r in summary["rows"]:
         secs = f"{r['elapsed']:.0f}s" if isinstance(r["elapsed"], (int, float)) else "-"
-        out.append(f"| {_cell(r['provider'])} | {_cell(r['verdict'])} | {secs} |")
+        if candidate:
+            out.append(f"| {_cell(r['provider'])} | {_cell(r.get('route') or '-')} | "
+                       f"{_cell(r['verdict'])} | {secs} |")
+        else:
+            out.append(f"| {_cell(r['provider'])} | {_cell(r['verdict'])} | {secs} |")
     for r in summary["rows"]:
         body = r["findings"] or (f"Unavailable: {redact(r['error'])}" if r["error"]
                                  else "No findings recorded.")
@@ -495,20 +703,34 @@ def main(argv=None):
     ap = argparse.ArgumentParser(prog="ai-review-simple", description=__doc__.split("\n")[0])
     ap.add_argument("--combine", nargs="+", metavar="JSON")
     ap.add_argument("--provider", choices=sorted(PROVIDERS))
+    ap.add_argument("--route", choices=sorted(RR.routes()),
+                    help="candidate route (opt-in, #2549/#2550); overrides the provider spec")
     ap.add_argument("--repo", default=".")
     for name in ("--comment-out", "--base", "--head", "--out"):
         ap.add_argument(name)
     ap.add_argument("--timeout", type=int)
     ap.add_argument("--rotation", type=int, metavar="PR")
+    ap.add_argument("--candidate-plan", type=int, metavar="PR",
+                    help="expand the rotation into the candidate route attempt order")
+    ap.add_argument("--run-plan", metavar="ROUTES",
+                    help="candidate mode: run this ordered route/reviewer plan, one result file each")
+    ap.add_argument("--results-dir", default="results")
     ap.add_argument("--docs-only", metavar="FILE_LIST")
     args = ap.parse_args(argv)
     if args.rotation is not None:
         print(" ".join(rotation(args.rotation)))
         return 0
+    if args.candidate_plan is not None:
+        print(" ".join(RR.candidate_plan(rotation(args.candidate_plan))))
+        return 0
     if args.docs_only:
         with open(args.docs_only, encoding="utf-8") as fh:
             print("true" if is_docs_only(fh.read().splitlines()) else "false")
         return 0
+    if args.run_plan is not None:
+        if not (args.repo and args.base and args.head):
+            ap.error("--run-plan needs --repo, --base and --head")
+        return run_plan(args)
     if args.combine:
         results = []
         for path in args.combine:
@@ -518,14 +740,22 @@ def main(argv=None):
             except (OSError, ValueError):
                 results.append({"provider": os.path.basename(path).split(".")[0],
                                 "error": "result missing"})
-        summary = combine(results, args.head)
+        candidate_routes = next((r["route"] for r in results if r.get("route")), None)
+        summary = combine(results, args.head,
+                          routes=set(RR.routes()) if candidate_routes else None)
         if args.comment_out:
             with open(args.comment_out, "w") as fh:
                 fh.write(render_comment(summary, args.head))
         print(json.dumps({k: v for k, v in summary.items() if k != "rows"}))
         return 0
-    if not (args.provider and args.base and args.head and args.out):
-        ap.error("--provider, --base, --head and --out are required")
+    if not ((args.provider or args.route) and args.base and args.head and args.out):
+        ap.error("--provider (or --route), --base, --head and --out are required")
+    if not args.provider and args.route:
+        args.provider = RR.route(args.route)["reviewer"]
+    try:
+        spec_for(args.provider, args.route)
+    except RR.RouteError as exc:
+        ap.error(str(exc))
     return review(args)
 
 

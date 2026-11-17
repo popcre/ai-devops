@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# ai-hy4: Hy4 second opinion through the shared OpenCode OpenRouter route
+# (bin/ai-second-opinion, popcre/ai-devops #2550). See its --help.
+d="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+py=python3; command -v python3 >/dev/null 2>&1 || py=python
+exec "$py" "$d/ai-second-opinion" hy4-openrouter "$@"
