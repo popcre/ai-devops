@@ -61,6 +61,8 @@ grep -q 'CANNOT write' "$tmp/out"
 # 4. A working codex passes.
 cat >"$fake/codex" <<'FAKE'
 #!/usr/bin/env bash
+git rev-parse --verify HEAD >/dev/null || exit 1
+test -d .git || exit 1
 printf 'OK' > probe.txt
 FAKE
 chmod +x "$fake/codex"
