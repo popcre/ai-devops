@@ -116,6 +116,12 @@ cd /worksp/ai-devops
    the primary worktree while it is detached or on `main`, so a plain
    `git pull`, `merge`, `reset`, or detached `checkout` there fails with
    guidance naming `update.sh` / `bin/install-ai-devops-windows.ps1`.
+   The one allowance is value-preserving: `git pack-refs` (also reached
+   through `gc`/`maintenance` after a fetch) rewrites each loose ref
+   through a create-then-delete pair that never changes what `main`
+   points at, and those two transaction shapes pass (#2535); every move
+   to a different value, and any delete whose value is not already
+   preserved in `packed-refs` under the loose ref, is still refused.
    Git rewrites the index and files before the ref, so when the refused
    target is existing history (already contained by a ref or FETCH_HEAD,
    or older than HEAD: fast-forward pull or merge, reset, checkout), the same git process's `aborted` call
