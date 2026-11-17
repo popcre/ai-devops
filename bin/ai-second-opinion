@@ -330,7 +330,8 @@ def run_harness_turn(provider, sdir, meta, prompt, spec, route):
             env[n] = os.environ[n]
     if os.name == "nt":
         env["USERPROFILE"] = env["HOME"]
-    cmd = [dsh, "--profile", "headless", "--json", "--approval-policy", "never"]
+    cmd = [dsh, "--profile", "headless", "--json", "--permission-mode", "read-only",
+           "--approval-policy", "never"]
     resume = meta.get("session")
     if resume:
         cmd += ["--session-id", resume]
@@ -484,6 +485,9 @@ def _muse_failover(provider, sdir, meta, prompt, first_error):
     question. The new binding is saved only after a valid answer; a failed
     fallback leaves the last-good record untouched (plan section 9 step 3)."""
     spec = ars.spec_for(provider, "muse-openrouter")
+    # The session's on-disk OpenCode profile still names the direct provider;
+    # rewrite it for the alternate connection before the continuation runs.
+    write_config(sdir, provider, meta["agent"], READ_AGENT, spec=spec)
     replay = sanitized_replay(meta) + f"New request: {prompt}"
     meta.update(state="failing-over", updated=time.time())
     save_meta(sdir, meta)

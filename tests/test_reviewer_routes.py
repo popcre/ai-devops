@@ -300,6 +300,8 @@ class SecretScopeTests(Base):
         self.assertIn("id: \"deepseek/deepseek-v4.1-flash-1017\"", call["patch"])
         self.assertEqual(call["remote"], "")  # workspace has no git remote
         self.assertIn("--json", call["args"])
+        self.assertEqual(call["args"][call["args"].index("--permission-mode") + 1],
+                         "read-only")
 
     def test_candidate_agent_config_is_read_only(self):
         self.mode("ok")
@@ -474,6 +476,7 @@ class SecondOpinionRouteTests(Base):
         self.assertEqual(calls[2]["args"][calls[2]["args"].index("--model") + 1],
                          "openrouter-muse/meta/muse-spark-1.3-contributor")
         self.assertNotIn("--session", calls[2]["args"])
+        self.assertEqual(sorted(calls[2]["config"].get("provider", {})), ["openrouter-muse"])
         self.assertIn("Prior conversation", calls[2]["prompt_head"])
         self.assertIn("question one", calls[2]["prompt_head"])
         self.assertIn("second question", calls[2]["prompt_head"])
@@ -529,6 +532,15 @@ class SecondOpinionRouteTests(Base):
         r = self.run_so("muse", "--route", "muse-meta", "implement", "x1", "do it")
         self.assertEqual(r.returncode, 2)
         self.assertIn("read-only", r.stderr)
+
+    def test_route_shaped_provider_entry_selects_itself(self):
+        self.mode("ok")
+        r = self.run_so("hy4-openrouter", "new", "hp", "hello there")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        m = self.meta("hy4-openrouter", "hp")
+        self.assertEqual(m["route"], "hy4-openrouter")
+        self.assertEqual(self.oc_calls()[0]["args"][self.oc_calls()[0]["args"].index("--model") + 1],
+                         "openrouter-hy4/tencent/hy4")
 
     def test_legacy_session_defaults_unchanged(self):
         self.mode("ok")
@@ -682,6 +694,7 @@ class DeepseekAgentHarnessTests(Base):
         self.assertTrue(rows[0]["has_or_key"])
         self.assertFalse(rows[0]["has_ds_key"])
         self.assertIn("deepseek/deepseek-v4.1-flash-1017", rows[0]["patch"])
+        self.assertIn("read-only", rows[0]["args"])
         r2 = self.agent("show", session_id)
         self.assertEqual(r2.returncode, 0, r2.stderr)
         self.assertIn("HARNESS deepseek-openrouter", r2.stdout)
