@@ -164,3 +164,4 @@ The bounded denied-read recovery extension is designed in
 
 Release provenance and live Linux stage result: [October 16 Muse Code pin verification](verification/muse-code-repin-20261016.md).
 Windows 1.4.11 re-pin provenance: [October 21 Muse Code pin verification](verification/muse-code-repin-20261021.md).
+Windows 1.4.23 re-pin provenance: [November 17 Muse Code pin verification](verification/muse-code-repin-20261117.md).
