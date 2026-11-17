@@ -80,7 +80,8 @@ aligned with this list:
 Read [`docs/critical-incidents.md`](docs/critical-incidents.md) before diagnosing "odd" tool behavior — it may be an intentional guardrail ([`docs/design-decisions.md`](docs/design-decisions.md)).
 Ghost run records (queued forever, zero jobs, cancel refused, delete 404/403) are
 a known GitHub-side half-deleted state: go around with a fresh ref; sweepers reap
-them every 10 minutes — see the 2026-11-11 entry.
+them every 30 minutes — see the 2026-11-11 entry. If one freezes a check, escape
+with [`docs/ghost-run-escape.md`](docs/ghost-run-escape.md) (drain, bump `LANE_EPOCH`).
 
 ## Repository contract
 
