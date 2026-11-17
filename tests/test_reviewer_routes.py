@@ -575,13 +575,54 @@ class SecondOpinionRouteTests(Base):
         self.assertEqual(self.oc_calls()[0]["args"][self.oc_calls()[0]["args"].index("--model") + 1],
                          "openrouter-hy4/tencent/hy4")
 
-    def test_legacy_session_defaults_unchanged(self):
+    def test_new_muse_session_defaults_to_candidate_route(self):
+        # Activation (#2531, 2026-11-17): a new Muse conversation without
+        # --route runs the candidate route (auto = muse-meta with same-model
+        # OpenRouter failover), and later turns stay on it.
+        self.mode("ok")
+        r = self.run_so("muse", "new", "nd", "plain question")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.meta("muse", "nd")["route"], "muse-meta")
+        r2 = self.run_so("muse", "ask", "nd", "follow up")
+        self.assertEqual(r2.returncode, 0, r2.stderr)
+        self.assertEqual(self.meta("muse", "nd")["route"], "muse-meta")
+        self.assertIn("--session", self.oc_calls()[-1]["args"])
+
+    def test_legacy_routeless_session_stays_legacy(self):
+        # A conversation created before the activation (meta without a route)
+        # keeps the legacy provider on later turns; the default only applies
+        # to new conversations.
         self.mode("ok")
         r = self.run_so("muse", "new", "lg", "plain question")
         self.assertEqual(r.returncode, 0, r.stderr)
-        m = self.meta("muse", "lg")
-        self.assertNotIn("route", m)
-        self.assertNotIn("visible", m)
+        mp = os.path.join(self.so_dir("muse", "lg"), "meta.json")
+        with open(mp) as fh:
+            m = json.load(fh)
+        m.pop("route", None)
+        m.pop("visible", None)
+        with open(mp, "w") as fh:
+            json.dump(m, fh)
+        r2 = self.run_so("muse", "ask", "lg", "follow up")
+        self.assertEqual(r2.returncode, 0, r2.stderr)
+        m2 = self.meta("muse", "lg")
+        self.assertNotIn("route", m2)
+        self.assertNotIn("visible", m2)
+
+
+class WorkflowDefaultTests(Base):
+    WF = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                      ".github", "workflows", "ai-review.yml")
+
+    def test_default_rotation_expands_into_candidate_plan(self):
+        # Activation (#2531, 2026-11-17): with no explicit candidate_routes
+        # input, the workflow computes the candidate expansion itself; the
+        # legacy per-provider loop is gone and reverting restores it.
+        with open(self.WF, encoding="utf-8") as fh:
+            wf = fh.read()
+        self.assertIn('if [ -z "$candidate_routes" ]; then', wf)
+        self.assertIn('python3 "$script" --candidate-plan "$PR"', wf)
+        self.assertNotIn('python3 "$script" --rotation "$PR"', wf)
+        self.assertIn('AI_REVIEW_CANDIDATE_ROUTES', wf)
 
 
 
