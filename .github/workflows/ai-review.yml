@@ -103,7 +103,13 @@ jobs:
           # Candidate routes (#2549/#2550) are opt-in: the input is empty and
           # AI_REVIEW_CANDIDATE_ROUTES is unset on main, so the normal rotation
           # below is the only default path.
-          candidate_routes="${AI_REVIEW_CANDIDATE_ROUTES:-${{ inputs.candidate_routes || '' }}}}"
+          # Fix (#2531, 2026-11-17): a GitHub expression inside a bash ${:-}
+          # default leaves a stray `}` once it renders empty, so every
+          # pull_request run computed candidate_routes='}' and crashed the
+          # opt-in branch instead of reaching the rotation below. Assign in
+          # two steps so no rendered brace ever lands inside the bash default.
+          candidate_routes="${{ inputs.candidate_routes || '' }}"
+          candidate_routes="${AI_REVIEW_CANDIDATE_ROUTES:-$candidate_routes}"
           if [ -n "$candidate_routes" ]; then
             python3 "$script" --run-plan "$candidate_routes" --repo pr --base "$base" \
               --head "$HEAD_SHA" --results-dir results
