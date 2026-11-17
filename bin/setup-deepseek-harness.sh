@@ -16,7 +16,7 @@ VERSION="$(tr -d ' \t\r\n' < "$VERSION_FILE")"
 [ -n "$VERSION" ] || { echo "config/deepseek-harness/version is empty" >&2; exit 1; }
 
 HOME_DIR="${USERPROFILE:-$HOME}"
-case "$HOME_DIR" in [A-Za-z]:*) HOME_DIR="/$(printf '%s' "$HOME_DIR" | sed 's#\\#/#g; s#:#/#');; esac
+case "$HOME_DIR" in [A-Za-z]:*) HOME_DIR="/$(printf '%s' "$HOME_DIR" | sed 's#\\#/#g; s#:#/#')";; esac
 LIB_ROOT="$HOME_DIR/.local/lib/ai-devops/deepseek-harness"
 PREFIX="$LIB_ROOT/$VERSION"
 BIN="$PREFIX/node_modules/.bin/dsh"
