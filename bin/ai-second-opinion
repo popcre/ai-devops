@@ -207,7 +207,7 @@ def copy_repo(repo, work, writable):
     return top
 
 
-def write_config(sdir, provider, agent_name, agent_text, spec=None):
+def write_config(sdir, provider, agent_name, agent_text, spec=None, cache=None):
     cfg_dir = os.path.join(sdir, "xdg", "config", "opencode")
     os.makedirs(os.path.join(cfg_dir, "agent"), exist_ok=True)
     spec = spec or ars.PROVIDERS[provider]
@@ -215,6 +215,9 @@ def write_config(sdir, provider, agent_name, agent_text, spec=None):
            "share": "disabled", "autoupdate": False}
     if spec["provider"]:
         cfg["provider"] = spec["provider"]
+        if cache and spec.get("route"):
+            cfg["provider"] = RR.opencode_provider_block(RR.route(spec["route"]),
+                                                         cache=cache)
     with open(os.path.join(cfg_dir, "opencode.json"), "w") as fh:
         json.dump(cfg, fh, indent=1)
     with open(os.path.join(cfg_dir, "agent", agent_name + ".md"), "w") as fh:
@@ -487,7 +490,8 @@ def _muse_failover(provider, sdir, meta, prompt, first_error):
     spec = ars.spec_for(provider, "muse-openrouter")
     # The session's on-disk OpenCode profile still names the direct provider;
     # rewrite it for the alternate connection before the continuation runs.
-    write_config(sdir, provider, meta["agent"], READ_AGENT, spec=spec)
+    write_config(sdir, provider, meta["agent"], READ_AGENT, spec=spec,
+                 cache=RR.cache_fields("muse-openrouter", meta.get("repo"), meta.get("name")))
     replay = sanitized_replay(meta) + f"New request: {prompt}"
     meta.update(state="failing-over", updated=time.time())
     save_meta(sdir, meta)
@@ -539,7 +543,9 @@ def start(provider, name, repo, writable, base=None, route=None):
     agent = "implement" if writable else "second-opinion"
     spec = (ars.spec_for(provider, route) if route and route in RR.routes()
             else ars.PROVIDERS[provider])
-    write_config(sdir, provider, agent, WRITE_AGENT if writable else READ_AGENT, spec=spec)
+    cache = RR.cache_fields(route, top, name) if route else None
+    write_config(sdir, provider, agent, WRITE_AGENT if writable else READ_AGENT, spec=spec,
+                 cache=cache)
     meta = {"name": name, "provider": provider, "repo": top, "work": work, "agent": agent,
             "mode": "implement" if writable else "read-only", "base": base,
             "created": time.time(), "turns": 0, "state": "idle"}

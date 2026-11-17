@@ -254,6 +254,29 @@ def read_events(stdout):
     return "\n".join(texts), "\n".join(final), "\n".join(errors)
 
 
+def cache_receipts(stdout):
+    """Cache-token receipts from step_finish events: counts only, never
+    content, so a cache experiment can report a missing measurement as
+    distinct from a zero hit."""
+    reads = writes = None
+    for line in (stdout or "").splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            ev = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(ev, dict) and ev.get("type") == "step_finish":
+            tokens = ((ev.get("part") or {}).get("tokens") or {})
+            cache = tokens.get("cache") or {}
+            if isinstance(cache, dict):
+                read, write = cache.get("read"), cache.get("write")
+                reads = (reads or 0) + (read or 0)
+                writes = (writes or 0) + (write or 0)
+    return {"read": reads, "write": writes}
+
+
 def final_report(final, full):
     """The findings to publish: the final message without VERDICT lines, capped."""
     text = final if parse_verdict(final) or not parse_verdict(full) else full
@@ -330,7 +353,7 @@ def _force_rmtree(path):
     shutil.rmtree(path, onerror=onerror)
 
 
-def make_workspace(repo, head, provider, tmp, spec=None):
+def make_workspace(repo, head, provider, tmp, spec=None, cache=None):
     work = os.path.join(tmp, "work")
     subprocess.run(["git", "clone", "--quiet", "--no-checkout", "--no-hardlinks", repo, work],
                    check=True, capture_output=True)
@@ -358,6 +381,9 @@ def make_workspace(repo, head, provider, tmp, spec=None):
            "share": "disabled", "autoupdate": False}
     if spec["provider"]:
         cfg["provider"] = spec["provider"]
+        if cache and spec.get("route"):
+            cfg["provider"] = RR.opencode_provider_block(RR.route(spec["route"]),
+                                                         cache=cache)
     with open(os.path.join(cfg_dir, "opencode.json"), "w") as fh:
         json.dump(cfg, fh, indent=1)
     with open(os.path.join(cfg_dir, "agent", "simple-review.md"), "w") as fh:
@@ -372,7 +398,7 @@ def run_once(provider, prompt, work, home, tmp, key, timeout, spec=None):
         return run_harness_once(spec, prompt, work, tmp, key, timeout)
     oc = resolve_opencode()
     if not oc:
-        return None, "", "local: opencode binary not found"
+        return None, "", "local: opencode binary not found", None
     xdg = os.path.join(tmp, "xdg")
     env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": home,
            "XDG_CONFIG_HOME": os.path.join(xdg, "config"),
@@ -400,16 +426,16 @@ def run_once(provider, prompt, work, home, tmp, key, timeout, spec=None):
         except OSError:
             pass
         proc.communicate()
-        return None, "", f"timeout after {timeout}s"
+        return None, "", f"timeout after {timeout}s", None
     full, final, ev_err = read_events(out)
     text = final_report(final, full)
     verdict = parse_verdict(final) or parse_verdict(full)
     if verdict:
-        return verdict, text, None
+        return verdict, text, None, cache_receipts(out)
     problem = redact("\n".join(x for x in (ev_err, (err or "")[-2000:]) if x.strip()), key)
     if is_credit_error(problem):
-        return None, text, "out-of-credit: " + problem[:500]
-    return None, text, (f"no verdict (exit {proc.returncode}): " + problem[:500]).strip()
+        return None, text, "out-of-credit: " + problem[:500], cache_receipts(out)
+    return None, text, (f"no verdict (exit {proc.returncode}): " + problem[:500]).strip(), cache_receipts(out)
 
 
 def read_harness_events(stdout):
@@ -479,17 +505,18 @@ def run_harness_once(spec, prompt, work, tmp, key, timeout):
     final, ev_err = read_harness_events(out)
     verdict = parse_verdict(final)
     if verdict:
-        return verdict, final_report(final, final), None
+        return verdict, final_report(final, final), None, {"read": None, "write": None}
     problem = redact("\n".join(x for x in (ev_err, (err or "")[-2000:]) if x.strip()), key)
     if is_credit_error(problem):
-        return None, final_report(final, final), "out-of-credit: " + problem[:500]
+        return None, final_report(final, final), "out-of-credit: " + problem[:500], None
     return None, final_report(final, final), (f"no verdict (exit {proc.returncode}): "
-                                              + problem[:500]).strip()
+                                              + problem[:500]).strip(), None
 
 
 def review(args):
     start = time.monotonic()
     route = getattr(args, "route", None)
+    receipts = None
     provider = args.provider
     if route and not provider:
         provider = RR.route(route)["reviewer"]
@@ -526,10 +553,13 @@ def review(args):
     try:
         prompt = build_prompt(args.repo, base, head)
         tmp = tempfile.mkdtemp(prefix=f"ai-review-simple-{result['provider']}-")
-        work, home = make_workspace(args.repo, head, provider, tmp, spec=spec)
+        cache_fields = RR.cache_fields(route, args.repo, head) if route else None
+        work, home = make_workspace(args.repo, head, provider, tmp, spec=spec,
+                                    cache=cache_fields)
+        receipts = None
         for _attempt in range(2):  # retry once, never on credit, timeout or refusal
-            verdict, text, error = run_once(provider, prompt, work, home, tmp, key, timeout,
-                                            spec=spec)
+            verdict, text, error, receipts = run_once(provider, prompt, work, home, tmp,
+                                                      key, timeout, spec=spec)
             if verdict or (error or "").startswith(("out-of-credit", "timeout", "local:")) \
                     or (error and RR.classify(error)[0] == "terminal"):
                 break
@@ -547,6 +577,8 @@ def review(args):
     if error and error.startswith("out-of-credit"):
         result["error"] = "out-of-credit"
         result["detail"] = error[len("out-of-credit: "):]
+    if route and RR.cache_enabled():
+        result["cache"] = receipts or {"read": None, "write": None}
     if route and not verdict and error and RR.classify(error)[0] == "terminal":
         result["error"] = "refused: " + (result.get("detail") or error)[:300]
         result.pop("detail", None)

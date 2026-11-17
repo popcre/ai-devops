@@ -17,12 +17,12 @@ Use current upstream. Planning baseline: `ec4886f57232a1bb2741b7cf66d5fa1a949a1d
 
 | Step | Status, 2026-11-16 | Evidence or next gate |
 |---|---|---|
-| 1. Shared route definitions and protected runtime profiles | Code landed (this PR) | Registry `config/reviewer-routes.json` + `tools/reviewer_routes.py`; `test_route_registry_and_secret_scope` in tests/test_reviewer_routes.py. | [Isolated Ubuntu and Windows benchmark](https://github.com/popcre/ai-devops/issues/2531#issuecomment-6927912521) informs pins and controls. |
-| 2. Wire GitHub review and fallback | Code landed (this PR); live proof open | `--route`/`--run-plan`/`--candidate-plan`; workflow consumes the plan only through the opt-in input. Phase B receipts still open. | [DeepSeek and Muse native verdicts on a disposable TypeScript PR](https://github.com/popcre/ai-devops/pull/2538#issuecomment-6928212224). Candidate product wiring and final route proofs remain open. |
-| 3. Wire resumable second opinions | Code landed (this PR); live proof open | `--route` on ai-second-opinion (per-session lock, sticky selection, atomic Muse failover), harness engine in ai-deepseek-agent, ai-hy4 entry point. | [Read-only native session restart evidence](https://github.com/popcre/ai-devops/issues/2531#issuecomment-6927912521). Cross-route Muse continuation remains open. |
-| 4. Qualify the exact integrated candidate | Open | Run the route, platform and failure matrix in §10. |
+| 1. Shared route definitions and protected runtime profiles | Landed #2560 | Registry `config/reviewer-routes.json` + `tools/reviewer_routes.py`; `test_route_registry_and_secret_scope` in tests/test_reviewer_routes.py. | [Isolated Ubuntu and Windows benchmark](https://github.com/popcre/ai-devops/issues/2531#issuecomment-6927912521) informs pins and controls. |
+| 2. Wire GitHub review and fallback | Landed #2560; live receipts 2026-11-17 | `--route`/`--run-plan`/`--candidate-plan`; workflow consumes the plan only through the opt-in input. Phase B receipts still open. | [DeepSeek and Muse native verdicts on a disposable TypeScript PR](https://github.com/popcre/ai-devops/pull/2538#issuecomment-6928212224). Candidate product wiring and final route proofs remain open. |
+| 3. Wire resumable second opinions | Landed #2560 (+ #2569, #2570 fixes); live receipts 2026-11-17 | `--route` on ai-second-opinion (per-session lock, sticky selection, atomic Muse failover), harness engine in ai-deepseek-agent, ai-hy4 entry point. | [Read-only native session restart evidence](https://github.com/popcre/ai-devops/issues/2531#issuecomment-6927912521). Cross-route Muse continuation remains open. |
+| 4. Qualify the exact integrated candidate | Route receipts landed 2026-11-17 (candidate 883e552); activation hold intact | Run the route, platform and failure matrix in §10. |
 | 5. Enable, verify and retain rollback | On hold | Keep existing defaults during qualification. Follow §13 for the eventual cutover. |
-| 6. Qualify caching separately | Open | [Muse baseline](https://github.com/popcre/ai-devops/issues/2531#issuecomment-6928592964). Phase C can start after step 4. |
+| 6. Qualify caching separately | Started: wiring + first measurements (#2571, off by default) | [Muse baseline](https://github.com/popcre/ai-devops/issues/2531#issuecomment-6928592964). Phase C can start after step 4. |
 
 ## 1. Goal
 
