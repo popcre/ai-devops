@@ -19,7 +19,8 @@ make_fixture() {
     "$fixture/skills/codex/client-codex" "$fixture/skills/shared/shared-one" \
     "$fixture/skills/shared/synology-sharesync-triage" "$fixture/templates/system"
   cp "$REPO_ROOT/bin/ai-install-skills" "$fixture/bin/ai-install-skills"
-  mkdir -p "$fixture/tools/lib" && cp "$REPO_ROOT/tools/lib/globals-common.sh" "$fixture/tools/lib/globals-common.sh"
+  mkdir -p "$fixture/tools/lib"
+  cp "$REPO_ROOT/tools/lib/"{globals-common,path-identity}.sh "$fixture/tools/lib/"
   printf '%s\n' '---' 'name: client-claude' 'description: test' '---' > "$fixture/skills/claude/client-claude/SKILL.md"
   printf '%s\n' '---' 'name: client-codex' 'description: test' '---' > "$fixture/skills/codex/client-codex/SKILL.md"
   printf '%s\n' '---' 'name: shared-one' 'description: test' '---' > "$fixture/skills/shared/shared-one/SKILL.md"
@@ -428,14 +429,24 @@ fixture="$TMP_ROOT/reposcope/repo"; claude="$TMP_ROOT/reposcope/claude"; codex="
 clones="$TMP_ROOT/reposcope/clones"
 make_fixture "$fixture"
 make_demo_clone "$clones"
+git -C "$clones/demo-app" -c user.name=Fixture -c user.email=fixture@example.invalid \
+  -c commit.gpgSign=false commit -q --allow-empty -m fixture
+linked="$TMP_ROOT/reposcope/linked worktree"
+git -C "$clones/demo-app" worktree add -q --detach "$linked" HEAD
 mkdir -p "$fixture/skills/shared/repo-only-skill"
 printf '%s\n' '---' 'name: repo-only-skill' 'description: test' '---' > "$fixture/skills/shared/repo-only-skill/SKILL.md"
 printf '%s\n' '{' '  "schema_version": 1,' '  "skills": {' '    "repo-only-skill": ["demo-app"]' '  }' '}' > "$fixture/config/skill-scope.json"
-AI_SKILL_CLONE_ROOTS="$clones" run_installer "$fixture" "$claude" "$codex" >"$TMP_ROOT/reposcope.out"
+AI_SKILL_CLONE_ROOTS="$clones:$clones/." run_installer "$fixture" "$claude" "$codex" >"$TMP_ROOT/reposcope.out"
 assert_absent "$claude/skills/repo-only-skill"
 assert_absent "$codex/skills/repo-only-skill"
 assert_file "$clones/demo-app/.claude/skills/repo-only-skill/SKILL.md"
 assert_file "$clones/demo-app/.agents/skills/repo-only-skill/SKILL.md"
+assert_file "$linked/.claude/skills/repo-only-skill/SKILL.md"
+assert_file "$linked/.agents/skills/repo-only-skill/SKILL.md"
+for client in repo-claude repo-codex; do
+  [[ "$(grep -Fc "repo-only-skill ($client)" "$TMP_ROOT/reposcope.out")" == 2 ]] \
+    || fail "expected one $client check per distinct working folder"
+done
 grep -qxF '.claude/skills/' "$clones/demo-app/.git/info/exclude" || fail "claude skills not excluded from git"
 grep -qxF '.agents/skills/' "$clones/demo-app/.git/info/exclude" || fail "codex skills not excluded from git"
 grep -Fq 'repo-scoped' "$TMP_ROOT/reposcope.out" || fail "repo-scoped install not reported"
