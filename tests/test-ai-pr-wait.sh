@@ -57,8 +57,19 @@ done
 case "$(uname -s 2>/dev/null || true)" in
   MINGW*|MSYS*|CYGWIN*) export TMPDIR="$HOME" ;;
 esac
-TMP="$(mktemp -d)"
+TMP="$(mktemp -d)" || exit 1
 trap 'rm -rf "$TMP"' EXIT
+case "$(uname -s 2>/dev/null || true)" in
+  MINGW*|MSYS*|CYGWIN*)
+    # The cache helper rejects an ancestor with inherited write access for
+    # other users. Prepare the disposable root before opening any fixture cache.
+    FIXTURE_ACL_ROOT="$(cygpath -w "$TMP")" powershell.exe -NoProfile -NonInteractive \
+      -Command '$sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value; & icacls.exe "$env:FIXTURE_ACL_ROOT" /inheritance:r /grant:r ("*" + $sid + ":(OI)(CI)(F)") | Out-Null; exit $LASTEXITCODE' \
+      || exit 1
+    AI_TEST_BASH="$(cygpath -w "$BASH")"
+    export AI_TEST_BASH
+    ;;
+esac
 mkdir -p "$TMP/bin"
 cat > "$TMP/bin/gh" <<'EOF'
 #!/usr/bin/env bash

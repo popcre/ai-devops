@@ -13,6 +13,8 @@ import time
 import unittest
 from unittest import mock
 
+from bash_resolution import resolve_bash
+
 
 ROOT = Path(__file__).resolve().parents[1]
 HELPER = ROOT / "tools/github-requests/pr_status_singleflight.py"
@@ -30,6 +32,24 @@ def secure_windows_directory(path):
         raise AssertionError(result.stderr.decode(errors="replace"))
 
 
+def fixture_directory():
+    directory = tempfile.TemporaryDirectory(dir=Path.home() if os.name == "nt" else None)
+    if os.name == "nt":
+        # A newly created profile child can inherit write access from other users.
+        result = subprocess.run(
+            ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
+             '$sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value; '
+             '& icacls.exe "$env:FIXTURE_ACL_ROOT" /inheritance:r /grant:r '
+             '("*" + $sid + ":(OI)(CI)(F)") | Out-Null; exit $LASTEXITCODE'],
+            env=dict(os.environ, FIXTURE_ACL_ROOT=directory.name),
+            capture_output=True, text=True, check=False,
+        )
+        if result.returncode:
+            directory.cleanup()
+            raise AssertionError(result.stderr or result.stdout)
+    return directory
+
+
 def bash_path(path):
     if os.name != "nt":
         return str(path)
@@ -38,7 +58,7 @@ def bash_path(path):
 
 class SingleFlight(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory(dir=Path.home() if os.name == "nt" else None)
+        self.tmp = fixture_directory()
         self.addCleanup(self.tmp.cleanup)
         self.base = Path(self.tmp.name)
         self.count = self.base / "calls"
@@ -335,9 +355,11 @@ sys.exit(124)
 
 class AccessContext(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory(dir=Path.home() if os.name == "nt" else None)
+        self.tmp = fixture_directory()
         self.addCleanup(self.tmp.cleanup)
         self.base = Path(self.tmp.name)
+        self.bash, _ = resolve_bash()
+        self.assertIsNotNone(self.bash, "the GitHub access fixture needs Bash")
         self.state = self.base / "state"
         if os.name == "nt":
             secure_windows_directory(self.state)
@@ -359,7 +381,7 @@ class AccessContext(unittest.TestCase):
         (self.state / "identities" / key).chmod(0o600)
         env = dict(os.environ, AI_GH_STATE_DIR=bash_path(self.state),
                    AI_GH_REAL_GH=bash_path(self.fake), TOKEN=token)
-        return subprocess.run(["bash", str(CONTEXT)], capture_output=True, env=env, check=False)
+        return subprocess.run([self.bash, str(CONTEXT)], capture_output=True, env=env, check=False)
 
     def test_same_principal_different_tokens_have_different_access_keys(self):
         first = self.context("ghp_scope_one")
