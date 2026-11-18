@@ -720,18 +720,23 @@ check "DeepSeek status is available with its doctor contract" "$SCRIPT status de
 check "DeepSeek preflight uses its doctor contract" "$SCRIPT check deepseek '$REPO' | grep -q 'health=ok'"
 check "StepFun is usable on Linux with its doctor contract" "AI_STEPFUN_PLATFORM=Linux $SCRIPT status stepfun | jq -e '.status==\"installed-healthy\" and .usable==true'"
 check "StepFun preflight passes on Linux" "AI_STEPFUN_PLATFORM=Linux $SCRIPT check stepfun '$REPO' | grep -q 'health=ok'"
-# Restricted PATH: essential tools only, so `command -v opencode` fails and
-# the StepFun engine-miss path is reachable on Windows CI runners.
-WIN_TEST_PATH="/mingw64/bin:$(dirname "$(command -v jq)"):/usr/bin:/bin:$(dirname "$(command -v python3 || command -v python)")"
-check "StepFun is unsupported-platform on Windows without OpenCode" "AI_STEPFUN_PLATFORM=MINGW64_NT-10.0 AI_STEPFUN_OPENCODE='$TMP/missing-oc' PATH=\"$WIN_TEST_PATH\" $SCRIPT status stepfun | jq -e '.status==\"unsupported-platform\" and .usable==false'"
-check "StepFun preflight refuses on Windows without an engine" "AI_STEPFUN_PLATFORM=MINGW64_NT-10.0 AI_STEPFUN_OPENCODE='$TMP/missing-oc' PATH=\"$WIN_TEST_PATH\" $SCRIPT check stepfun '$REPO' >/dev/null 2>&1; [ \$? = 4 ]"
+# An explicit missing engine already prevents fallback to a host OpenCode.
+check "StepFun is unsupported-platform on Windows without OpenCode" "AI_STEPFUN_PLATFORM=MINGW64_NT-10.0 AI_STEPFUN_OPENCODE='$TMP/missing-oc' $SCRIPT status stepfun | jq -e '.status==\"unsupported-platform\" and .usable==false'"
+stepfun_missing_rc=0
+stepfun_missing_output="$(AI_STEPFUN_PLATFORM=MINGW64_NT-10.0 AI_STEPFUN_OPENCODE="$TMP/missing-oc" "$SCRIPT" check stepfun "$REPO" 2>&1)" || stepfun_missing_rc=$?
+if [ "$stepfun_missing_rc" -eq 4 ] && [[ "$stepfun_missing_output" == *"unsupported on this platform"* ]]; then
+  ok "StepFun preflight refuses on Windows without an engine"
+else
+  printf 'StepFun preflight exit %s: %s\n' "$stepfun_missing_rc" "$stepfun_missing_output" >&2
+  bad "StepFun preflight refuses on Windows without an engine"
+fi
 check "unsupported-platform has an explanation" "$SCRIPT explain unsupported-platform | grep -q 'Ubuntu/Linux under bubblewrap, or Windows folder + test shell'"
 check "StepFun is not statically unsupported on Windows with OpenCode (folder + test shell)" "! AI_STEPFUN_PLATFORM=MINGW64_NT-10.0 AI_STEPFUN_OPENCODE=/bin/true $SCRIPT status stepfun | jq -e '.failure_class==\"unsupported-platform\"'"
 # Default install path must satisfy preflight even when AI_STEPFUN_OPENCODE is
 # unset — otherwise a healthy Windows OpenCode setup is reported unsupported.
 # Pin the path from config/opencode/version so a version bump cannot silently
-# skip this branch. Restrict PATH like the sibling Windows engine-miss tests so
-# a host `opencode` on PATH cannot satisfy the probe instead of the default path.
+# skip this branch. Restrict PATH so a host `opencode` cannot satisfy the probe.
+WIN_TEST_PATH="/mingw64/bin:$(dirname "$(command -v jq)"):/usr/bin:/bin:$(dirname "$(command -v python3 || command -v python)")"
 fake_oc_home="$TMP/oc-default-home"
 fake_oc_ver="$(tr -d ' \r\n' < "$ROOT/config/opencode/version" 2>/dev/null || echo 1.18.12)"
 mkdir -p "$fake_oc_home/.local/lib/ai-devops/opencode/$fake_oc_ver/node_modules/opencode-ai/bin"
