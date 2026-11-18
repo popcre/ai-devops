@@ -11,13 +11,14 @@ Keep GitHub reviews and second opinions available even when Meta direct loses ac
 
 Tracking: [parent #2531](https://github.com/popcre/ai-devops/issues/2531), [DeepSeek #2549](https://github.com/popcre/ai-devops/issues/2549), [OpenCode #2550](https://github.com/popcre/ai-devops/issues/2550), [caching #2551](https://github.com/popcre/ai-devops/issues/2551). Start with the [current handoff](HANDOFF.d/2026-11-16T2207Z-edge-dev3-codex-reviewer-rollout-closeout.md). The [previous handoff](HANDOFF.d/2026-11-16T2118Z-edge-dev3-codex-reviewer-route-build.md) records the earlier implementation planning.
 
-The November 17 wrap-up requested a fresh session to implement the remaining
-cache, persistence and token-saving strategies on three machines. Its
-[fleet continuation handoff](https://github.com/popcre/ai-devops/blob/main/HANDOFF.d/2026-11-17T2355Z-edge-dev3-codex-cache-fleet-continuation.md)
-defines the successor's steps, completed proof, installation lessons and
-Albert's confirmed targets: edge-dev3, edge-dev and hetz. Start there for Phase C/6b; keep current
-defaults unchanged. This wrap-up does not itself implement or activate those
-strategies or certify a third host.
+The [November 17 fleet handoff](https://github.com/popcre/ai-devops/blob/e901513e11217b9189e3c101f132bb4d691efe9f/HANDOFF.d/2026-11-17T2355Z-edge-dev3-codex-cache-fleet-continuation.md)
+preserves the original instructions and installation lessons for edge-dev3,
+edge-dev and hetz. Its successor completed the three-host installation and
+verification at the pinned release with defaults unchanged
+([#2551 acceptance](https://github.com/popcre/ai-devops/issues/2551#issuecomment-6967526056)).
+The remaining quality and cost confirmations moved to
+[#2619](https://github.com/popcre/ai-devops/issues/2619) and are recorded in the
+[closed follow-up plan](plan_reviewer-quality-cost.md).
 
 ## STATUS — start here
 
