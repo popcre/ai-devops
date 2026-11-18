@@ -17,7 +17,6 @@ on:
         type: string
   schedule:
     - cron: '17 6 * * 1'
-    - cron: '13 23 * * 3' # Temporary #988 proof, remove after this observation window.
 
 concurrency:
   # A pull request is keyed on its *number*, not its head SHA. Keying on the SHA
