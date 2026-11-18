@@ -19,6 +19,8 @@ NEW_REPOSITORIES = {
     "popcre/designflow-tracking", "popcre/designflow-frontend",
     "popcre/designflow-item-master",
 }
+REFRESH_REPOSITORY = "popcre/designflow-frontend"
+REFRESH_BRANCHES = ("sandbox-albert", "develop")
 MANIFEST = ".ai-devops/application-release-target.json"
 GIT = "/usr/bin/git"
 GH = "/usr/bin/gh"
@@ -98,11 +100,11 @@ def discriminator(root):
         return ""
 
 
-def run(argv, root, env, timeout_seconds=30):
+def run(argv, root, env, timeout_seconds=30, max_stdout=262144):
     completed = subprocess.run(argv, cwd=root, env=env, capture_output=True, timeout=timeout_seconds,
                                check=False)
     require(completed.returncode == 0, "read-only source-release proof command failed")
-    require(len(completed.stdout) <= 262144, "oversized proof response")
+    require(len(completed.stdout) <= max_stdout, "oversized proof response")
     return completed.stdout
 
 
@@ -191,7 +193,8 @@ def installed_helper(root, env):
                     "gh_sha256": digest(Path(GH).read_bytes())}
 
 
-def remote_ref(root, repo, helper, env):
+def remote_ref(root, repo, helper, env, branch="develop"):
+    require(branch in REFRESH_BRANCHES, "unexpected exact-ref target")
     child = {key: value for key, value in env.items()
              if key not in {"BASH_ENV", "ENV", "SHELLOPTS", "BASHOPTS", "LD_PRELOAD",
                             "LD_LIBRARY_PATH", "LD_AUDIT", "PYTHONPATH", "PYTHONHOME"}
@@ -205,24 +208,174 @@ def remote_ref(root, repo, helper, env):
     # this is not a guarantee about queue duration. Local commands stay short.
     raw = run(["/bin/bash", "--noprofile", "--norc", str(helper),
                "api", "--hostname", "github.com", "--method", "GET",
-               f"repos/{repo}/git/ref/heads/develop"], root, child, timeout_seconds=600)
+               f"repos/{repo}/git/ref/heads/{branch}"], root, child, timeout_seconds=600)
     value = parse(raw)
     require(type(value) is dict and set(value) <= {"ref", "node_id", "url", "object"}
             and {"ref", "object"} <= set(value), "malformed exact-ref response")
     require("node_id" not in value or type(value["node_id"]) is str,
             "malformed ref identity")
     obj = value["object"]
-    require(value["ref"] == "refs/heads/develop" and type(obj) is dict
+    require(value["ref"] == f"refs/heads/{branch}" and type(obj) is dict
             and set(obj) <= {"type", "sha", "url"} and {"type", "sha"} <= set(obj)
             and obj["type"] == "commit" and type(obj["sha"]) is str
-            and SHA.fullmatch(obj["sha"]), "exact develop commit proof unavailable")
+            and SHA.fullmatch(obj["sha"]), "exact branch commit proof unavailable")
     if "url" in value:
-        require(value["url"] == f"https://api.github.com/repos/{repo}/git/refs/heads/develop",
+        require(value["url"] == f"https://api.github.com/repos/{repo}/git/refs/heads/{branch}",
                 "foreign ref response refused")
     if "url" in obj:
         require(obj["url"] == f"https://api.github.com/repos/{repo}/git/commits/{obj['sha']}",
                 "foreign commit response refused")
     return obj["sha"]
+
+
+def refresh_context(root, repo, base, env):
+    require(repo == REFRESH_REPOSITORY and SHA.fullmatch(base), "refresh target or base refused")
+    root = Path(root).resolve(strict=True)
+    require(Path.cwd().resolve() == root
+            and Path(git(root, env, "rev-parse", "--show-toplevel")).resolve() == root,
+            "refresh source root differs from selected context")
+    common = Path(git(root, env, "rev-parse", "--path-format=absolute", "--git-common-dir"))
+    common = common.resolve(strict=True)
+    require(git(root, env, "rev-parse", "--is-shallow-repository") == "false"
+            and not git(root, env, "replace", "-l"), "incomplete or replaced history refused")
+    graft = common / "info/grafts"
+    require(not graft.exists() or graft.stat().st_size == 0, "grafted ancestry refused")
+    raw_origin = git(root, env, "config", "--get-all", "remote.origin.url")
+    require(raw_origin in origin_forms(repo)
+            and git(root, env, "remote", "get-url", "origin") in origin_forms(repo)
+            and git(root, env, "remote", "get-url", "--push", "--all", "origin") in origin_forms(repo),
+            "canonical fetch and push origin required")
+    require(not git(root, env, "-c", "core.fsmonitor=false", "--no-optional-locks",
+                    "status", "--porcelain=v1", "--untracked-files=all"),
+            "published refresh worktree must be clean")
+    flags = run([GIT, "-C", str(root), "ls-files", "-v", "-z"], root, env, max_stdout=8 * 1024 * 1024)
+    require(not any(path[:1] == b"S" or path[:1].islower() for path in flags.split(b"\0")),
+            "hidden working-copy differences refused")
+    branch = git(root, env, "rev-parse", "--abbrev-ref", "HEAD")
+    worktree = Path(git(root, env, "rev-parse", "--absolute-git-dir")).resolve(strict=True)
+    require(worktree != common and branch in {"HEAD", "sandbox-albert"},
+            "refresh must use an isolated sandbox-albert or detached worktree")
+    sandbox = git(root, env, "rev-parse", "refs/remotes/origin/sandbox-albert")
+    develop = git(root, env, "rev-parse", "refs/remotes/origin/develop")
+    head = git(root, env, "rev-parse", "HEAD")
+    require(sandbox == base and head != sandbox and all(map(SHA.fullmatch, (sandbox, develop, head))),
+            "refresh base or source ref is unavailable, differs, or has no update")
+    if head == develop:
+        git(root, env, "merge-base", "--is-ancestor", sandbox, develop)
+    else:
+        parents = git(root, env, "show", "-s", "--format=%P", head).split()
+        require(parents == [sandbox, develop], "refresh must merge only the two published heads")
+    require(git(root, env, "rev-parse", f"{head}^{{tree}}") == git(root, env, "rev-parse", f"{develop}^{{tree}}"),
+            "refresh tree differs from the exact published develop tree")
+    git(root, env, "diff", "--quiet", sandbox, head, "--", ".", ":(exclude)shared-db")
+    config = run([GIT, "-C", str(root), "config", "--null", "--list", "--show-origin"], root, env)
+    return {"repository": repo, "head": head, "sandbox-albert": sandbox, "develop": develop,
+            "config_sha256": digest(config)}
+
+
+def frontend_cloud_proof(root, develop, env):
+    import grp
+    import pwd  # The maintained exact GitHub ref verifier is Linux-only.
+
+    policy = Path(__file__).resolve().parents[1] / "config/task-gates.json"
+    target = parse(policy.read_bytes())["application_source_releases"][REFRESH_REPOSITORY]["target"]
+    project, region = target["project"], target["region"]
+    connection, source_repo = "popcre", "pop-dflow-frontend"
+    cloud_repo = f"projects/{project}/locations/{region}/connections/{connection}/repositories/{source_repo}"
+    github = f"https://github.com/{REFRESH_REPOSITORY}.git"
+    gcloud = public_binary("/usr/bin/gcloud")
+    account = pwd.getpwuid(os.getuid())
+    home = Path(account.pw_dir).resolve(strict=True)
+    # Use the account's standard SDK profile and system trust. No caller
+    # process environment can select a proxy, endpoint, CA or SDK executable.
+    child = {"HOME": str(home), "PATH": "/usr/bin:/bin"}
+    for directory in (home / ".config", home / ".config/gcloud"):
+        metadata = directory.lstat()
+        require(stat.S_ISDIR(metadata.st_mode) and metadata.st_uid == os.getuid() and not metadata.st_mode & 0o002,
+                "standard Cloud SDK configuration path is not under account custody")
+        if metadata.st_mode & 0o020:
+            members = set(grp.getgrgid(metadata.st_gid).gr_mem)
+            members.update(user.pw_name for user in pwd.getpwall() if user.pw_gid == metadata.st_gid)
+            require(members == {account.pw_name}, "Cloud SDK configuration is writable by another account")
+
+    def cloud(*args):
+        return parse(run([gcloud, "--quiet", *args, f"--project={project}", f"--region={region}"],
+                         root, child))
+
+    settings = parse(run([gcloud, "--quiet", "config", "list",
+                          "--format=json(api_endpoint_overrides,core.custom_ca_certs_file,proxy)"], root, child))
+    require(not settings, "alternate Cloud Build endpoint, proxy or certificate authority refused")
+    repo = cloud("builds", "repositories", "describe", source_repo, f"--connection={connection}",
+                 "--format=json(name,remoteUri)")
+    require(repo == {"name": cloud_repo, "remoteUri": github}, "Cloud Build source repository differs")
+    triggers = cloud("builds", "triggers", "list",
+                     "--format=json(id,name,disabled,filename,filter,ignoredFiles,includedFiles,repositoryEventConfig,"
+                     "substitutions._SERVICE_NAME,substitutions._APP_ENV,substitutions._REGION)")
+
+    def trigger_id(branch, service, ignored):
+        matches = [entry["id"] for entry in triggers if not entry.get("disabled")
+                   and entry.get("name") == service and entry.get("filename") == "cloudbuild.yaml"
+                   and not entry.get("filter") and not entry.get("includedFiles")
+                   and entry.get("ignoredFiles", []) == ignored
+                   and entry.get("repositoryEventConfig") == {"repository": cloud_repo,
+                       "repositoryType": "GITHUB", "push": {"branch": f"^{branch}$"}}
+                   and all(entry.get("substitutions", {}).get(key) == value for key, value in {
+                       "_SERVICE_NAME": service, "_APP_ENV": branch, "_REGION": region}.items())]
+        require(len(matches) == 1 and re.fullmatch(r"[a-f0-9-]{36}", matches[0]),
+                "exact enabled Cloud Build target is unavailable")
+        return matches[0]
+
+    sandbox_trigger = trigger_id(target["branch"], target["service"], [])
+    develop_trigger = trigger_id("develop", "popcre-frontend-dev", ["shared-db/**"])
+    docker_ignore = git(root, env, "show", f"{develop}:.dockerignore").splitlines()
+    require(docker_ignore.count("shared-db") == 1 and not any(line.lstrip().startswith("!") for line in docker_ignore),
+            "frontend build does not exclude the mirrored tree")
+    dockerfile = git(root, env, "show", f"{develop}:Dockerfile").splitlines()
+    require("RUN yarn test" in dockerfile and "RUN yarn build:${NODE_ENV}" in dockerfile,
+            "frontend build lacks its pinned application checks")
+    builds = cloud("builds", "list", "--limit=10", f"--filter=buildTriggerId={develop_trigger} AND status=SUCCESS",
+                   "--format=json(id,status,buildTriggerId,sourceProvenance.resolvedGitSource,substitutions.COMMIT_SHA)")
+    for entry in builds:
+        source = entry.get("sourceProvenance", {}).get("resolvedGitSource", {})
+        revision = source.get("revision", "")
+        build_id = entry.get("id", "")
+        if not (entry.get("status") == "SUCCESS" and entry.get("buildTriggerId") == develop_trigger
+                and source.get("url") == github and SHA.fullmatch(revision)
+                and entry.get("substitutions", {}).get("COMMIT_SHA") == revision
+                and re.fullmatch(r"[a-f0-9-]{36}", build_id)):
+            continue
+        try:
+            git(root, env, "merge-base", "--is-ancestor", revision, develop)
+            git(root, env, "diff", "--quiet", revision, develop, "--", ".", ":(exclude)shared-db")
+        except ValueError:
+            continue
+        build = cloud("builds", "describe", build_id, "--format=json(id,status,buildTriggerId,steps)")
+        require(build.get("id") == build_id and build.get("status") == "SUCCESS"
+                and build.get("buildTriggerId") == develop_trigger
+                and any(step.get("id") == "Build" and step.get("status") == "SUCCESS"
+                        and step.get("name") == "gcr.io/cloud-builders/docker"
+                        and {"build", "."} <= set(step.get("args", [])) for step in build.get("steps", [])),
+                "successful frontend test-and-build step unavailable")
+        return {"sandbox_trigger": sandbox_trigger, "tested_develop_build": build_id,
+                "tested_develop_source": revision}
+    raise ValueError("no successful Cloud Build with the exact frontend application tree")
+
+
+def prove_refresh(root, repo, base, env):
+    env = confined_environment(env)
+    before = refresh_context(root, repo, base, env)
+    helper, closure = installed_helper(root, env)
+    for branch in REFRESH_BRANCHES:
+        require(remote_ref(root, repo, helper, env, branch) == before[branch],
+                "local refresh parent differs from fresh canonical remote")
+    cloud = frontend_cloud_proof(root, before["develop"], env)
+    after = refresh_context(root, repo, base, env)
+    _, closure_after = installed_helper(root, env)
+    require(before == after and closure == closure_after, "refresh source or helper moved during proof")
+    for branch in reversed(REFRESH_BRANCHES):
+        require(remote_ref(root, repo, helper, env, branch) == after[branch],
+                "canonical remote refresh parent moved during proof")
+    return {**before, **cloud}
 
 
 def prove(root, repo, base, env):
@@ -239,7 +392,7 @@ def prove(root, repo, base, env):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("mode", choices=("preflight", "prove"))
+    parser.add_argument("mode", choices=("preflight", "prove", "refresh-preflight", "prove-refresh"))
     parser.add_argument("root")
     parser.add_argument("repository", nargs="?")
     parser.add_argument("base", nargs="?")
@@ -250,6 +403,10 @@ def main():
             if repo:
                 confined_environment(os.environ)
             print(repo)
+        elif args.mode == "refresh-preflight":
+            confined_environment(os.environ)
+        elif args.mode == "prove-refresh":
+            print(json.dumps(prove_refresh(args.root, args.repository, args.base, os.environ), sort_keys=True))
         else:
             print(json.dumps(prove(args.root, args.repository, args.base, os.environ), sort_keys=True))
         return 0
