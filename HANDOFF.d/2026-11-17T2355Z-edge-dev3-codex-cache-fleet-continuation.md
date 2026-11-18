@@ -9,16 +9,15 @@ read-when: implementing the three-machine token-efficiency continuation requeste
 
 ## 0. Business decisions only the owner can make
 
-**One scope clarification is pending:** which three machines Albert means.
-The preceding work verified **edge-dev3 (Ubuntu)** and **edge-dev (Windows)**.
-The [deployment guide](https://github.com/popcre/ai-devops/blob/main/docs/deployment.md)
-names edge-dev, edge-dev3 and **hetz (Ubuntu)** as reviewer hosts, so hetz is the
-recommended third target, not a verified new instruction from Albert. This
-chat asked Albert asynchronously during wrap-up. Incorporate his answer if
-present. Before any third-host write, confirm its identity from Albert's answer
-or the existing rollout's explicit current machine custody. Continue source
-implementation and the two verified hosts independently while that is resolved;
-do not silently substitute another computer or expand to four.
+**None — no business decision is pending.** Albert confirmed the exact targets
+in this chat during wrap-up: **“edge-dev3, edge-dev, and hetz”**. Use edge-dev3
+(Ubuntu), edge-dev (Windows) and hetz (Ubuntu). The previous repair's installed
+proof covers the first two; hetz still needs its own baseline, supported
+installation and live acceptance. Do not ask Albert to reconfirm the host set,
+silently substitute another computer or expand to four. The
+[deployment guide](https://github.com/popcre/ai-devops/blob/main/docs/deployment.md)
+also identifies these reviewer hosts. Confirmation of target scope does not
+change the existing default hold or authorize production application changes.
 
 Already settled on November 17; do not ask again:
 
@@ -35,9 +34,9 @@ Already settled on November 17; do not ask again:
   approval, manual credential entry or setup task belongs to Albert. AI review
   is advisory. Only a genuine unresolved business scope question is his.
 
-Sweep of sections 1–9: the third-machine identity is the only owner question.
-Retention, billing completeness, test design, source custody and deployment
-mechanics are implementation constraints, not permission requests to Albert.
+Sweep of sections 1–9: the only scope question was the third-machine identity;
+Albert answered it. Retention, billing completeness, test design, source custody
+and deployment mechanics are implementation constraints, not permission requests.
 
 ## 1. What this application is
 
@@ -208,7 +207,7 @@ claimed complete by this wrap-up.
    reconcile actual ownership before touching the same files. Do not infer
    active work from old comments or an empty assignee list. **Gate:** current
    source, intended scope, one implementation owner and the confirmed host set
-   are recorded on the existing issues. The third-host write waits for §0.
+   are recorded on the existing issues. Use §0's confirmed host set.
 2. **Inventory each confirmed machine safely.** Resolve its canonical toolkit
    checkout, installed receipt, pinned runtimes, protected credential bindings,
    native shell, read-only boundary and relevant live sessions through the
@@ -344,7 +343,7 @@ review gate or compression service is being introduced.
 Self-audit passed:
 
 1. **A fresh developer can continue without chat context:** sections 0–3 define
-   the scope/hold, three-host uncertainty, existing application, completed
+   the scope/hold, confirmed three-host set, existing application, completed
    source and exact public receipts; sections 6–8 give ordered gates and access.
 2. **They retain the session's non-obvious knowledge:** sections 3–5 preserve
    implemented persistence, missing/subtotal semantics, both Muse corrections,
@@ -352,14 +351,14 @@ Self-audit passed:
    and the cross-machine key observation deferred by scope freeze.
 3. **All execution detail and constraints are present:** every step in section
    6 has an observable gate, section 7 preserves safety and unchanged defaults,
-   and section 8 separates verified two-host facts from third-host uncertainty.
+   and section 8 separates verified two-host facts from unmeasured third-host state.
    Every file/commit pointer is a portable GitHub URL; no private paths/values
    are needed or embedded. Existing plan tests remain the full build contract.
 4. **Owner-question sweep:** read all sections 1–9 and extracted machine scope,
    default hold, retention, custody, credentials and deployment decisions.
-   Only the machine-scope question needs Albert and it appears in section 0.
-   Everything else is settled or an AI-owned technical verification, not a
-   new permission request. No unrelated business decision was discovered.
+   The only machine-scope question was answered by Albert and is settled in
+   section 0. Everything else is settled or an AI-owned technical verification,
+   not a new permission request. No unrelated business decision was discovered.
 
 ### Report-only successor-review inventory
 
@@ -416,8 +415,8 @@ Start from current main in your own task worktree/branch, declare the proper
 task class and reconcile the existing implementation owner before editing.
 The cache-reporting repair is already merged, installed and verified on
 edge-dev3 and edge-dev; do not redo it or replace working named-session resume.
-Targets are edge-dev3, edge-dev and provisionally hetz; resolve section 0's
-third-machine scope before writing there. Implement plan steps 6/6b in order:
+Albert confirmed the targets: edge-dev3, edge-dev and hetz. Do not ask him to
+reconfirm them. Implement plan steps 6/6b in order:
 complete billing/coverage, stable scoped caching, lean inputs with full evidence,
 concise findings, growing-session persistence/compaction qualification and
 conditional exact-work reuse. Preserve every existing default and provider,
