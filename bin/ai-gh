@@ -300,7 +300,9 @@ trap 'release; exit 130' INT TERM
 # Lock liveness is age-based only: pid checks are unreliable across Git Bash,
 # MSYS and WSL pid namespaces sharing one state directory.
 acquire(){
-  local waited=0
+  # Windows process/filesystem work can dominate each pass. Count that time,
+  # not just the quarter-second sleeps, in the caller's no-wait deadline.
+  local started=$SECONDS
   while :; do
     if queue_head && mkdir "$LOCK" 2>/dev/null; then
       echo "$$ $(now) $TOKEN" > "$LOCK/owner"
@@ -313,19 +315,19 @@ acquire(){
     local info ts age
     # Checked before any reclaim, so a reclaim that keeps failing (Windows refusing
     # to remove an open file) can never keep a NO_WAIT caller spinning.
-    if [ "${AI_GH_NO_WAIT:-0}" = 1 ] && [ "$waited" -ge "${AI_GH_NO_WAIT_LOCK_SECONDS:-10}" ]; then
+    if [ "${AI_GH_NO_WAIT:-0}" = 1 ] && [ $(( SECONDS - started )) -ge "${AI_GH_NO_WAIT_LOCK_SECONDS:-10}" ]; then
       say "another GitHub call holds the throttle lock; not waiting (AI_GH_NO_WAIT=1)."; exit 75
     fi
     info="$(cat "$LOCK/owner" 2>/dev/null)"; ts="$(echo "$info" | awk '{print $2}')"
     if isnum "${ts:-}"; then
       age=$(( $(now) - ts ))
-      if [ "$age" -gt "$STALE" ]; then say "reclaiming abandoned lock (${age}s old)"; reclaim "$info" && { waited=$(( waited + 1 )); continue; }; fi
+      if [ "$age" -gt "$STALE" ]; then say "reclaiming abandoned lock (${age}s old)"; reclaim "$info" && continue; fi
     else
       # Owner never written (holder killed between mkdir and write): use the directory age.
       age=$(( $(now) - $(stat -c %Y "$LOCK" 2>/dev/null || now) ))
-      if [ "$age" -gt 60 ]; then say "reclaiming lock with no owner record (${age}s old)"; reclaim "$info" && { waited=$(( waited + 1 )); continue; }; fi
+      if [ "$age" -gt 60 ]; then say "reclaiming lock with no owner record (${age}s old)"; reclaim "$info" && continue; fi
     fi
-    sleep 0.25; waited_q=$(( ${waited_q:-0} + 1 )); [ $(( waited_q % 4 )) -eq 0 ] && waited=$(( waited + 1 ))
+    sleep 0.25
   done
 }
 
