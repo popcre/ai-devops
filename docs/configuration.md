@@ -31,6 +31,22 @@ and source SHA in `/etc/ai-devops/config-state.json`.
 There are **no secrets** in these files. Model access comes from the Claude/Codex
 CLI login sessions (`~/.claude`, `~/.codex`), not from variables here.
 
+## Preserving the installed Muse conversation default
+
+On a host held on the pre-activation Muse default, place an owner-writable
+regular file named `~/.config/ai-devops/muse-second-opinion-default` in the
+toolkit user's home before installing a newer release. On Windows, that home
+is `%USERPROFILE%`. The file contains only `legacy` with an optional line break.
+Installers neither create nor remove this file. Keep it in place until the
+host is cleared to activate the newer default.
+
+The pin applies to new `ai-muse new` conversations and unnamed `ai-muse ask`
+calls when no route is supplied. It retains the legacy direct Meta path.
+Explicit routes, saved conversations, other providers, and GitHub's review
+rotation keep their existing routing. If the file is absent, new implicit Muse
+conversations use the current release default (`auto`). An invalid or
+unreadable pin stops those calls before contacting a provider.
+
 ## `models.env` variables
 
 Command strings the scripts invoke per stage. See [`model-setup.md`](model-setup.md)

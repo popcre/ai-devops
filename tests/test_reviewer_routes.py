@@ -496,6 +496,17 @@ class AttributionTests(Base):
 
 
 class SecondOpinionRouteTests(Base):
+    def setUp(self):
+        super().setUp()
+        home = pathlib.Path(self.tmp.name, "caller-home")
+        self.pin = home / ".config" / "ai-devops" / "muse-second-opinion-default"
+        self.pin.parent.mkdir(parents=True)
+        self.env.update(HOME=str(home), USERPROFILE=str(home))
+
+    def write_pin(self, payload):
+        self.pin.touch(mode=0o600)
+        self.pin.write_bytes(payload)
+
     def run_so(self, *args, **kw):
         env = kw.get("env", self.env)
         env.setdefault("AI_SECOND_OPINION_TIMEOUT", "60")
@@ -671,6 +682,39 @@ class SecondOpinionRouteTests(Base):
         m2 = self.meta("muse", "lg")
         self.assertNotIn("route", m2)
         self.assertNotIn("visible", m2)
+
+    def test_local_pin_preserves_new_and_resumed_legacy_muse_sessions(self):
+        self.mode("ok")
+        self.write_pin(b"legacy\r\n")
+        for args in (("new", "held", "plain question"), ("ask", "held", "follow up")):
+            result = self.run_so("muse", *args)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertNotIn("route", self.meta("muse", "held"))
+            self.assertNotIn("visible", self.meta("muse", "held"))
+            call = self.oc_calls()[-1]
+            self.assertEqual(call["args"][call["args"].index("--model") + 1],
+                             "meta-model-api/muse-spark-1.3-contributor")
+        self.assertIn("--session", self.oc_calls()[-1]["args"])
+
+    def test_local_pin_keeps_explicit_and_saved_candidate_routes(self):
+        self.mode("ok")
+        result = self.run_so("muse", "new", "pre-pin", "plain question")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.write_pin(b"legacy\n")
+        for args, name in ((("--route", "auto", "new", "explicit", "question"), "explicit"),
+                           (("ask", "pre-pin", "follow up"), "pre-pin")):
+            result = self.run_so("muse", *args)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(self.meta("muse", name)["route"], "muse-meta")
+        self.assertIn("--session", self.oc_calls()[-1]["args"])
+
+    def test_invalid_pin_stops_before_creating_a_session(self):
+        self.write_pin(b"legacy\nextra\n")
+        result = self.run_so("muse", "new", "invalid", "plain question")
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("must contain only 'legacy'", result.stderr)
+        self.assertFalse(os.path.exists(self.so_dir("muse", "invalid")))
+        self.assertEqual(self.oc_calls(), [])
 
 
 class WorkflowDefaultTests(Base):
