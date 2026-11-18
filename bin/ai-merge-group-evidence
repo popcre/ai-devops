@@ -187,7 +187,14 @@ read_cancel_policy() (
   bash_runner="$(command -v bash)" || return 1
   # Native Windows must launch Git Bash explicitly, as ai-pr-wait does.
   case "$(uname -s 2>/dev/null || true)" in
-    MINGW*|MSYS*|CYGWIN*) bash_runner="$(cygpath -w "$bash_runner")" || return 1 ;;
+    MINGW*|MSYS*|CYGWIN*)
+      bash_runner="$(cygpath -w "$bash_runner")" || return 1
+      # Singleflight also launches Python through CreateProcess, which cannot
+      # execute the shell shim that may have resolved python3 above.
+      python="$("$python" -c 'import sys; print(sys.executable)' | tr -d '\r')" || return 1
+      [ -n "$python" ] || return 1
+      python="$(cygpath -w "$python")" || return 1
+      ;;
   esac
   temp="$(mktemp -d)" || return 1
   trap 'rm -rf "$temp"' EXIT
