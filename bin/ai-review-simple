@@ -332,10 +332,31 @@ def read_key(name):
     return raw.splitlines()[0] if raw else None
 
 
-def build_prompt(repo, base, head):
+LEAN_REVIEW = """Review only this change in a read-only checkout. Read local evidence as needed.
+Report correctness, security, compatibility, and changed-behavior test defects
+with file, line, and impact. Omit style preferences. Never edit files.
+End with exactly one final line: VERDICT: APPROVE (safe to merge),
+VERDICT: REJECT (must not merge), or VERDICT: REVISE (needs specific fixes).
+Use the word VERDICT only on that last line.
+
+"""
+CONCISE_REVIEW = (
+    "For each finding give only the file and line, defect, and impact. "
+    "Include every material finding. Omit progress narration and repeated patch text.\n\n"
+)
+
+
+def build_prompt(repo, base, head, variant=None):
     with open(TEMPLATE) as fh:
         tpl = fh.read()
     diff = git(repo, "diff", f"{base}...{head}")
+    if variant == "lean":
+        _, heading, scope = tpl.partition("## Review scope")
+        if not heading:
+            raise RR.RouteError("review template is missing its scope section")
+        tpl = LEAN_REVIEW + heading + scope
+    if variant == "concise":
+        tpl = CONCISE_REVIEW + tpl
     if len(diff) > MAX_DIFF:
         diff = diff[:MAX_DIFF] + "\n[diff truncated; read the files directly]\n"
     stat_text = git(repo, "diff", "--stat", f"{base}...{head}")
@@ -360,7 +381,7 @@ def _force_rmtree(path):
     shutil.rmtree(path, onerror=onerror)
 
 
-def make_workspace(repo, head, provider, tmp, spec=None, cache=None):
+def make_workspace(repo, head, provider, tmp, spec=None, cache=None, affinity_id=None):
     work = os.path.join(tmp, "work")
     subprocess.run(["git", "clone", "--quiet", "--no-checkout", "--no-hardlinks", repo, work],
                    check=True, capture_output=True)
@@ -380,7 +401,7 @@ def make_workspace(repo, head, provider, tmp, spec=None, cache=None):
         profiles = os.path.join(tmp, "dsh", "profiles", "headless")
         os.makedirs(profiles)
         with open(os.path.join(profiles, "cordis.patch.yml"), "w") as fh:
-            fh.write(RR.harness_patch_yaml(spec))
+            fh.write(RR.harness_patch_yaml(spec, affinity_id))
         return work, home
     cfg_dir = os.path.join(tmp, "xdg", "config", "opencode")
     os.makedirs(os.path.join(cfg_dir, "agent"))
@@ -388,9 +409,9 @@ def make_workspace(repo, head, provider, tmp, spec=None, cache=None):
            "share": "disabled", "autoupdate": False}
     if spec["provider"]:
         cfg["provider"] = spec["provider"]
-        if cache and spec.get("route"):
+        if (cache or affinity_id) and spec.get("route"):
             cfg["provider"] = RR.opencode_provider_block(RR.route(spec["route"]),
-                                                         cache=cache)
+                                                         cache=cache, affinity_id=affinity_id)
     with open(os.path.join(cfg_dir, "opencode.json"), "w") as fh:
         json.dump(cfg, fh, indent=1)
     with open(os.path.join(cfg_dir, "agent", "simple-review.md"), "w") as fh:
@@ -398,11 +419,11 @@ def make_workspace(repo, head, provider, tmp, spec=None, cache=None):
     return work, home
 
 
-def run_once(provider, prompt, work, home, tmp, key, timeout, spec=None):
+def run_once(provider, prompt, work, home, tmp, key, timeout, spec=None, observe=None):
     """One attempt. Returns (verdict, text, error)."""
     spec = spec or PROVIDERS[provider]
     if spec.get("engine") == "deepseek-harness":
-        return run_harness_once(spec, prompt, work, tmp, key, timeout)
+        return run_harness_once(spec, prompt, work, tmp, key, timeout, observe=observe)
     oc = resolve_opencode()
     if not oc:
         return None, "", "local: opencode binary not found", None
@@ -439,11 +460,15 @@ def run_once(provider, prompt, work, home, tmp, key, timeout, spec=None):
                 proc.kill()
         except OSError:
             pass
-        proc.communicate()
+        out, _ = proc.communicate()
+        if observe:
+            observe(out, "timeout")
         return None, "", f"timeout after {timeout}s", None
     full, final, ev_err = read_events(out)
     text = final_report(final, full)
     verdict = parse_verdict(final) or parse_verdict(full)
+    if observe:
+        observe(out, "verdict" if verdict else "failed")
     if verdict:
         return verdict, text, None, cache_receipts(out)
     problem = redact("\n".join(x for x in (ev_err, (err or "")[-2000:]) if x.strip()), key)
@@ -480,7 +505,7 @@ def read_harness_events(stdout):
     return final, "\n".join(errors)
 
 
-def run_harness_once(spec, prompt, work, tmp, key, timeout):
+def run_harness_once(spec, prompt, work, tmp, key, timeout, observe=None):
     """One DeepSeek Harness attempt through the shared route adapter (#2549).
 
     Runs the pinned headless profile with a private DSH_HOME, the task on
@@ -514,10 +539,14 @@ def run_harness_once(spec, prompt, work, tmp, key, timeout):
                 proc.kill()
         except OSError:
             pass
-        proc.communicate()
+        out, _ = proc.communicate()
+        if observe:
+            observe(out, "timeout")
         return None, "", f"timeout after {timeout}s", None
     final, ev_err = read_harness_events(out)
     verdict = parse_verdict(final)
+    if observe:
+        observe(out, "verdict" if verdict else "failed")
     if verdict:
         return verdict, final_report(final, final), None, {"read": None, "write": None}
     problem = redact("\n".join(x for x in (ev_err, (err or "")[-2000:]) if x.strip()), key)
@@ -539,6 +568,20 @@ def review(args):
               "findings": "", "elapsed": 0, "error": None}
     if route:
         result["route"], result["engine"] = route, spec["engine"]
+    variant = os.environ.get("AI_REVIEW_PROMPT_VARIANT") if route else None
+    attempts = None
+    billing_id = RR.billing_session_id() if route else None
+    if route and os.environ.get("AI_REVIEW_USAGE") == "1":
+        attempts = result["usage_attempts"] = []
+
+    def observe(stdout, outcome):
+        from reviewer_usage import reviewer_attempt
+
+        attempts.append(reviewer_attempt(
+            stdout, route=route, model=spec["model"], engine=spec["engine"],
+            outcome=outcome, elapsed=time.monotonic() - attempt_start,
+            billing_id=billing_id if spec.get("base_url") == RR.OPENROUTER_URL else None,
+        ))
 
     def finish(code):
         result["elapsed"] = round(time.monotonic() - start, 1)
@@ -546,6 +589,10 @@ def review(args):
             json.dump(result, fh, indent=1)
         print(json.dumps({k: result[k] for k in ("provider", "verdict", "elapsed", "error")}))
         return code
+
+    if variant not in (None, "lean", "concise"):
+        result["error"] = "refused: unknown reviewer prompt variant"
+        return finish(2)
 
     try:
         actual = git(args.repo, "rev-parse", "HEAD").strip()
@@ -565,18 +612,26 @@ def review(args):
     timeout = args.timeout or spec["timeout"]
     tmp = None
     try:
-        prompt = build_prompt(args.repo, base, head)
+        prompt = build_prompt(args.repo, base, head, variant)
         tmp = tempfile.mkdtemp(prefix=f"ai-review-simple-{result['provider']}-")
         cache_fields = RR.cache_fields(route, args.repo, head) if route else None
+        if cache_fields and variant:
+            cache_fields["prompt_cache_key"] += "-" + variant
+        affinity_id = billing_id or RR.cache_affinity_id(route, args.repo, head)
         work, home = make_workspace(args.repo, head, provider, tmp, spec=spec,
-                                    cache=cache_fields)
+                                    cache=cache_fields, affinity_id=affinity_id)
         receipts = None
         for _attempt in range(2):  # retry once, never on credit, timeout or refusal
+            attempt_start = time.monotonic()
             verdict, text, error, receipts = run_once(provider, prompt, work, home, tmp,
-                                                      key, timeout, spec=spec)
+                                                      key, timeout, spec=spec,
+                                                      observe=observe if attempts is not None else None)
             if verdict or (error or "").startswith(("out-of-credit", "timeout", "local:")) \
                     or (error and RR.classify(error)[0] == "terminal"):
                 break
+    except RR.RouteError as exc:
+        result["error"] = f"refused: {exc}"
+        return finish(2)
     except (subprocess.CalledProcessError, OSError, UnicodeError) as exc:
         detail = getattr(exc, "stderr", None) or str(exc)
         if isinstance(detail, bytes):
@@ -801,6 +856,8 @@ def main(argv=None):
         args.provider = RR.route(args.route)["reviewer"]
     try:
         spec_for(args.provider, args.route)
+        if args.route:
+            RR.billing_session_id()
     except RR.RouteError as exc:
         ap.error(str(exc))
     return review(args)

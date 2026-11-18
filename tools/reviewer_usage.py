@@ -12,6 +12,7 @@ CLI's first-party model catalog whenever that row is readable.
 import argparse
 import datetime
 import decimal
+import hashlib
 import json
 import math
 import os
@@ -41,6 +42,78 @@ def nested(obj, *keys):
             return None
         obj = obj.get(key)
     return obj
+
+
+def reviewer_attempt(stdout, *, route, model, engine, outcome, elapsed, billing_id=None):
+    """Observed runtime events cannot count hidden retries or establish billing."""
+    fields = {
+        'input_uncached': ('input',), 'output_visible': ('output',), 'reasoning': ('reasoning',),
+        'cache_read': ('cache', 'read'), 'cache_write': ('cache', 'write'),
+    }
+    starts, finishes, seen = 0, [], {}
+    if engine == 'opencode':
+        for line in (stdout or '').splitlines():
+            try:
+                event = json.loads(line)
+            except ValueError:
+                continue
+            kind = nested(event, 'type')
+            part = nested(event, 'part')
+            session = nested(event, 'sessionID') or nested(part, 'sessionID')
+            if nested(part, 'sessionID') not in (None, session):
+                continue
+            identity = (session, nested(part, 'messageID'), nested(part, 'id'))
+            if kind in ('step_start', 'step_finish') and all(
+                isinstance(item, str) and item for item in identity
+            ):
+                key = (kind, identity)
+                if key in seen:
+                    index = seen[key]
+                    if kind == 'step_finish' and finishes[index] != part:
+                        finishes[index] = None
+                    continue
+                seen[key] = len(finishes)
+            if kind == 'step_start':
+                starts += 1
+            elif kind == 'step_finish':
+                finishes.append(part)
+    observed = {}
+    for field, path in fields.items():
+        values = [nested(part, 'tokens', *path) for part in finishes]
+        measured = [value for value in values if type(value) is int and value >= 0]
+        observed[field] = {
+            'subtotal': sum(measured) if measured else None,
+            'reported_steps': len(measured),
+        }
+    estimates = [number(nested(part, 'cost'), tokens=False) for part in finishes]
+    # OpenCode can emit zero when model pricing is missing.
+    measured_estimates = [value for value in estimates if value]
+    receipt = {
+        'route': route, 'model': model, 'engine': engine,
+        'outcome': outcome, 'elapsed_seconds': round(elapsed, 3),
+        'source': 'runtime-events',
+        'step_starts': starts if engine == 'opencode' else None,
+        'step_finishes': len(finishes) if engine == 'opencode' else None,
+        'adapter_counters': observed,
+        'adapter_cost_estimate_usd': {
+            'subtotal': number(sum(measured_estimates), tokens=False) if measured_estimates else None,
+            'reported_steps': len(measured_estimates),
+        },
+        'provider_request_count': None,
+        'billed_cost_usd': None,
+    }
+    if billing_id:
+        receipt['billing_fingerprint'] = hashlib.sha256(billing_id.encode('utf-8')).hexdigest()
+    return receipt
+
+
+def append_reviewer_attempt(path, receipt):
+    """Append a sanitized receipt outside conversation history."""
+    if os.path.islink(path):
+        raise OSError("usage receipt path is a link")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND | getattr(os, "O_NOFOLLOW", 0)
+    with os.fdopen(os.open(path, flags, 0o600), "a", encoding="utf-8") as stream:
+        stream.write(json.dumps(receipt) + "\n")
 
 
 def deepseek(response):

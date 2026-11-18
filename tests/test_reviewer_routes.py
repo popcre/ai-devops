@@ -70,6 +70,12 @@ FAKE_OC = textwrap.dedent("""\
         sys.exit(0)
     if mode == "sleep":
         time.sleep(30)
+    if mode == "paid-failure":
+        for _ in range(2):
+            print(json.dumps({"type": "step_start", "part": {}}))
+        print(json.dumps({"type": "step_finish", "part": {"cost": 0.015, "tokens": {
+            "input": 42, "cache": {"read": 0}}}}))
+        sys.exit(1)
     if mode == "cachefinish":
         print(json.dumps({"type": "step_start", "sessionID": "ses_c", "part": {}}))
         text("Findings: none.\\nVERDICT: APPROVE")
@@ -513,6 +519,8 @@ class SecondOpinionRouteTests(Base):
         self.assertEqual(m["route"], "muse-openrouter")
         self.assertEqual(m["turns"], 2)
         self.assertEqual(len(m["visible"]), 2)
+        self.assertEqual([turn["q"] for turn in m["visible"]],
+                         ["question one", "second question"])
         transcript = open(os.path.join(self.so_dir("muse", "fa"), "transcript.md")).read()
         self.assertIn("route failover: muse-meta -> muse-openrouter", transcript)
         calls = self.oc_calls()
@@ -736,6 +744,8 @@ class DeepseekAgentHarnessTests(Base):
 
     def test_harness_send_reply_and_show(self):
         self.protect_or_store()
+        identifier = "bill-" + "f" * 32
+        self.agent_env.update(AI_REVIEW_USAGE="1", AI_REVIEW_BILLING_ID=identifier)
         r = self.agent("send", "--route", "deepseek-openrouter", "hello there")
         self.assertEqual(r.returncode, 0, r.stderr)
         sid_line = [ln for ln in r.stdout.splitlines() if ln.startswith("SESSION_ID:")]
@@ -751,6 +761,7 @@ class DeepseekAgentHarnessTests(Base):
         self.assertFalse(rows[0]["has_ds_key"])
         self.assertIn("deepseek/deepseek-v4.1-flash-1017", rows[0]["patch"])
         self.assertIn("read-only", rows[0]["args"])
+        self.assertIn(f'x-session-id: "{identifier}"', rows[0]["patch"])
         r2 = self.agent("show", session_id)
         self.assertEqual(r2.returncode, 0, r2.stderr)
         self.assertIn("HARNESS deepseek-openrouter", r2.stdout)
@@ -758,8 +769,12 @@ class DeepseekAgentHarnessTests(Base):
         self.assertEqual(r3.returncode, 0, r3.stderr)
         rows = self.dsh_log_rows()
         self.assertIn("--session-id", rows[-1]["args"])
+        self.assertIn(f'x-session-id: "{identifier}"', rows[-1]["patch"])
         value = json.load(open(sess_path))
         self.assertEqual(len(value["turns"]), 4)
+        usage_path = pathlib.Path(sess_path).with_suffix(".dsh-home") / "usage.jsonl"
+        receipts = [json.loads(line) for line in usage_path.read_text().splitlines()]
+        self.assertEqual([row["outcome"] for row in receipts], ["answer", "answer"])
 
     def test_harness_doctor_live_route(self):
         self.protect_or_store()
@@ -836,14 +851,84 @@ class CacheReceiptTests(unittest.TestCase):
 class CacheQualificationTests(SecondOpinionRouteTests):
     """Phase C (#2551): opt-in cache identifiers, prompt order and receipts."""
 
+    @classmethod
+    def setUpClass(cls):
+        import importlib.machinery, importlib.util
+        loader = importlib.machinery.SourceFileLoader("ars_qualification", SCRIPT)
+        spec = importlib.util.spec_from_loader(loader.name, loader)
+        cls.ars = importlib.util.module_from_spec(spec)
+        loader.exec_module(cls.ars)
+
+    def openrouter_options(self, call):
+        provider = call["config"]["provider"]["openrouter-muse"]
+        return provider["models"]["meta/muse-spark-1.3-contributor"].get("options", {})
+
+    def test_usage_coverage_and_failed_attempt_costs(self):
+        self.env["AI_REVIEW_USAGE"] = "1"
+        self.mode("paid-failure", "cachefinish")
+        proc, result = self.run_review(route="muse-openrouter")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        failed, succeeded = result["usage_attempts"]
+        self.assertEqual((failed["outcome"], succeeded["outcome"]), ("failed", "verdict"))
+        self.assertEqual((failed["step_starts"], failed["step_finishes"]), (2, 1))
+        self.assertEqual(failed["adapter_counters"]["input_uncached"],
+                         {"subtotal": 42, "reported_steps": 1})
+        self.assertEqual(failed["adapter_counters"]["cache_read"]["subtotal"], 0)
+        self.assertIsNone(failed["adapter_counters"]["cache_write"]["subtotal"])
+        self.assertEqual(failed["adapter_cost_estimate_usd"],
+                         {"subtotal": 0.015, "reported_steps": 1})
+        for attempt in (failed, succeeded):
+            self.assertIsNone(attempt["billed_cost_usd"])
+            self.assertIsNone(attempt["provider_request_count"])
+        self.env.pop("AI_REVIEW_USAGE")
+        self.mode("cachefinish")
+        proc, result = self.run_review(route="muse-openrouter")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertNotIn("usage_attempts", result)
+
+    def test_usage_observes_top_level_session_and_rejects_conflicting_duplicates(self):
+        from reviewer_usage import reviewer_attempt
+        first = {"type": "step_finish", "sessionID": "fixture",
+                 "part": {"messageID": "reply", "id": "part", "tokens": {"input": 10}}}
+        second = {"type": "step_finish", "sessionID": "fixture",
+                  "part": {"messageID": "reply", "id": "second", "tokens": {"input": 3}}}
+        conflict = {**first, "part": {**first["part"], "tokens": {"input": 99}}}
+        receipt = reviewer_attempt(
+            "\n".join(json.dumps(event) for event in (first, first, second, conflict)),
+            route="muse-openrouter", model="fixture", engine="opencode",
+            outcome="failed", elapsed=1, billing_id="bill-" + "f" * 32,
+        )
+        self.assertEqual(receipt["step_finishes"], 2)
+        self.assertEqual(receipt["adapter_counters"]["input_uncached"],
+                         {"subtotal": 3, "reported_steps": 1})
+        self.assertEqual(len(receipt["billing_fingerprint"]), 64)
+        self.assertNotIn("bill-", json.dumps(receipt))
+
+    def test_usage_records_both_failover_attempts_without_conversation_text(self):
+        self.env["AI_REVIEW_USAGE"] = "1"
+        self.mode("ok", "credit", "cachefinish")
+        first = self.run_so("muse", "--route", "auto", "new", "billing", "private marker")
+        self.assertEqual(first.returncode, 0, first.stderr)
+        second = self.run_so("muse", "--route", "auto", "ask", "billing", "follow up")
+        self.assertEqual(second.returncode, 0, second.stderr)
+        path = os.path.join(self.so_dir("muse", "billing"), "usage.jsonl")
+        with open(path, encoding="utf-8") as fh:
+            raw = fh.read()
+        self.assertNotIn("private marker", raw)
+        self.assertNotIn("follow up", raw)
+        receipts = [json.loads(line) for line in raw.splitlines()]
+        self.assertEqual([(r["route"], r["outcome"]) for r in receipts],
+                         [("muse-meta", "answer"), ("muse-meta", "failed"),
+                          ("muse-openrouter", "answer")])
+
     def test_muse_cache_key_scope_and_stability(self):
         self.env["AI_REVIEW_CACHE"] = "1"
         self.mode("ok")
         proc, result = self.run_review(route="muse-openrouter")
         self.assertEqual(proc.returncode, 0, proc.stderr)
-        cfg = self.oc_calls()[0]["config"]["provider"]["openrouter-muse"]
-        key = cfg["body"]["prompt_cache_key"]
-        session = cfg["headers"]["x-session-id"]
+        cfg = self.openrouter_options(self.oc_calls()[0])
+        key = cfg["prompt_cache_key"]
+        session = cfg["session_id"]
         self.assertTrue(key.startswith("aidv1-"))
         self.assertTrue(session.startswith("aidv1-s-"))
         self.assertLessEqual(len(key), 256)
@@ -852,15 +937,15 @@ class CacheQualificationTests(SecondOpinionRouteTests):
         # stable across a second identical review; the session id follows the head
         self.mode("ok")
         self.run_review(route="muse-openrouter")
-        cfg2 = self.oc_calls()[1]["config"]["provider"]["openrouter-muse"]
-        self.assertEqual(cfg2["body"]["prompt_cache_key"], key)
-        self.assertEqual(cfg2["headers"]["x-session-id"], session)
+        cfg2 = self.openrouter_options(self.oc_calls()[1])
+        self.assertEqual(cfg2["prompt_cache_key"], key)
+        self.assertEqual(cfg2["session_id"], session)
         # a different namespace isolates the shared key
         self.env["AI_REVIEW_CACHE_NAMESPACE"] = "other"
         self.mode("ok")
         self.run_review(route="muse-openrouter")
-        cfg3 = self.oc_calls()[2]["config"]["provider"]["openrouter-muse"]
-        self.assertNotEqual(cfg3["body"]["prompt_cache_key"], key)
+        cfg3 = self.openrouter_options(self.oc_calls()[2])
+        self.assertNotEqual(cfg3["prompt_cache_key"], key)
         del self.env["AI_REVIEW_CACHE_NAMESPACE"]
 
     def test_meta_gets_cache_key_without_openrouter_session_header(self):
@@ -869,7 +954,9 @@ class CacheQualificationTests(SecondOpinionRouteTests):
         proc, _ = self.run_review(route="muse-meta")
         self.assertEqual(proc.returncode, 0, proc.stderr)
         cfg = self.oc_calls()[0]["config"]["provider"]["meta-model-api"]
-        self.assertTrue(cfg["body"]["prompt_cache_key"].startswith("aidv1-"))
+        options = cfg["models"]["muse-spark-1.3-contributor"]["options"]
+        self.assertTrue(options["promptCacheKey"].startswith("aidv1-"))
+        self.assertNotIn("session_id", options)
         self.assertNotIn("headers", cfg)
 
     def test_cache_off_by_default_everywhere(self):
@@ -877,26 +964,99 @@ class CacheQualificationTests(SecondOpinionRouteTests):
         proc, _ = self.run_review(route="muse-openrouter")
         self.assertEqual(proc.returncode, 0, proc.stderr)
         cfg = self.oc_calls()[0]["config"]["provider"]["openrouter-muse"]
+        self.assertEqual(self.openrouter_options(self.oc_calls()[0]), {})
         self.assertNotIn("body", cfg)
         self.assertNotIn("headers", cfg)
 
-    def test_non_muse_route_gets_no_cache_fields(self):
+    def test_non_muse_routes_use_affinity_without_muse_cache_keys(self):
         self.env["AI_REVIEW_CACHE"] = "1"
         self.mode("approve")
         proc, _ = self.run_review(route="deepseek-openrouter")
         self.assertEqual(proc.returncode, 0, proc.stderr)
         patch = self.dsh_calls()[0]["patch"]
         self.assertIn("openrouter", patch)  # prove we inspected the actual profile
-        for field in ("prompt_cache_key", "session_id", "x-session-id"):
-            self.assertNotIn(field, patch)
+        self.assertNotIn("prompt_cache_key", patch)
+        self.assertIn('x-session-id: "aidv1-s-', patch)
+        self.mode("ok")
+        proc, _ = self.run_review(route="hy4-openrouter")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        model = self.oc_calls()[0]["config"]["provider"]["openrouter-hy4"]["models"]["tencent/hy4"]
+        self.assertNotIn("prompt_cache_key", model["options"])
+        self.assertTrue(model["options"]["session_id"].startswith("aidv1-s-"))
+
+    def test_affinity_scope_separates_repositories_routes_and_sessions(self):
+        from unittest.mock import patch
+        with patch.dict(os.environ, {"AI_REVIEW_CACHE": "1", "GITHUB_REPOSITORY": "public/repo"}):
+            first = RR.cache_affinity_id("hy4-openrouter", self.repo, self.head)
+            self.assertEqual(first, RR.cache_affinity_id("hy4-openrouter", self.tmp.name, self.head))
+            self.assertNotEqual(first, RR.cache_affinity_id("deepseek-openrouter", self.repo, self.head))
+            self.assertNotEqual(first, RR.cache_affinity_id("hy4-openrouter", self.repo, self.base))
+            with patch.dict(os.environ, {"GITHUB_REPOSITORY": "public/other"}):
+                self.assertNotEqual(first, RR.cache_affinity_id("hy4-openrouter", self.repo, self.head))
+
+    def test_openrouter_billing_session_supports_hy4_and_deepseek(self):
+        identifier = "bill-" + "c" * 32
+        self.env.update(AI_REVIEW_USAGE="1", AI_REVIEW_BILLING_ID=identifier)
+        self.mode("cachefinish")
+        proc, result = self.run_review(route="hy4-openrouter")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        model = self.oc_calls()[0]["config"]["provider"]["openrouter-hy4"]["models"]["tencent/hy4"]
+        self.assertEqual(model["options"], {"session_id": identifier})
+        self.assertNotIn(identifier, json.dumps(result))
+
+        self.mode("approve")
+        proc, result = self.run_review(route="deepseek-openrouter")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn(f'x-session-id: "{identifier}"', self.dsh_calls()[0]["patch"])
+        self.assertNotIn(identifier, json.dumps(result))
+
+    def test_hy4_billing_session_survives_restart(self):
+        identifier = "bill-" + "d" * 32
+        self.env.update(AI_REVIEW_USAGE="1", AI_REVIEW_BILLING_ID=identifier)
+        first = self.run_so("hy4-openrouter", "new", "usage-hy4", "remember this")
+        self.assertEqual(first.returncode, 0, first.stderr)
+        del self.env["AI_REVIEW_BILLING_ID"]
+        second = self.run_so("hy4-openrouter", "ask", "usage-hy4", "recall it")
+        self.assertEqual(second.returncode, 0, second.stderr)
+        for call in self.oc_calls():
+            model = call["config"]["provider"]["openrouter-hy4"]["models"]["tencent/hy4"]
+            self.assertEqual(model["options"], {"session_id": identifier})
+        self.env["AI_REVIEW_BILLING_ID"] = "bill-" + "e" * 32
+        changed = self.run_so("hy4-openrouter", "ask", "usage-hy4", "recall it")
+        self.assertEqual(changed.returncode, 2)
+        self.assertEqual(len(self.oc_calls()), 2)
+
+    def test_lean_prompt_preserves_review_contract(self):
+        prompt = self.ars.build_prompt(self.repo, self.base, self.head, "lean")
+        self.assertIn("+two", prompt)
+        for required in (self.base, self.head, "read-only", "file, line, and impact",
+                         "VERDICT: APPROVE", "VERDICT: REJECT", "VERDICT: REVISE"):
+            self.assertIn(required, prompt)
+
+    def test_lean_requires_template_scope_section(self):
+        from unittest.mock import patch
+        broken = pathlib.Path(self.tmp.name, "wrong-template.md")
+        broken.write_text("No scope heading", encoding="utf-8")
+        with patch.object(self.ars, "TEMPLATE", broken):
+            with self.assertRaisesRegex(RR.RouteError, "missing its scope section"):
+                self.ars.build_prompt(self.repo, self.base, self.head, "lean")
+
+    def test_review_refuses_candidate_without_inline_patch(self):
+        self.env["AI_REVIEW_PROMPT_VARIANT"] = "file-map"
+        proc, result = self.run_review(route="muse-openrouter")
+        self.assertEqual(proc.returncode, 2)
+        self.assertIn("unknown reviewer prompt variant", result["error"])
+        self.assertEqual(self.oc_calls(), [])
+
+    def test_concise_report_preserves_findings_and_verdict(self):
+        original = self.ars.build_prompt(self.repo, self.base, self.head)
+        concise = self.ars.build_prompt(self.repo, self.base, self.head, "concise")
+        self.assertTrue(concise.endswith(original))
+        self.assertIn("Include every material finding", concise)
+        self.assertIn("file and line, defect, and impact", concise)
 
     def test_cache_prefix_puts_fixed_instructions_before_variable_ids(self):
-        import importlib.machinery, importlib.util
-        loader = importlib.machinery.SourceFileLoader("ars_c", SCRIPT)
-        spec = importlib.util.spec_from_loader("ars_c", loader)
-        ars = importlib.util.module_from_spec(spec)
-        loader.exec_module(ars)
-        prompt = ars.build_prompt(self.repo, self.base, self.head)
+        prompt = self.ars.build_prompt(self.repo, self.base, self.head)
         fixed = prompt.index("Do not report style preferences.")
         head_at = prompt.index(self.head)
         base_at = prompt.index(self.base)
@@ -932,9 +1092,9 @@ class CacheQualificationTests(SecondOpinionRouteTests):
         self.mode("ok")
         r2 = self.run_so("muse", "--route", "muse-openrouter", "ask", "cs", "again")
         self.assertEqual(r2.returncode, 0, r2.stderr)
-        cfgs = [c["config"]["provider"]["openrouter-muse"] for c in self.oc_calls()]
-        self.assertEqual(cfgs[0]["body"]["prompt_cache_key"], cfgs[1]["body"]["prompt_cache_key"])
-        self.assertEqual(cfgs[0]["headers"]["x-session-id"], cfgs[1]["headers"]["x-session-id"])
+        cfgs = [self.openrouter_options(call) for call in self.oc_calls()]
+        self.assertEqual(cfgs[0]["prompt_cache_key"], cfgs[1]["prompt_cache_key"])
+        self.assertEqual(cfgs[0]["session_id"], cfgs[1]["session_id"])
 
 
 

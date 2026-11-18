@@ -15,9 +15,11 @@ import json
 import os
 import subprocess
 import sys
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import reviewer_routes as RR  # noqa: E402
+from reviewer_usage import append_reviewer_attempt, reviewer_attempt  # noqa: E402
 
 
 def main():
@@ -38,6 +40,14 @@ def main():
     if spec["engine"] != "deepseek-harness":
         print(f"error: route {args.route} is not a deepseek-harness route", file=sys.stderr)
         return 2
+    try:
+        billing_id = RR.billing_session_id()
+        affinity_id = billing_id or RR.cache_affinity_id(
+            args.route, os.path.realpath(args.dsh_home), "named-session"
+        )
+    except RR.RouteError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 2
     key = RR.read_key(spec, secrets_dir=args.secrets_dir)
     if not key:
         print(f"error: credential missing ({spec['key_file']}) in {args.secrets_dir}",
@@ -53,7 +63,7 @@ def main():
     os.makedirs(profiles, exist_ok=True)
     os.makedirs(args.home, exist_ok=True)
     with open(os.path.join(profiles, "cordis.patch.yml"), "w", encoding="utf-8") as fh:
-        fh.write(RR.harness_patch_yaml(spec))
+        fh.write(RR.harness_patch_yaml(spec, affinity_id))
 
     prompt = open(args.prompt_file, encoding="utf-8").read() if args.prompt_file \
         else sys.stdin.read()
@@ -74,6 +84,21 @@ def main():
     if args.session:
         cmd += ["--session-id", args.session]
     cmd.append("-")
+    started = time.monotonic()
+
+    def observe(outcome, events=""):
+        if os.environ.get("AI_REVIEW_USAGE") != "1":
+            return
+        receipt = reviewer_attempt(
+            events, route=args.route, model=spec["model"], engine=spec["engine"],
+            outcome=outcome, elapsed=time.monotonic() - started, billing_id=billing_id,
+        )
+        path = os.path.join(args.dsh_home, "usage.jsonl")
+        try:
+            append_reviewer_attempt(path, receipt)
+        except OSError:
+            print("Usage receipt could not be recorded.", file=sys.stderr)
+
     proc = subprocess.Popen(cmd, cwd=args.cwd, env=env, stdin=subprocess.PIPE,
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                             text=True, encoding="utf-8", errors="replace")
@@ -82,6 +107,7 @@ def main():
     except subprocess.TimeoutExpired:
         proc.kill()
         proc.communicate()
+        observe("timeout")
         print(f"error: no answer within {args.timeout}s", file=sys.stderr)
         return 3
 
@@ -109,7 +135,9 @@ def main():
                 detail = reason.get("error") if isinstance(reason, dict) else reason
                 error_text.append(json.dumps(detail or reason or "final without completion")[:2000])
     problem = "\n".join(x for x in (error_text + [(err or "")[-2000:]]) if x.strip())
-    if not final_text:
+    answered = bool(final_text and not error_text and proc.returncode == 0)
+    observe("answer" if answered else "failed", out)
+    if not answered:
         print("error: no completed final answer"
               + (f": {problem[:800]}" if problem else ""), file=sys.stderr)
         return 3
