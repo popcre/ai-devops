@@ -640,6 +640,8 @@ class SecondOpinionRouteTests(Base):
         self.assertNotIn("visible", m2)
 
 
+# Activation live-proof marker (2026-11-17): the default rotation now expands
+# into the qualified candidate plan (#2531, merged c58eb1e0).
 class WorkflowDefaultTests(Base):
     WF = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                       ".github", "workflows", "ai-review.yml")
