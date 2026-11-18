@@ -4,6 +4,7 @@ $root = Split-Path -Parent $PSScriptRoot
 $temp = Join-Path ([IO.Path]::GetTempPath()) ('ai-devops-private-file-' + [guid]::NewGuid())
 New-Item -ItemType Directory -Path $temp | Out-Null
 function Assert([bool]$Condition, [string]$Message) { if (-not $Condition) { throw "FAIL: $Message" } }
+function Get-Acl { throw 'Fixture: Microsoft.PowerShell.Security ACL cmdlet unavailable' }
 
 try {
   $explicitFixture = Join-Path $temp 'explicit-extra-grant'
