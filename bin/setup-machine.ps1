@@ -112,6 +112,40 @@ function Get-CodexBin {
   return $null
 }
 
+function Test-CodexSandboxWrite([string]$CodexExe) {
+  $probe = Join-Path ([System.IO.Path]::GetTempPath()) ("codex-probe-" + [Guid]::NewGuid().ToString("N"))
+  $gitEnvironment = @(Get-ChildItem Env: | Where-Object Name -Like 'GIT_*')
+  $PSNativeCommandUseErrorActionPreference = $false
+  New-Item -ItemType Directory -Path $probe | Out-Null
+  try {
+    foreach ($variable in $gitEnvironment) {
+      Remove-Item -LiteralPath ("Env:" + $variable.Name)
+    }
+    $env:GIT_CONFIG_NOSYSTEM = '1'
+    $env:GIT_CONFIG_GLOBAL = Join-Path (Join-Path $probe '.git') 'probe-global-config'
+    & git -C $probe init -q --template= *> $null
+    if ($LASTEXITCODE -ne 0) { throw 'Could not initialize the scratch Git repository; Codex was not tested.' }
+    & git -C $probe -c 'user.name=Codex doctor' -c 'user.email=codex-doctor@example.invalid' `
+      -c commit.gpgSign=false commit -q --allow-empty -m 'Initialize Codex write probe' *> $null
+    if ($LASTEXITCODE -ne 0) { throw 'Could not commit the scratch Git baseline; Codex was not tested.' }
+
+    Push-Location -LiteralPath $probe
+    try {
+      '' | & $CodexExe exec --sandbox workspace-write -c 'model_reasoning_effort=low' `
+        'Create a file named probe.txt in the current working directory containing exactly: OK. Then stop.' *> $null
+      return Test-Path -LiteralPath (Join-Path $probe 'probe.txt')
+    } finally {
+      Pop-Location
+    }
+  } finally {
+    Remove-Item Env:GIT_CONFIG_NOSYSTEM, Env:GIT_CONFIG_GLOBAL -ErrorAction SilentlyContinue
+    foreach ($variable in $gitEnvironment) {
+      [Environment]::SetEnvironmentVariable($variable.Name, $variable.Value, 'Process')
+    }
+    Remove-Item -Recurse -Force -LiteralPath $probe -ErrorAction SilentlyContinue
+  }
+}
+
 function Step($m){ Write-Host "`n==> $m" -ForegroundColor Cyan }
 function Note($m){ Write-Host "    $m" }
 function Ok($m){   Write-Host "    ok $m" -ForegroundColor Green }
@@ -899,15 +933,8 @@ if (-not $codexRealBin) {
     Note "Open a NEW terminal for this to take effect."
   }
   # Prove it: a real sandboxed write. --version cannot detect this failure mode.
-  $probe = Join-Path ([System.IO.Path]::GetTempPath()) ("codex-probe-" + [Guid]::NewGuid().ToString("N"))
-  New-Item -ItemType Directory -Path $probe -Force | Out-Null
   try {
-    Push-Location $probe
-    & (Join-Path $codexRealBin "codex.exe") exec --sandbox workspace-write --skip-git-repo-check `
-        -c model_reasoning_effort='low' `
-        'Create a file named probe.txt in the current working directory containing exactly: OK. Then stop.' *> $null
-    Pop-Location
-    if (Test-Path -LiteralPath (Join-Path $probe "probe.txt")) {
+    if (Test-CodexSandboxWrite (Join-Path $codexRealBin "codex.exe")) {
       Ok "verified: codex sandbox can write"
     } else {
       Warn "codex sandbox still cannot write - `codex exec` will silently do nothing."
@@ -915,8 +942,6 @@ if (-not $codexRealBin) {
     }
   } catch {
     Warn "codex sandbox probe could not run: $($_.Exception.Message)"
-  } finally {
-    Remove-Item -Recurse -Force $probe -ErrorAction SilentlyContinue
   }
 }
 

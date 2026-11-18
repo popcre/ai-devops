@@ -226,26 +226,32 @@ codex_probe_verdict() {
   echo unknown
 }
 
+codex_scratch_command() (
+  local name
+  for name in ${!GIT_@}; do unset "$name"; done
+  export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL="$PWD/.git/probe-global-config"
+  "$@"
+)
+
 check_codex_sandbox() {
-  local tmp out rc wrote
-  tmp="$(mktemp -d 2>/dev/null || echo "${TMPDIR:-/tmp}/codex-probe.$$")"
-  mkdir -p "$tmp" || { c_warn "codex sandbox: could not create temp dir; skipped"; return 0; }
+  local tmp out rc wrote other
+  tmp="$(mktemp -d 2>/dev/null)" || { c_warn "codex sandbox: could not create temp dir; skipped"; return 0; }
 
   # The Codex task gate needs a repository and a committed baseline.
-  if ! git -C "$tmp" init -q --template= ||
-     ! git -C "$tmp" -c user.name='Codex doctor' -c user.email='codex-doctor@example.invalid' \
-       -c commit.gpgSign=false commit -q --allow-empty -m 'Initialize Codex write probe'; then
-    c_fail "codex sandbox probe could not initialize its scratch Git repository"
-    FAILED=1
+  if ! (cd "$tmp" &&
+    codex_scratch_command git init -q --template= &&
+    codex_scratch_command git -c user.name='Codex doctor' -c user.email='codex-doctor@example.invalid' \
+      -c commit.gpgSign=false commit -q --allow-empty -m 'Initialize Codex write probe'); then
+    c_warn "codex sandbox not tested: could not initialize the scratch Git repository"
     rm -rf "$tmp" 2>/dev/null || true
-    return
+    return 0
   fi
 
   # stdin MUST be closed. `codex exec` also reads a prompt from stdin, so when
   # doctor runs under a shell whose stdin stays open (ssh, install.sh, CI) the
   # probe sat at "Reading additional input from stdin..." until the timeout and
   # then reported a sandbox failure that did not exist.
-  out="$(cd "$tmp" && timeout 180 codex exec --sandbox workspace-write \
+  out="$(cd "$tmp" && codex_scratch_command timeout 180 codex exec --sandbox workspace-write \
     -c model_reasoning_effort='low' \
     'Create a file named probe.txt in the current working directory containing exactly: OK. Then stop.' \
     </dev/null 2>&1)"
