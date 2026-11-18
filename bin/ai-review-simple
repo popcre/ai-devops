@@ -398,11 +398,11 @@ def make_workspace(repo, head, provider, tmp, spec=None, cache=None):
     return work, home
 
 
-def run_once(provider, prompt, work, home, tmp, key, timeout, spec=None):
+def run_once(provider, prompt, work, home, tmp, key, timeout, spec=None, observe=None):
     """One attempt. Returns (verdict, text, error)."""
     spec = spec or PROVIDERS[provider]
     if spec.get("engine") == "deepseek-harness":
-        return run_harness_once(spec, prompt, work, tmp, key, timeout)
+        return run_harness_once(spec, prompt, work, tmp, key, timeout, observe=observe)
     oc = resolve_opencode()
     if not oc:
         return None, "", "local: opencode binary not found", None
@@ -439,11 +439,15 @@ def run_once(provider, prompt, work, home, tmp, key, timeout, spec=None):
                 proc.kill()
         except OSError:
             pass
-        proc.communicate()
+        out, _ = proc.communicate()
+        if observe:
+            observe(out, "timeout")
         return None, "", f"timeout after {timeout}s", None
     full, final, ev_err = read_events(out)
     text = final_report(final, full)
     verdict = parse_verdict(final) or parse_verdict(full)
+    if observe:
+        observe(out, "verdict" if verdict else "failed")
     if verdict:
         return verdict, text, None, cache_receipts(out)
     problem = redact("\n".join(x for x in (ev_err, (err or "")[-2000:]) if x.strip()), key)
@@ -480,7 +484,7 @@ def read_harness_events(stdout):
     return final, "\n".join(errors)
 
 
-def run_harness_once(spec, prompt, work, tmp, key, timeout):
+def run_harness_once(spec, prompt, work, tmp, key, timeout, observe=None):
     """One DeepSeek Harness attempt through the shared route adapter (#2549).
 
     Runs the pinned headless profile with a private DSH_HOME, the task on
@@ -514,10 +518,14 @@ def run_harness_once(spec, prompt, work, tmp, key, timeout):
                 proc.kill()
         except OSError:
             pass
-        proc.communicate()
+        out, _ = proc.communicate()
+        if observe:
+            observe(out, "timeout")
         return None, "", f"timeout after {timeout}s", None
     final, ev_err = read_harness_events(out)
     verdict = parse_verdict(final)
+    if observe:
+        observe(out, "verdict" if verdict else "failed")
     if verdict:
         return verdict, final_report(final, final), None, {"read": None, "write": None}
     problem = redact("\n".join(x for x in (ev_err, (err or "")[-2000:]) if x.strip()), key)
@@ -539,6 +547,17 @@ def review(args):
               "findings": "", "elapsed": 0, "error": None}
     if route:
         result["route"], result["engine"] = route, spec["engine"]
+    attempts = None
+    if route and os.environ.get("AI_REVIEW_USAGE") == "1":
+        attempts = result["usage_attempts"] = []
+
+    def observe(stdout, outcome):
+        from reviewer_usage import reviewer_attempt
+
+        attempts.append(reviewer_attempt(
+            stdout, route=route, model=spec["model"], engine=spec["engine"],
+            outcome=outcome, elapsed=time.monotonic() - attempt_start,
+        ))
 
     def finish(code):
         result["elapsed"] = round(time.monotonic() - start, 1)
@@ -572,8 +591,10 @@ def review(args):
                                     cache=cache_fields)
         receipts = None
         for _attempt in range(2):  # retry once, never on credit, timeout or refusal
+            attempt_start = time.monotonic()
             verdict, text, error, receipts = run_once(provider, prompt, work, home, tmp,
-                                                      key, timeout, spec=spec)
+                                                      key, timeout, spec=spec,
+                                                      observe=observe if attempts is not None else None)
             if verdict or (error or "").startswith(("out-of-credit", "timeout", "local:")) \
                     or (error and RR.classify(error)[0] == "terminal"):
                 break

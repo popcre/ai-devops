@@ -70,6 +70,12 @@ FAKE_OC = textwrap.dedent("""\
         sys.exit(0)
     if mode == "sleep":
         time.sleep(30)
+    if mode == "paid-failure":
+        for _ in range(2):
+            print(json.dumps({"type": "step_start", "part": {}}))
+        print(json.dumps({"type": "step_finish", "part": {"cost": 0.015, "tokens": {
+            "input": 42, "cache": {"read": 0}}}}))
+        sys.exit(1)
     if mode == "cachefinish":
         print(json.dumps({"type": "step_start", "sessionID": "ses_c", "part": {}}))
         text("Findings: none.\\nVERDICT: APPROVE")
@@ -835,6 +841,46 @@ class CacheReceiptTests(unittest.TestCase):
 
 class CacheQualificationTests(SecondOpinionRouteTests):
     """Phase C (#2551): opt-in cache identifiers, prompt order and receipts."""
+
+    def test_usage_coverage_and_failed_attempt_costs(self):
+        self.env["AI_REVIEW_USAGE"] = "1"
+        self.mode("paid-failure", "cachefinish")
+        proc, result = self.run_review(route="muse-openrouter")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        failed, succeeded = result["usage_attempts"]
+        self.assertEqual((failed["outcome"], succeeded["outcome"]), ("failed", "verdict"))
+        self.assertEqual((failed["step_starts"], failed["step_finishes"]), (2, 1))
+        self.assertEqual(failed["adapter_counters"]["input_uncached"],
+                         {"subtotal": 42, "reported_steps": 1})
+        self.assertEqual(failed["adapter_counters"]["cache_read"]["subtotal"], 0)
+        self.assertIsNone(failed["adapter_counters"]["cache_write"]["subtotal"])
+        self.assertEqual(failed["adapter_cost_estimate_usd"],
+                         {"subtotal": 0.015, "reported_steps": 1})
+        for attempt in (failed, succeeded):
+            self.assertIsNone(attempt["billed_cost_usd"])
+            self.assertIsNone(attempt["provider_request_count"])
+        self.env.pop("AI_REVIEW_USAGE")
+        self.mode("cachefinish")
+        proc, result = self.run_review(route="muse-openrouter")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertNotIn("usage_attempts", result)
+
+    def test_usage_records_both_failover_attempts_without_conversation_text(self):
+        self.env["AI_REVIEW_USAGE"] = "1"
+        self.mode("ok", "credit", "cachefinish")
+        first = self.run_so("muse", "--route", "auto", "new", "billing", "private marker")
+        self.assertEqual(first.returncode, 0, first.stderr)
+        second = self.run_so("muse", "--route", "auto", "ask", "billing", "follow up")
+        self.assertEqual(second.returncode, 0, second.stderr)
+        path = os.path.join(self.so_dir("muse", "billing"), "usage.jsonl")
+        with open(path, encoding="utf-8") as fh:
+            raw = fh.read()
+        self.assertNotIn("private marker", raw)
+        self.assertNotIn("follow up", raw)
+        receipts = [json.loads(line) for line in raw.splitlines()]
+        self.assertEqual([(r["route"], r["outcome"]) for r in receipts],
+                         [("muse-meta", "answer"), ("muse-meta", "failed"),
+                          ("muse-openrouter", "answer")])
 
     def test_muse_cache_key_scope_and_stability(self):
         self.env["AI_REVIEW_CACHE"] = "1"

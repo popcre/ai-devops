@@ -342,6 +342,7 @@ def run_harness_turn(provider, sdir, meta, prompt, spec, route):
     timeout = int(os.environ.get("AI_SECOND_OPINION_TIMEOUT") or spec["timeout"])
     meta.update(state="running", pid=os.getpid(), updated=time.time())
     save_meta(sdir, meta)
+    started = time.monotonic()
     proc = subprocess.Popen(cmd, cwd=meta["work"], env=env, stdin=subprocess.PIPE,
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                             encoding="utf-8", errors="replace",
@@ -350,12 +351,14 @@ def run_harness_turn(provider, sdir, meta, prompt, spec, route):
         out, err = proc.communicate(prompt, timeout=timeout)
     except subprocess.TimeoutExpired:
         kill_process_tree(proc)
+        record_usage(sdir, route, spec, "", "timeout", started)
         meta.update(state="failed", updated=time.time())
         save_meta(sdir, meta)
         die(f"{provider}: no answer within {timeout}s.", 3)
     final, ev_err = ars.read_harness_events(out)
     sid = resume or harness_session_id(out)
     answer = ars.redact((final or "").strip(), key)
+    record_usage(sdir, route, spec, out, "answer" if answer else "failed", started)
     label = f"{provider} via {route}" if route else provider
     with open(os.path.join(sdir, "transcript.md"), "a", encoding="utf-8") as fh:
         fh.write(f"\n\n## Request ({time.strftime('%Y-%m-%d %H:%M:%S')})\n\n{prompt}\n"
@@ -374,6 +377,25 @@ def sanitized_replay(meta):
         blocks.append(f"--- turn {i} ---\nRequest: {turn.get('q', '').strip()}\n"
                       f"Answer: {turn.get('a', '').strip()}")
     return "\n".join(blocks) + "\n\nAnswer the new request below under the same rules.\n\n"
+
+
+def record_usage(sdir, route, spec, stdout, outcome, started):
+    if not route or os.environ.get("AI_REVIEW_USAGE") != "1":
+        return
+    from reviewer_usage import reviewer_attempt
+
+    receipt = reviewer_attempt(
+        stdout, route=route, model=spec["model"], engine=spec["engine"],
+        outcome=outcome, elapsed=time.monotonic() - started,
+    )
+    path = os.path.join(sdir, "usage.jsonl")
+    try:
+        if os.path.islink(path):
+            raise OSError("usage receipt path is a link")
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(receipt) + "\n")
+    except OSError:
+        print("Usage receipt could not be recorded.", file=sys.stderr)
 
 
 def run_opencode(provider, sdir, meta, prompt, route=None):
@@ -445,20 +467,26 @@ def _run_opencode_turn(provider, sdir, meta, prompt, spec, effective, auto, new_
     timeout = int(os.environ.get("AI_SECOND_OPINION_TIMEOUT") or spec["timeout"])
     meta.update(state="running", pid=os.getpid(), updated=time.time())
     save_meta(sdir, meta)
+    started = time.monotonic()
     proc = subprocess.Popen(cmd, cwd=work, env=env, stdin=subprocess.PIPE,
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                             encoding="utf-8", errors="replace",
                             start_new_session=hasattr(os, "killpg"))
     try:
         out, err = proc.communicate(prompt, timeout=timeout)
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired as exc:
         kill_process_tree(proc)
+        partial = exc.stdout or b""
+        if isinstance(partial, bytes):
+            partial = partial.decode("utf-8", errors="replace")
+        record_usage(sdir, effective, spec, partial, "timeout", started)
         meta.update(state="failed", updated=time.time())
         save_meta(sdir, meta)
         die(f"{provider}: no answer within {timeout}s.", 3)
     meta["session"] = meta.get("session") or session_id(out)
     full, final, ev_err = ars.read_events(out)
     answer = ars.redact((final or full or "").strip(), key)
+    record_usage(sdir, effective, spec, out, "answer" if answer else "failed", started)
     label = f"{provider} via {effective}" if effective else provider
     with open(os.path.join(sdir, "transcript.md"), "a", encoding="utf-8") as fh:
         fh.write(f"\n\n## Request ({time.strftime('%Y-%m-%d %H:%M:%S')})\n\n{prompt}\n"
