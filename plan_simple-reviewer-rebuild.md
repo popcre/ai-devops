@@ -12,7 +12,7 @@ read-when: looking up history before the skinny review plan
 > 2026-10-29: review is advice only). Kept as history; do not follow.
 
 Issue: popcre/ai-devops#2041. Evidence: [docs/reviewer-observation-week-2026-10-22.md](docs/reviewer-observation-week-2026-10-22.md) (#1948).
-Handoff: [HANDOFF.d/2026-10-29T2330Z-edge-dev3-claude-skinny-review-plan.md](HANDOFF.d/2026-10-29T2330Z-edge-dev3-claude-skinny-review-plan.md).
+Original handoff: [October 29 planning record](https://github.com/popcre/ai-devops/blob/a02b50a40c0b788af3af937edb928cc89092cbc9/HANDOFF.d/2026-10-29T2330Z-edge-dev3-claude-skinny-review-plan.md).
 
 ## STATUS (read first)
 

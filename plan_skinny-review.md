@@ -8,7 +8,7 @@ read-when: understanding the advisory review model and its stages
 # Plan — skinny advisory AI review (replaces the old reviewer system)
 
 - **Parent issue:** popcre/ai-devops#2041. Each stage has its own child issue, listed in STATUS.
-- **Handoff:** [HANDOFF.d/2026-10-29T2330Z-edge-dev3-claude-skinny-review-plan.md](HANDOFF.d/2026-10-29T2330Z-edge-dev3-claude-skinny-review-plan.md).
+- **Original handoff:** [October 29 planning record](https://github.com/popcre/ai-devops/blob/a02b50a40c0b788af3af937edb928cc89092cbc9/HANDOFF.d/2026-10-29T2330Z-edge-dev3-claude-skinny-review-plan.md).
 - **Supersedes** [plan_simple-reviewer-rebuild.md](plan_simple-reviewer-rebuild.md). That plan's history and REVISION section are kept for background only; **this file is the one to execute**.
 
 DeepSeek-specific runner qualification is tracked in the [DeepSeek Harness plan](plan_deepseek-harness-openrouter.md).
@@ -28,7 +28,7 @@ DeepSeek-specific runner qualification is tracked in the [DeepSeek Harness plan]
 | G Advisory review in other repos + automatic production promotion in shared-db | #2075 | ✅ done (2026-10-31) | ai-devops #2090, #2108; shared-db #5069, #5078; theoracle #276; popdam3 #592; https://github.com/popcre/ai-devops/issues/2075#issuecomment-6551124566 |
 | H Fixer hygiene and delivery speed | #2171 | ✅ delivered and live-proved | [Owning acceptance and cleanup](https://github.com/popcre/ai-devops/issues/2171); final implementation [#2204](https://github.com/popcre/ai-devops/pull/2204) landed `23bf2a8aa9177edaf84f47e04b1b760334cd7b56`; [shared-db integration and live receipt](https://github.com/popcre/shared-db/issues/5175#issuecomment-6534013046). |
 
-**All stages are done.** What remains is the #2041 closeout: see https://github.com/popcre/ai-devops/issues/2041 and the inventory resolution column in `docs/reviewer-enforcement-inventory-2026-10-29.md`.
+**All stages are done and #2041 is closed.** The [live closeout receipt](https://github.com/popcre/ai-devops/issues/2041#issuecomment-6552232940) records 50 of 50 old enforcement points retired, the freeze removed from all five hosts, the child issues closed with proof, and the full Windows lane green. Oracle's [private capture admission](https://github.com/popcre/ai-devops/issues/2041#issuecomment-6552225555) remains descriptor-bound. See the [enforcement inventory](docs/reviewer-enforcement-inventory-2026-10-29.md) for the individual dispositions.
 
 ### Fixer follow-up — #2171
 
