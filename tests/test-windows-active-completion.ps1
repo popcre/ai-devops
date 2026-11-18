@@ -13,21 +13,40 @@ $supervisor=Join-Path $SourceRoot 'tools/github-requests/source_generation_windo
 $text=[IO.File]::ReadAllText($supervisor);$tokens=$null;$errors=$null
 $ast=[Management.Automation.Language.Parser]::ParseInput($text,[ref]$tokens,[ref]$errors)
 if($errors.Count){throw 'Supervisor syntax invalid'}
-foreach($name in @('Assert-StagingParent','New-BootstrapPrivateDirectory','Assert-ActiveArguments','Assert-ReadArguments')){
+foreach($name in @('New-BootstrapPrivateDirectory','Assert-ActiveArguments','Assert-ReadArguments')){
  $node=$ast.Find({param($n)$n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -ceq $name},$true)
  if($null -eq $node){throw 'Shared native helper missing'};. ([scriptblock]::Create($node.Extent.Text))
 }
-$root=$null;$failure=$null;$savedTemp=$env:TEMP;$savedTmp=$env:TMP
+$fixtureParent=$null;$fixturePin=$null;$root=$null;$rootPin=$null
+$failure=$null;$savedTemp=$env:TEMP;$savedTmp=$env:TMP
+# The native component tests exercise a synthetic private tree. Hosted profile
+# parents need not satisfy deployment custody. Only fresh fixture directories
+# receive private ACLs, and their ACLs are verified through native handles.
 foreach($candidate in @([Environment]::GetFolderPath('UserProfile'),(Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Temp'),[Environment]::GetFolderPath('ProgramFiles'),'C:/')){
- try{Assert-StagingParent ([IO.DirectoryInfo]::new($candidate));$new=New-BootstrapPrivateDirectory (Join-Path $candidate ('ai-gh-active-test-'+[Guid]::NewGuid().ToString('N')));$root=$new.FullName;break}catch{}
+ if(-not $candidate){continue}
+ try{
+  $directory=[IO.DirectoryInfo]::new($candidate)
+  if([IO.DriveInfo]::new($directory.Root.FullName).DriveType -ne [IO.DriveType]::Fixed){continue}
+  for($cursor=$directory;$null -ne $cursor;$cursor=$cursor.Parent){
+   if(-not $cursor.Exists -or ($cursor.Attributes -band [IO.FileAttributes]::ReparsePoint)){throw 'Fixture creation path unavailable or reparse point'}
+  }
+  $new=New-BootstrapPrivateDirectory (Join-Path $directory.FullName ('ai-gh-active-test-'+[Guid]::NewGuid().ToString('N')))
+  $fixtureParent=$new.FullName
+  break
+ }catch{}
 }
-if(-not $root){throw 'No existing protected fixture parent; no permissions changed'}
-$env:TEMP=$root;$env:TMP=$root;$checks=0
+if(-not $fixtureParent){throw 'Could not create a fresh private fixture parent; no existing permissions changed'}
+$checks=0
 function Check([bool]$Good,[string]$Message){if(-not $Good){throw $Message};$script:checks++}
 $source=[regex]::Match($text,"(?s)Add-Type -TypeDefinition @'\r?\n(.*?)\r?\n'@").Groups[1].Value
 try{
+ $root=(New-BootstrapPrivateDirectory (Join-Path $fixtureParent 'component')).FullName
+ $env:TEMP=$root;$env:TMP=$root
  Add-Type -TypeDefinition $source
+ $fixturePin=[GenerationCustody]::Metadata($fixtureParent,$true)
+ [GenerationCustody]::AssertPrivateConfigDirectory($fixturePin)
  $rootPin=[GenerationCustody]::Hold($root,$true,$true)
+ [GenerationCustody]::AssertPrivateConfigDirectory($rootPin)
  $beforePrivilege=[GenerationCustody]::PrivilegedContext()
  $beforeToken=(& (Join-Path $env:WINDIR 'System32/whoami.exe') /priv /fo csv|Out-String)
  $controlReader=[IO.Pipes.AnonymousPipeServerStream]::new([IO.Pipes.PipeDirection]::In,[IO.HandleInheritability]::None)
@@ -137,6 +156,6 @@ try{
  Check ((& (Join-Path $env:WINDIR 'System32/whoami.exe') /priv /fo csv|Out-String) -ceq $beforeToken) 'Parent privilege attributes unchanged'
  [pscustomobject]@{native_active_component_cases=$checks;component_only=$true;original_active_qualified=$false;real_api_or_notifications=$false}|ConvertTo-Json -Compress
 }catch{$failure=$_;throw}finally{
- if($rootPin){$rootPin.Dispose()};$env:TEMP=$savedTemp;$env:TMP=$savedTmp
- if(-not $failure -and $root -and (Test-Path -LiteralPath $root)){Remove-Item -LiteralPath $root -Recurse -Force}
+ if($rootPin){$rootPin.Dispose()};if($fixturePin){$fixturePin.Dispose()};$env:TEMP=$savedTemp;$env:TMP=$savedTmp
+ if(-not $failure -and (Test-Path -LiteralPath $fixtureParent)){Remove-Item -LiteralPath $fixtureParent -Recurse -Force}
 }
