@@ -203,6 +203,27 @@ the lead retains all design, merge and release decisions.
    time, reusing the existing fixture/receipt paths. Nothing here activates a
    setting or claims savings before measurement.
 
+   The fleet candidate adds opt-in usage receipts across both reviewer entry
+   points and the standalone DeepSeek Harness path. Use `AI_REVIEW_USAGE=1`
+   with a freshly generated `AI_REVIEW_BILLING_ID` of the form `bill-` followed
+   by 32 lowercase hexadecimal characters to attribute public qualification
+   requests to one OpenRouter job. Keep the same opaque ID across an intended
+   named-session comparison and use a different ID for the control. The billing
+   credential belongs only in the read-only reconciliation process. Runtime
+   step totals may miss auxiliary requests and do not establish actual cost.
+   OpenRouter analytics filtered by the reviewer key and opaque session ID
+   proved this gap even when every observed step succeeded. Preserve unknown
+   when provider evidence cannot be matched. Never publish private IDs.
+
+   With `AI_REVIEW_CACHE=1`, all three OpenRouter routes can keep affinity
+   independently of Muse's cache key. DeepSeek uses the pinned Harness route's
+   deployment header, and Hy4 and Muse use the OpenCode request body. Only Muse
+   receives a provider-specific prompt cache key. Unset the experiment
+   variables for ordinary operation. For qualification, select one of
+   `lean`, `file-map`, or `concise` with `AI_REVIEW_PROMPT_VARIANT` on an
+   explicit review route. The file-map experiment keeps the complete patch
+   readable in the exact-head workspace.
+
    1. **Establish complete billing first.** Extend the existing shared receipts
       around `bin/ai-review-simple:run_once`, `run_harness_once`, `review` and
       `bin/ai-second-opinion:run_opencode` as needed after inspecting the current

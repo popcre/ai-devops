@@ -207,7 +207,7 @@ def copy_repo(repo, work, writable):
     return top
 
 
-def write_config(sdir, provider, agent_name, agent_text, spec=None, cache=None, billing_id=None):
+def write_config(sdir, provider, agent_name, agent_text, spec=None, cache=None, affinity_id=None):
     cfg_dir = os.path.join(sdir, "xdg", "config", "opencode")
     os.makedirs(os.path.join(cfg_dir, "agent"), exist_ok=True)
     spec = spec or ars.PROVIDERS[provider]
@@ -215,9 +215,9 @@ def write_config(sdir, provider, agent_name, agent_text, spec=None, cache=None, 
            "share": "disabled", "autoupdate": False}
     if spec["provider"]:
         cfg["provider"] = spec["provider"]
-        if (cache or billing_id) and spec.get("route"):
+        if (cache or affinity_id) and spec.get("route"):
             cfg["provider"] = RR.opencode_provider_block(RR.route(spec["route"]),
-                                                         cache=cache, billing_id=billing_id)
+                                                         cache=cache, affinity_id=affinity_id)
     with open(os.path.join(cfg_dir, "opencode.json"), "w") as fh:
         json.dump(cfg, fh, indent=1)
     with open(os.path.join(cfg_dir, "agent", agent_name + ".md"), "w") as fh:
@@ -307,12 +307,12 @@ def harness_session_id(stdout):
     return None
 
 
-def write_harness_profile(sdir, spec, billing_id=None):
+def write_harness_profile(sdir, spec, affinity_id=None):
     """A private, persistent DeepSeek Harness home per named session."""
     profiles = os.path.join(sdir, "dsh-home", "profiles", "headless")
     os.makedirs(profiles, exist_ok=True)
     with open(os.path.join(profiles, "cordis.patch.yml"), "w", encoding="utf-8") as fh:
-        fh.write(RR.harness_patch_yaml(spec, billing_id))
+        fh.write(RR.harness_patch_yaml(spec, affinity_id))
 
 
 def run_harness_turn(provider, sdir, meta, prompt, spec, route):
@@ -323,7 +323,7 @@ def run_harness_turn(provider, sdir, meta, prompt, spec, route):
     dsh = RR.resolve_deepseek_harness()
     if not dsh:
         die("deepseek harness binary not found; run bin/setup-deepseek-harness.sh.", 3)
-    write_harness_profile(sdir, spec, meta.get("billing_id"))
+    write_harness_profile(sdir, spec, meta.get("affinity_id") or meta.get("billing_id"))
     env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": os.path.join(sdir, "home"),
            "DSH_HOME": os.path.join(sdir, "dsh-home"), "PYTHONDONTWRITEBYTECODE": "1",
            spec["key_env"]: key}
@@ -382,7 +382,7 @@ def sanitized_replay(meta):
 def record_usage(sdir, route, spec, stdout, outcome, started):
     if not route or os.environ.get("AI_REVIEW_USAGE") != "1":
         return
-    from reviewer_usage import reviewer_attempt
+    from reviewer_usage import append_reviewer_attempt, reviewer_attempt
 
     receipt = reviewer_attempt(
         stdout, route=route, model=spec["model"], engine=spec["engine"],
@@ -390,10 +390,7 @@ def record_usage(sdir, route, spec, stdout, outcome, started):
     )
     path = os.path.join(sdir, "usage.jsonl")
     try:
-        if os.path.islink(path):
-            raise OSError("usage receipt path is a link")
-        with open(path, "a", encoding="utf-8") as fh:
-            fh.write(json.dumps(receipt) + "\n")
+        append_reviewer_attempt(path, receipt)
     except OSError:
         print("Usage receipt could not be recorded.", file=sys.stderr)
 
@@ -517,11 +514,14 @@ def _muse_failover(provider, sdir, meta, prompt, first_error):
     question. The new binding is saved only after a valid answer; a failed
     fallback leaves the last-good record untouched (plan section 9 step 3)."""
     spec = ars.spec_for(provider, "muse-openrouter")
+    affinity_id = meta.get("billing_id") or RR.cache_affinity_id(
+        "muse-openrouter", meta.get("repo"), meta["name"]
+    )
     # The session's on-disk OpenCode profile still names the direct provider;
     # rewrite it for the alternate connection before the continuation runs.
     write_config(sdir, provider, meta["agent"], READ_AGENT, spec=spec,
                  cache=RR.cache_fields("muse-openrouter", meta.get("repo"), meta.get("name")),
-                 billing_id=meta.get("billing_id"))
+                 affinity_id=affinity_id)
     resume_context = sanitized_replay(meta) + "New request: "
     meta.update(state="failing-over", updated=time.time())
     save_meta(sdir, meta)
@@ -574,8 +574,9 @@ def start(provider, name, repo, writable, base=None, route=None, billing_id=None
     spec = (ars.spec_for(provider, route) if route and route in RR.routes()
             else ars.PROVIDERS[provider])
     cache = RR.cache_fields(route, top, name) if route else None
+    affinity_id = billing_id or RR.cache_affinity_id(route or spec.get("route"), top, name)
     write_config(sdir, provider, agent, WRITE_AGENT if writable else READ_AGENT, spec=spec,
-                 cache=cache, billing_id=billing_id)
+                 cache=cache, affinity_id=affinity_id)
     meta = {"name": name, "provider": provider, "repo": top, "work": work, "agent": agent,
             "mode": "implement" if writable else "read-only", "base": base,
             "created": time.time(), "turns": 0, "state": "idle"}
@@ -583,6 +584,8 @@ def start(provider, name, repo, writable, base=None, route=None, billing_id=None
         meta["route"] = route
     if billing_id:
         meta["billing_id"] = billing_id
+    if affinity_id:
+        meta["affinity_id"] = affinity_id
     save_meta(sdir, meta)
     return sdir, meta
 

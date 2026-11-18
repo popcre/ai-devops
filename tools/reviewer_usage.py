@@ -96,6 +96,15 @@ def reviewer_attempt(stdout, *, route, model, engine, outcome, elapsed):
     }
 
 
+def append_reviewer_attempt(path, receipt):
+    """Append a sanitized receipt outside conversation history."""
+    if os.path.islink(path):
+        raise OSError("usage receipt path is a link")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND | getattr(os, "O_NOFOLLOW", 0)
+    with os.fdopen(os.open(path, flags, 0o600), "a", encoding="utf-8") as stream:
+        stream.write(json.dumps(receipt) + "\n")
+
+
 def deepseek(response):
     usage = response.get('usage') if isinstance(response, dict) else None
     usage = usage if isinstance(usage, dict) else {}

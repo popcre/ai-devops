@@ -101,7 +101,7 @@ def candidate_plan(rotation_order):
     return plan
 
 
-def opencode_provider_block(spec, cache=None, billing_id=None):
+def opencode_provider_block(spec, cache=None, affinity_id=None):
     """The OpenCode provider block for an opencode-engine route (plan section 5
     shapes, custom OpenAI-compatible connection for OpenRouter).
 
@@ -114,7 +114,7 @@ def opencode_provider_block(spec, cache=None, billing_id=None):
     provider_id = spec["model"].split("/", 1)[0]
     model_id = spec["model"].split("/", 1)[1]
     key = (cache or {}).get("prompt_cache_key")
-    session = billing_id or (cache or {}).get("session_id")
+    session = affinity_id or (cache or {}).get("session_id")
     if provider_id == "meta-model-api":  # the direct Muse connection (existing spec)
         model = {"name": "Muse Spark 1.3 Contributor",
                  "limit": {"context": 1048576, "output": 65536}}
@@ -150,11 +150,11 @@ def cache_enabled():
 
 def cache_scope(repo=None):
     """The stable scope of a shared review-instructions cache key: the
-    authorized repository (CI name, else the local checkout), never a
-    credential, timestamp or private path."""
-    scope = os.environ.get("GITHUB_REPOSITORY") or (repo or "local")
-    if "/" not in scope and scope != "local":
-        scope = os.path.basename(scope.rstrip("/\\")) or "local"
+    authorized repository (CI name, else a normalized local checkout). Only
+    the digest leaves the machine."""
+    scope = os.environ.get("GITHUB_REPOSITORY")
+    if not scope:
+        scope = os.path.normcase(os.path.realpath(repo)) if repo else "local"
     import hashlib
     return f"{CACHE_VERSION}-" + hashlib.sha256(
         (scope + "\0" + (os.environ.get("AI_REVIEW_CACHE_NAMESPACE") or "shared")
@@ -180,6 +180,13 @@ def cache_fields(route_id, repo, namespace):
             "session_id": cache_session_id(namespace)}
 
 
+def cache_affinity_id(route_id, repo, namespace):
+    """OpenRouter affinity applies to its routes without adding Muse cache keys."""
+    if not cache_enabled() or not route_id or route(route_id).get("base_url") != OPENROUTER_URL:
+        return None
+    return cache_session_id("\0".join((cache_scope(repo), route_id, namespace)))
+
+
 def opencode_spec(route_id):
     """An ai-review-simple PROVIDERS-shaped spec for a route's OpenCode run."""
     spec = route(route_id)
@@ -202,12 +209,12 @@ def billing_session_id():
     return value
 
 
-def harness_patch_yaml(spec, billing_id=None):
+def harness_patch_yaml(spec, affinity_id=None):
     """cordis.patch.yml for a deepseek-harness route's private profile
     (validated live 2026-11-16: llm-pi-ai registers the custom adapter)."""
     if spec.get("base_url") and not spec["base_url"].startswith("https://"):
         raise RouteError("route base_url must be https")
-    headers = f"        headers:\n          x-session-id: {json.dumps(billing_id)}\n" if billing_id else ""
+    headers = f"        headers:\n          x-session-id: {json.dumps(affinity_id)}\n" if affinity_id else ""
     return (
         "- id: llm-pi-ai\n"
         "  config:\n"

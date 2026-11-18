@@ -744,6 +744,8 @@ class DeepseekAgentHarnessTests(Base):
 
     def test_harness_send_reply_and_show(self):
         self.protect_or_store()
+        identifier = "bill-" + "f" * 32
+        self.agent_env.update(AI_REVIEW_USAGE="1", AI_REVIEW_BILLING_ID=identifier)
         r = self.agent("send", "--route", "deepseek-openrouter", "hello there")
         self.assertEqual(r.returncode, 0, r.stderr)
         sid_line = [ln for ln in r.stdout.splitlines() if ln.startswith("SESSION_ID:")]
@@ -759,6 +761,7 @@ class DeepseekAgentHarnessTests(Base):
         self.assertFalse(rows[0]["has_ds_key"])
         self.assertIn("deepseek/deepseek-v4.1-flash-1017", rows[0]["patch"])
         self.assertIn("read-only", rows[0]["args"])
+        self.assertIn(f'x-session-id: "{identifier}"', rows[0]["patch"])
         r2 = self.agent("show", session_id)
         self.assertEqual(r2.returncode, 0, r2.stderr)
         self.assertIn("HARNESS deepseek-openrouter", r2.stdout)
@@ -766,8 +769,12 @@ class DeepseekAgentHarnessTests(Base):
         self.assertEqual(r3.returncode, 0, r3.stderr)
         rows = self.dsh_log_rows()
         self.assertIn("--session-id", rows[-1]["args"])
+        self.assertIn(f'x-session-id: "{identifier}"', rows[-1]["patch"])
         value = json.load(open(sess_path))
         self.assertEqual(len(value["turns"]), 4)
+        usage_path = pathlib.Path(sess_path).with_suffix(".dsh-home") / "usage.jsonl"
+        receipts = [json.loads(line) for line in usage_path.read_text().splitlines()]
+        self.assertEqual([row["outcome"] for row in receipts], ["answer", "answer"])
 
     def test_harness_doctor_live_route(self):
         self.protect_or_store()
@@ -943,15 +950,31 @@ class CacheQualificationTests(SecondOpinionRouteTests):
         self.assertNotIn("body", cfg)
         self.assertNotIn("headers", cfg)
 
-    def test_non_muse_route_gets_no_cache_fields(self):
+    def test_non_muse_routes_use_affinity_without_muse_cache_keys(self):
         self.env["AI_REVIEW_CACHE"] = "1"
         self.mode("approve")
         proc, _ = self.run_review(route="deepseek-openrouter")
         self.assertEqual(proc.returncode, 0, proc.stderr)
         patch = self.dsh_calls()[0]["patch"]
         self.assertIn("openrouter", patch)  # prove we inspected the actual profile
-        for field in ("prompt_cache_key", "session_id", "x-session-id"):
-            self.assertNotIn(field, patch)
+        self.assertNotIn("prompt_cache_key", patch)
+        self.assertIn('x-session-id: "aidv1-s-', patch)
+        self.mode("ok")
+        proc, _ = self.run_review(route="hy4-openrouter")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        model = self.oc_calls()[0]["config"]["provider"]["openrouter-hy4"]["models"]["tencent/hy4"]
+        self.assertNotIn("prompt_cache_key", model["options"])
+        self.assertTrue(model["options"]["session_id"].startswith("aidv1-s-"))
+
+    def test_affinity_scope_separates_repositories_routes_and_sessions(self):
+        from unittest.mock import patch
+        with patch.dict(os.environ, {"AI_REVIEW_CACHE": "1", "GITHUB_REPOSITORY": "public/repo"}):
+            first = RR.cache_affinity_id("hy4-openrouter", self.repo, self.head)
+            self.assertEqual(first, RR.cache_affinity_id("hy4-openrouter", self.tmp.name, self.head))
+            self.assertNotEqual(first, RR.cache_affinity_id("deepseek-openrouter", self.repo, self.head))
+            self.assertNotEqual(first, RR.cache_affinity_id("hy4-openrouter", self.repo, self.base))
+            with patch.dict(os.environ, {"GITHUB_REPOSITORY": "public/other"}):
+                self.assertNotEqual(first, RR.cache_affinity_id("hy4-openrouter", self.repo, self.head))
 
     def test_openrouter_billing_session_supports_hy4_and_deepseek(self):
         identifier = "bill-" + "c" * 32
