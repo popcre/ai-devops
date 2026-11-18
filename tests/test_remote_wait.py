@@ -341,6 +341,8 @@ class ActiveCompletionRemoteTests(unittest.TestCase):
 
     def run_transport(self, sdk=False, duplicate=False, cleanup=True, mismatch=False, drop=False, clock_unknown=False,
                       original_status=3, storage_failure=False, dry_run=False, facts=False):
+        if not sys.platform.startswith("linux"):
+            self.skipTest("Linux observer subprocess and parent clock required")
         arguments = ["alarm"] if sdk else ["tick"]
         if dry_run:
             arguments.append("--dry-run")
@@ -457,6 +459,7 @@ class ActiveCompletionRemoteTests(unittest.TestCase):
         self.assertTrue(saved["active_source_protocol_verified"])
         self.assertFalse(saved["active_completion_qualified"])
 
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux parent uses directory descriptors for private receipt storage")
     def test_failed_private_storage_leaves_no_qualified_publication(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "atomic.json"
@@ -478,13 +481,15 @@ class ActiveCompletionRemoteTests(unittest.TestCase):
         status, cleanup = remote._active_terminal_status({"child_exit": 125, "observer_run_id": "a" * 32}, 125, record)
         self.assertEqual(status, 125)
         self.assertTrue(cleanup["owned_cleanup_verified"])
-        result = self.run_transport(sdk=True, original_status=125)
-        self.assertTrue(result["native_cleanup_verified"])
-        self.assertEqual(result["source_receipt"]["child_exit"], 125)
         for original in (0, 7, 125):
             status, cleanup = remote._active_terminal_status({"child_exit": original, "observer_run_id": "a" * 32}, 125, None)
             self.assertEqual(status, original)
             self.assertFalse(cleanup["owned_cleanup_verified"])
+
+    def test_observer_preserves_original_125_with_clean_teardown(self):
+        result = self.run_transport(sdk=True, original_status=125)
+        self.assertTrue(result["native_cleanup_verified"])
+        self.assertEqual(result["source_receipt"]["child_exit"], 125)
 
     def test_late_failure_clears_previously_qualified_event_as_well_as_completion(self):
         result = {"active_completion_qualified": True, "active_source_protocol_verified": True,

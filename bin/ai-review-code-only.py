@@ -82,7 +82,14 @@ def digest(data):
 
 def source_digest(source):
     script = Path(__file__).with_name("ai-review-sandbox")
-    proc = subprocess.run(["bash", str(script), "digest", str(source)], stdout=subprocess.PIPE,
+    # Native Windows lookup for an unqualified executable searches System32
+    # before PATH, where Bash may be the WSL launcher. Exclude relative PATH
+    # entries and reject the implicit current-directory candidate as well.
+    path = os.pathsep.join(entry for entry in os.get_exec_path() if os.path.isabs(entry))
+    bash = shutil.which("bash", path=path)
+    if not bash or not os.path.isabs(bash):
+        fail("absolute Bash path unavailable for source digest")
+    proc = subprocess.run([bash, str(script), "digest", str(source)], stdout=subprocess.PIPE,
                           stderr=subprocess.PIPE, check=False, env=git_env())
     if proc.returncode:
         fail("source digest unavailable")

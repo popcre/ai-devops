@@ -7,8 +7,10 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from bash_resolution import resolve_bash
 
 ROOT = Path(__file__).resolve().parents[1]
+BASH, _ = resolve_bash()
 
 
 class EventDispatch(unittest.TestCase):
@@ -24,11 +26,12 @@ class EventDispatch(unittest.TestCase):
                     "row=json.loads(sys.stdin.readline())\n"
                     "Path(os.environ['EVENT_TEST_CAPTURE']).write_text(json.dumps(row))\n"
                     f"sys.exit({writer_status})\n")
-            result = subprocess.run(["bash", "-c", 'OSTYPE="$2"; source "$1"; gh_measure_workflow_evidence ai-pr-wait pr_wait aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; printf ORIGINAL',
-                                     "bash", str(collector), platform],
-                                    env=dict(os.environ, AI_GH_STATE_DIR=str(directory / "state"),
+            result = subprocess.run([BASH, "-c", 'OSTYPE="$2"; source "$1"; gh_measure_workflow_evidence ai-pr-wait pr_wait aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; printf ORIGINAL',
+                                     "bash", collector.as_posix(), platform],
+                                    env=dict(os.environ, AI_GH_STATE_DIR=(directory / "state").as_posix(),
                                              AI_GH_QUALIFICATION_EVENT_HANDLE=handle, EVENT_TEST_CAPTURE=str(capture)),
-                                    capture_output=True, text=True, timeout=4)
+                                    # Git Bash and the native writer need several process launches on Windows.
+                                    capture_output=True, text=True, timeout=45 if os.name == "nt" else 4)
             row = json.loads(capture.read_text()) if capture.exists() else None
             return result, row
 

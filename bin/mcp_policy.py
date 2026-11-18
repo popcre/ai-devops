@@ -11,7 +11,7 @@ also relies on); this parses the same literals so Linux cannot drift from them.
       marked, untracked <root>/.codex/config.toml. Stale managed names are
       pruned; anything we do not manage is left alone.
 """
-import argparse, glob, json, os, re, subprocess, sys, time
+import argparse, glob, json, os, re, shutil, subprocess, sys, time
 
 BIN = os.path.dirname(os.path.realpath(__file__))
 SETUP = os.environ.get("AI_DEVOPS_SETUP_SCRIPT", os.path.join(BIN, "setup-machine.ps1"))
@@ -56,11 +56,16 @@ def clone_roots(key):
             if not os.path.exists(os.path.join(clone, ".git")):
                 continue
             url = (_git(clone, "remote", "get-url", "origin") or "").strip()
-            # The helper is a shebang script; Windows CreateProcess cannot run
-            # one directly, so invoke it through bash like the shell callers do.
-            ok = url and subprocess.run(["bash", os.path.join(BIN, "ai-repo-identity"), "accepts", key, url],
-                                        capture_output=True).returncode == 0
-            if not ok:
+            if not url:
+                continue
+            # Resolve Bash from PATH before launching the shebang script.
+            # Native Windows process lookup otherwise checks System32 first.
+            path = os.pathsep.join(entry for entry in os.get_exec_path() if os.path.isabs(entry))
+            bash = shutil.which("bash", path=path)
+            if not bash or not os.path.isabs(bash):
+                raise SystemExit("mcp_policy: Bash is required to check repository identity")
+            if subprocess.run([bash, os.path.join(BIN, "ai-repo-identity"), "accepts", key, url],
+                              capture_output=True).returncode != 0:
                 continue
             for line in (_git(clone, "worktree", "list", "--porcelain") or "worktree %s\n" % clone).splitlines():
                 wt = line[len("worktree "):].strip() if line.startswith("worktree ") else ""

@@ -418,6 +418,29 @@ printf 'print("base")\n' > "$NATIVE_CODE_SOURCE/app.py"
 git -C "$NATIVE_CODE_SOURCE" add app.py; git -C "$NATIVE_CODE_SOURCE" commit -qm base
 printf 'print("changed")\n' > "$NATIVE_CODE_SOURCE/app.py"
 git -C "$NATIVE_CODE_SOURCE" add app.py; git -C "$NATIVE_CODE_SOURCE" commit -qm changed
+"$PYTHON" -B - "$REPO_ROOT/bin/ai-review-code-only.py" "$NATIVE_CODE_SOURCE" <<'PY' && ok "code-only digest launches the resolved absolute Bash" || bad "code-only digest handed native process lookup an unqualified Bash"
+import importlib.util
+import os
+from pathlib import Path
+import shutil
+from subprocess import CompletedProcess
+import sys
+from unittest.mock import patch
+
+spec = importlib.util.spec_from_file_location("review_code_only", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+
+expected_bash = shutil.which("bash")
+def launch(args, **kwargs):
+    if not os.path.isabs(args[0]):
+        return CompletedProcess(args, 1, b"", b"")
+    assert os.path.samefile(args[0], expected_bash)
+    return CompletedProcess(args, 0, b"0" * 64, b"")
+
+with patch.object(module.subprocess, "run", side_effect=launch):
+    assert module.source_digest(Path(sys.argv[2])) == "0" * 64
+PY
 printf '["app.py"]\n' > "$TMP/native-code-paths.json"
 NATIVE_CODE_EXPORT="$(AI_REVIEW_SANDBOX_DIR="$TMP/native-code-sandboxes" "$REPO_ROOT/bin/ai-review-sandbox" ensure-code-only "$NATIVE_CODE_SOURCE" native-code --paths-file "$TMP/native-code-paths.json" --base HEAD~1)"
 PATH="$NATIVE_JQ_BIN:$PATH" "$SCRIPT" resolve "$NATIVE_CODE_EXPORT" --base HEAD~1 > "$TMP/native-code-identity.json"

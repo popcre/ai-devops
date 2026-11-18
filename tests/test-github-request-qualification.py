@@ -15,12 +15,15 @@ import selectors
 from contextlib import contextmanager
 import unittest
 from unittest import mock
+from bash_resolution import resolve_bash
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools/github-requests"))
 import report
 import measure_append
 
+BASH, _ = resolve_bash()
+COLLECTOR = (ROOT / "tools/github-requests/telemetry.sh").as_posix()
 
 def event():
     now = time.time_ns() // 1_000_000
@@ -139,36 +142,34 @@ class EventTests(unittest.TestCase):
 
     def test_collector_exact_operation_allowlists_and_opaque_ids(self):
         with tempfile.TemporaryDirectory() as directory:
-            environment = dict(os.environ, AI_GH_STATE_DIR=directory)
-            collector = str(ROOT / "tools/github-requests/telemetry.sh")
+            environment = dict(os.environ, AI_GH_STATE_DIR=Path(directory).as_posix())
             for index, (caller, workflow, outcome) in enumerate(sorted(report.RECEIPT_LABELS)):
                 row = receipt_fixture(caller, workflow, outcome, f"{index:032x}")
                 arguments = [caller, workflow, row["workflow_id"], outcome, "3"]
                 if workflow in report.ACTIVE_RECEIPT_BOUNDARIES:
                     arguments += [row["boundary"], *[str(row[name]) for name in
                                   ("attempted_count", "succeeded_count", "failed_count", "skipped_count")], ""]
-                result = subprocess.run(["bash", "-c", 'source "$1"; shift; gh_measure_workflow_outcome "$@"',
-                                         "bash", collector, *arguments],
+                result = subprocess.run([BASH, "-c", 'source "$1"; shift; gh_measure_workflow_outcome "$@"',
+                                         "bash", COLLECTOR, *arguments],
                                         env=environment, capture_output=True)
                 self.assertEqual(result.returncode, 0, (caller, workflow, outcome))
-            result = subprocess.run(["bash", "-c", 'source "$1"; shift; gh_measure_workflow_outcome "$@"',
-                                     "bash", collector, "ai-verify-run", "verify_dispatch", "private-target", "dispatched", "3"],
+            result = subprocess.run([BASH, "-c", 'source "$1"; shift; gh_measure_workflow_outcome "$@"',
+                                     "bash", COLLECTOR, "ai-verify-run", "verify_dispatch", "private-target", "dispatched", "3"],
                                     env=environment, capture_output=True)
             self.assertEqual(result.returncode, 2)
             # New active labels cannot silently reuse the old receipt shape.
-            result = subprocess.run(["bash", "-c", 'source "$1"; shift; gh_measure_workflow_outcome "$@"',
-                                     "bash", collector, "ai-blocker-watch", "blocker_watch_alarm", "a" * 32,
+            result = subprocess.run([BASH, "-c", 'source "$1"; shift; gh_measure_workflow_outcome "$@"',
+                                     "bash", COLLECTOR, "ai-blocker-watch", "blocker_watch_alarm", "a" * 32,
                                      "completed", "3"], env=environment, capture_output=True)
             self.assertEqual(result.returncode, 2)
             summary = report.summarize(Path(directory) / "measurements")
             self.assertEqual(summary["completed_workflow_receipts"], 6)
 
     def test_fixed_gate_and_fixer_callers_do_not_widen_arbitrary_labels(self):
-        collector = str(ROOT / "tools/github-requests/telemetry.sh")
         for caller, expected in (("ai-task-gates", "ai-task-gates"), ("review-fixer", "review-fixer"),
                                  ("review-fixer:private-target", "unknown")):
-            result = subprocess.run(["bash", "-c", 'source "$1"; gh_measure_init api graphql; printf "%s" "$GH_MEASURE_CALLER"',
-                                     "bash", collector], env=dict(os.environ, AI_GH_CALLER=caller),
+            result = subprocess.run([BASH, "-c", 'source "$1"; gh_measure_init api graphql; printf "%s" "$GH_MEASURE_CALLER"',
+                                     "bash", COLLECTOR], env=dict(os.environ, AI_GH_CALLER=caller),
                                     capture_output=True, text=True, check=True)
             self.assertEqual(result.stdout, expected)
         self.assertIn("ai-task-gates", report.CALLERS)
@@ -600,6 +601,7 @@ class SourceBoundaryRegressionTests(unittest.TestCase):
             self.assertFalse(same_execution_layout(source / "missing", transport, bash, bash))
 
 
+@unittest.skipUnless(sys.platform.startswith("linux"), "Linux prlimit and directory descriptors; Windows custody has native tests")
 class DescriptorCustodyTests(unittest.TestCase):
     def test_scoped_raise_nested_restore_and_actual_child_limit(self):
         # Dedicated process: never alter the test runner's own descriptor ceiling.
@@ -1129,7 +1131,7 @@ gh_measure_active_channel(){ printf 'FORWARD:%s:%s\\n' "$1" "$2"; return 1; }
 gh_measure_blocker_evidence blocker_watch_alarm aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa alarm_stale 2000 2500 3000 alarm_batch_acknowledged
 exit $?'''
         for append_status in (0, 9):
-            child = subprocess.run(["bash", "-c", script, "fixture", str(ROOT / "tools/github-requests/telemetry.sh")],
+            child = subprocess.run([BASH, "-c", script, "fixture", COLLECTOR],
                                    env=dict(os.environ, APPEND_STATUS=str(append_status), AI_GH_ACTIVE_EVENT_FD="3",
                                             AI_GH_ACTIVE_ACK_FD="4", AI_GH_ACTIVE_PYTHON=sys.executable),
                                    capture_output=True, timeout=5)
@@ -1143,6 +1145,7 @@ exit $?'''
                 self.assertEqual((prefix, phase), ("FORWARD", "facts"))
                 self.assertTrue(report.active_event_frame_valid(json.loads(payload)))
 
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux inherited fds; test_windows_event.py exercises native Windows handles")
     def test_actual_facts_pipe_needs_no_ack_and_rejects_oversize(self):
         read, write = os.pipe(); ack_read, ack_write = os.pipe()
         try:
