@@ -5,6 +5,7 @@
   "windows_sections": 12,
   "hosted_windows": "windows-2025",
   "warpbuild_windows": "warp-custom-warpbuild-win2022-canary",
+  "candidate_label": "ai-devops-windows",
   "qualified_windows": [
     "self-hosted",
     "Windows",
