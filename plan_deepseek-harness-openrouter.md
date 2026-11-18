@@ -29,10 +29,10 @@ Use current upstream. Planning baseline: `ec4886f57232a1bb2741b7cf66d5fa1a949a1d
 | 2. Wire GitHub review and fallback | Landed #2560; live receipts 2026-11-17 | `--route`/`--run-plan`/`--candidate-plan`; workflow consumes the plan only through the opt-in input. Phase B receipts still open. | [DeepSeek and Muse native verdicts on a disposable TypeScript PR](https://github.com/popcre/ai-devops/pull/2538#issuecomment-6928212224). Candidate product wiring and final route proofs remain open. |
 | 3. Wire resumable second opinions | Landed #2560 (+ #2569, #2570 fixes); live receipts 2026-11-17 | `--route` on ai-second-opinion (per-session lock, sticky selection, atomic Muse failover), harness engine in ai-deepseek-agent, ai-hy4 entry point. | [Read-only native session restart evidence](https://github.com/popcre/ai-devops/issues/2531#issuecomment-6927912521). Cross-route Muse continuation remains open. |
 | 4. Qualify the exact integrated candidate | Route receipts landed 2026-11-17 (candidate 883e552); activation hold intact | Run the route, platform and failure matrix in §10. |
-| 5. Enable, verify and retain rollback | On hold | Keep existing defaults during qualification. Follow §13 for the eventual cutover. |
+| 5. Enable, verify and retain rollback | Default change merged separately in [#2580](https://github.com/popcre/ai-devops/pull/2580) | The #2551 installation used the earlier pinned release and retained its defaults. Verify #2580 rollout separately on #2531. |
 | 6. Qualify caching separately | Started: wiring + first measurements (#2571, off by default) | [Muse baseline](https://github.com/popcre/ai-devops/issues/2531#issuecomment-6928592964). Phase C can start after step 4. |
 | 6a. Correct cache measurement reporting | Complete 2026-11-17; merged and installed on Ubuntu/Windows | [Acceptance receipt](https://github.com/popcre/ai-devops/issues/2531#issuecomment-6962732060): landed source `7dffdd4845729eac1a29463a60093b94cf134832`, 94 focused checks per OS, matching installed tool hashes and missing/zero/partial smoke results. Reproduce the counter boundary with `python3 tests/test_reviewer_routes.py CacheReceiptTests`. |
-| 6b. Reduce total token spend | Fleet code landed in [#2609](https://github.com/popcre/ai-devops/pull/2609) and the trials were evaluated. Experiments remain opt-in. | See fleet evidence below. Exact installed receipts are tracked on [#2551](https://github.com/popcre/ai-devops/issues/2551). No default switch is authorized. |
+| 6b. Reduce total token spend | Fleet code landed in [#2609](https://github.com/popcre/ai-devops/pull/2609), trials were evaluated, and all three installed targets passed. | See the [exact installed proof](https://github.com/popcre/ai-devops/issues/2551#issuecomment-6967526056). Experiments remain opt-in. |
 
 ### Fleet measurement evidence
 
@@ -124,6 +124,18 @@ requests cost $0.000191 combined and the two Responses requests $0.000215.
 For DeepSeek the totals were $0.000567 and $0.000565. Hy4 returned usage on
 both interfaces but the smoke output limit was exhausted before a verdict
 on all four calls. No interface change was adopted.
+
+The native installers completed at `9abcf1beed2ad165022f2847d5edbd6e2f292857`
+on edge-dev3, edge-dev and hetz. Each host approved both arms for all four
+routes, recalled after two fresh-process restarts, and passed an ordinary
+review with the experiment settings unset. On Windows, Hy4 needed a rerun
+under its normal deadline after both shorter test runs timed out. The
+standalone DeepSeek entry point passed live on all three hosts. Provider
+analytics matched 28 installed OpenRouter billing groups and 181 requests.
+The [signed receipts](https://github.com/popcre/ai-devops/issues/2551#issuecomment-6967526056)
+include the recovery and deployment scope. The separately merged
+[#2580](https://github.com/popcre/ai-devops/pull/2580) default change is absent
+from these installed pins.
 
 **Token-efficiency amendment, 2026-11-17.** This amendment fixes reporting and
 specifies future experiments; it does not implement prompt trimming, compaction,
@@ -481,7 +493,7 @@ Credential references only. In the `vibe_coding` 1Password vault, resolve Meta d
 - [ ] Candidate lands through the protected queue, old defaults remain during qualification, and any later activation has a separately revertible default change. Confirm commit on `origin/main`, installed revisions and one live check per enabled route.
 - [ ] Record Phase C separately. If caching is released, verify its measured API usage and rollback without changing the review routes. The initial route release can finish while the cache experiment stays disabled.
 - [x] Step 6a reporting repair landed with regression tests and installed Ubuntu/Windows proof: [acceptance receipt](https://github.com/popcre/ai-devops/issues/2531#issuecomment-6962732060), source `7dffdd4845729eac1a29463a60093b94cf134832`. Missing counters stay unknown, measured zero stays zero and defaults remain unchanged. The wider rollout and future Phase C experiments remain open on their existing issues.
-- [x] Step 6b experiments evaluated across both Muse connections, DeepSeek and Hy4. The fleet evidence above distinguishes measured savings, rejected changes and incomplete billing or quality. Installed live proof remains on [#2551](https://github.com/popcre/ai-devops/issues/2551) with parent evidence on [#2531](https://github.com/popcre/ai-devops/issues/2531). Keep the independent default activation hold.
+- [x] Step 6b experiments evaluated across both Muse connections, DeepSeek and Hy4. The fleet evidence above distinguishes measured savings, rejected changes and incomplete billing or quality. Installed live proof is on [#2551](https://github.com/popcre/ai-devops/issues/2551#issuecomment-6967526056) with parent evidence on [#2531](https://github.com/popcre/ai-devops/issues/2531#issuecomment-6967526195). The separate #2580 default activation is outside this fleet proof.
 - [ ] Rehearse restoring previous settings without deleting candidate session state. Verify that a live legacy review can complete after rollback.
 - [ ] Update STATUS, current reviewer docs and tracking issue with live evidence. Retire applicable handoffs only after the acceptance conditions are met.
 
