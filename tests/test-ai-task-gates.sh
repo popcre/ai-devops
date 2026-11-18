@@ -2400,4 +2400,16 @@ mkdir -p "$TMP/ow-rs/bin"; printf '#!/bin/sh\n' > "$TMP/ow-rs/bin/ai-review-life
 ( cd "$TMP/ow-rs" && "$GATES" start --class reviewer-safety >/dev/null 2>&1 )
 check 'retired_window_never_freezes_reviewer_code' "! ow_out '$TMP/ow-rs' check --before ship | grep -q 'are frozen'"
 
+printf 'bounded Supabase staging dispatch keeps other production paths sealed\n'
+check 'closed capacity descriptor and source-pin adversaries' \
+  "python3 -m unittest discover -s '$ROOT/tests' -p test_supabase_capacity_stage_profile.py -q"
+newrepo "$TMP/capacity-policy" popcre/ai-devops
+check 'capacity authorization follows the toolkit code classification' \
+  "(cd '$TMP/capacity-policy' && printf '%s\\n' tools/supabase_capacity_stage_profile.py config/supabase-capacity-stage-profile.json | '$GATES' explain --json --paths-from -) | jq -e '.observed_class==\"code\"'"
+infra_repo "$TMP/capacity-forged" popcre/shared-db
+cap_head="$(git -C "$TMP/capacity-forged" rev-parse HEAD)"
+printf '{"schema_version":1,"operation":"pgss-capacity-stage/v1","repository":"popcre/shared-db","workflow":"stage-pgss-capacity.yml","ref":"main","head_sha":"%s","work_issue":5609}\n' "$cap_head" > "$TMP/capacity-descriptor.json"
+check 'a forged local main cannot admit a bounded capacity dispatch' \
+  "rc 3 '$TMP/capacity-forged' check --before production --acknowledge 'Albert: stage only' --action-manifest-stdin < '$TMP/capacity-descriptor.json'"
+
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"; [ "$FAIL" -eq 0 ]
