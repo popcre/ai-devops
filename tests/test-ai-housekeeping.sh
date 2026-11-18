@@ -34,7 +34,7 @@ if [[ -n "${STUB_CALL_LOG:-}" ]]; then
   printf '%s\n' "$*" >> "$STUB_CALL_LOG"
 fi
 case "${1:-}" in
-  auth) exit "${STUB_AUTH_EXIT:-0}" ;;
+  auth) exit 1 ;;
   issue)
     if [[ "${2:-}" == "view" ]]; then
       printf '%s\n' "${STUB_ISSUE_STATE:-OPEN}"
@@ -58,7 +58,7 @@ case "${1:-}" in
       else
         echo '[]'
       fi
-      exit 0
+      exit "${STUB_PR_EXIT:-0}"
     fi
     ;;
 esac
@@ -398,12 +398,12 @@ unset AI_HOUSEKEEPING_LOG
 
 stub_deferred="$TMP/gh-deferred"
 make_gh_stub "$stub_deferred"
-( cd "$case13" && STUB_AUTH_EXIT=75 STUB_CALL_LOG="$TMP/deferred-calls.log" \
+( cd "$case13" && STUB_PR_EXIT=75 STUB_CALL_LOG="$TMP/deferred-calls.log" \
     AI_HOUSEKEEPING_GH="$stub_deferred" bash "$TOOL" ) > "$TMP/deferred.out" 2>&1
 if grep -q 'GitHub: UNKNOWN (GitHub probe deferred by the shared throttle)' "$TMP/deferred.out" && \
    ! grep -q 'Install and authenticate gh' "$TMP/deferred.out" && \
-   [[ "$(cat "$TMP/deferred-calls.log")" == 'auth status' ]]; then
-  ok "deferred GitHub probe reports UNKNOWN without diagnosing sign-in or reading PRs"
+   [[ "$(cat "$TMP/deferred-calls.log")" == 'pr list --state all --limit 200 --json state,headRefName,headRefOid,mergedAt,url' ]]; then
+  ok "deferred PR listing reports UNKNOWN without additional requests or diagnosing sign-in"
 else
   bad "deferred GitHub probe was not distinguished from unavailable authentication"
 fi
@@ -456,6 +456,13 @@ make_gh_stub "$stub15"
     AI_HOUSEKEEPING_GH="$stub15" bash "$TOOL" --details ) > "$TMP/c15.out" 2>&1
 list_calls="$(grep -c '^issue list ' "$TMP/gh15-calls.log" || true)"
 view_calls="$(grep -c '^issue view ' "$TMP/gh15-calls.log" || true)"
+pr_calls="$(grep -c '^pr list ' "$TMP/gh15-calls.log" || true)"
+if [[ "$pr_calls" -eq 1 ]] && ! grep -q '^auth ' "$TMP/gh15-calls.log" &&
+   grep -q 'GitHub: available' "$TMP/c15.out"; then
+  ok "a successful PR listing also proves GitHub availability without an auth probe"
+else
+  bad "GitHub availability did not reuse exactly one PR listing"
+fi
 if [[ "$list_calls" -eq 1 && "$view_calls" -eq 0 ]] &&
    grep -q 'Handoffs (git-shared): 1 OPEN, 1 SUCCESSOR REVIEW' "$TMP/c15.out"; then
   ok "numeric handoffs resolve from a single batched issue list (1 list, 0 views)"
@@ -504,9 +511,9 @@ stub17="$TMP/gh17"
 cat > "$stub17" <<'STUB'
 #!/nonexistent/interp
 case "${1:-}" in
-  auth) exit 0 ;;
+  pr) printf '[]\n'; exit 0 ;;
 esac
-exit 0
+exit 1
 STUB
 chmod +x "$stub17"
 ( cd "$case17" && AI_HOUSEKEEPING_GH="$stub17" bash "$TOOL" ) > "$TMP/c17.out" 2>&1
@@ -535,6 +542,16 @@ if grep -q 'timed out' "$TMP/c18.out" && ! grep -qi 'install and authenticate' "
   ok "probe timeout reports throttle timeout, not an install/authentication hint"
 else
   bad "probe timeout not reported honestly | $(tr '\n' ';' < "$TMP/c18.out" | cut -c1-300)"
+fi
+
+# An exit-zero response that isn't a PR list cannot prove availability.
+printf '%s\n' '{"error":"invalid response"}' > "$TMP/non-array.json"
+( cd "$case13" && STUB_PR_JSON="$TMP/non-array.json" \
+    AI_HOUSEKEEPING_GH="$stub13" bash "$TOOL" ) > "$TMP/non-array.out" 2>&1
+if grep -q 'GitHub: UNKNOWN (GitHub unavailable)' "$TMP/non-array.out"; then
+  ok "invalid PR response leaves GitHub availability UNKNOWN"
+else
+  bad "invalid PR response reported GitHub available"
 fi
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"

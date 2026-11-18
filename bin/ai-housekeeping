@@ -285,19 +285,18 @@ gh_call() {
 
 GH_OK=0
 GH_PROBE_RC=0
-if [[ -n "$GH" ]] && { [[ -x "$GH" ]] || command -v "$GH" >/dev/null 2>&1; }; then
-  gh_call auth status >/dev/null 2>&1 || GH_PROBE_RC=$?
-  if [[ "$GH_PROBE_RC" -eq 0 ]]; then
-    GH_OK=1
-  fi
-fi
-
-# One GitHub round-trip for every PR we may need. Open PRs take precedence;
-# otherwise a merged PR qualifies only on an exact headRefOid match (D3a).
+# Use the PR inventory itself as the availability probe. An extra auth
+# request can time out on Windows even when the repository query works.
 PR_DATA=""
-if [[ "$GH_OK" -eq 1 ]]; then
+if [[ -n "$GH" ]] && { [[ -x "$GH" ]] || command -v "$GH" >/dev/null 2>&1; }; then
   PR_DATA="$(gh_call pr list --state all --limit 200 \
-    --json state,headRefName,headRefOid,mergedAt,url 2>/dev/null || true)"
+    --json state,headRefName,headRefOid,mergedAt,url 2>/dev/null)" || GH_PROBE_RC=$?
+  if [[ "$GH_PROBE_RC" -eq 0 ]] &&
+     jq -es 'length == 1 and (.[0] | type == "array")' <<<"$PR_DATA" >/dev/null 2>&1; then
+    GH_OK=1
+  else
+    PR_DATA=""
+  fi
 fi
 
 pr_lookup() {
