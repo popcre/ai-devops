@@ -1,7 +1,7 @@
 ---
 summary: Install quality-preserving reviewer changes and qualify opt-in savings for Muse, DeepSeek and Hy4 on three hosts (#2619)
 kind: plan
-status: open
+status: done
 read-when: implementing or qualifying incremental reviewer cost savings without quality loss
 ---
 
@@ -13,16 +13,16 @@ Pay less for reviews while keeping every finding, citation, and final decision a
 
 ## STATUS
 
-Execution receipts and follow-up ownership are on [#2619](https://github.com/popcre/ai-devops/issues/2619). [Launch handoff](HANDOFF.d/2026-11-18T1549Z-edge-dev3-codex-reviewer-quality-cost.md).
+Execution receipts are on [#2619](https://github.com/popcre/ai-devops/issues/2619). Keep the current defaults. The evidence supports targeted, explicit Muse OpenRouter caching for repeated reviews.
 
 | Step | State on 2026-11-18 | Evidence to attach |
 | --- | --- | --- |
 | 1. Freeze baseline and cases | Recorded | All three installed hosts matched the #2609 pin. The issue carries exact public fixture heads and billing attribution. |
-| 2. Safe implementation | Merged | [#2621](https://github.com/popcre/ai-devops/pull/2621) rejects explicit incomplete output, preserves retry and fallback behavior, and leaves request assembly and route defaults untouched. |
-| 3. Install safe changes | Held for default parity | The exact candidate source passed ordinary live review from isolated copies on all three platforms. Installing the merged release would also activate [#2580](https://github.com/popcre/ai-devops/pull/2580) on the pinned hosts. |
-| 4. Muse caching pilot | Measured | OpenRouter charged $0.035351 with the explicit key off and $0.017384 with it on. Both arms produced nine usable reviews. The setting remains opt-in. |
-| 5. Separate experiments | See execution receipts | DeepSeek, Hy4 and Muse direct are recorded independently on the issue. Endpoint, text, output-budget, and history comparisons are distinct from the cache pilot. |
-| 6. Decide and close | Open | The fleet keeps the tested #2609 source. Keep the installation proof open until an authorized merged release preserves the observed host defaults. |
+| 2. Safe implementation | Merged | [#2621](https://github.com/popcre/ai-devops/pull/2621) rejects explicit incomplete output and preserves retry and fallback behavior. [#2631](https://github.com/popcre/ai-devops/pull/2631) allows the pinned hosts to retain their existing direct Muse default. |
+| 3. Install safe changes | Verified | All three native installs succeeded at `0d182905`. An ordinary review and both new and resumed implicit direct Muse sessions passed on each host. |
+| 4. Muse caching pilot | Confirmed | The 24 matched pairs cost $0.089033 with the explicit key off and $0.053392 with it on. Both arms produced 24 usable reviews and every verdict matched. |
+| 5. Separate experiments | Recorded | DeepSeek, Hy4 and Muse direct have independent receipts on the issue. Keep their existing settings. |
+| 6. Decide and close | Verified | Keep explicit Muse caching available for repeated reviews and leave all defaults in place. The pilot settings were scoped to processes that have ended. |
 
 ## 2. Application
 
@@ -47,6 +47,8 @@ In scope: safe request and response handling, installed proof, opt-in Muse OpenR
 The [previous cache comparison](plan_deepseek-harness-openrouter.md#L78) used six trials per setting. Muse OpenRouter cost $0.028986 → $0.020753 with 6/6 usable in each. Muse direct had incomplete estimates. DeepSeek cost $0.119102 → $0.100936 with 5/6 → 4/6 usable. That difference does not establish causation. Hy4 cost $0.219216 → $0.268168 with 0/6 usable in each at 150 seconds. Its later normal-deadline Windows reviews passed. Named-session savings were measured separately. Never combine them with cache savings.
 
 [OpenRouter's caching guide](https://openrouter.ai/blog/tutorials/prompt-caching-sticky-routing/) describes cache charges, expiry, and session affinity. Cache counters establish reuse. Provider charges, including retries and failures, establish cost. A stable affinity ID can change endpoint selection, so log the actual endpoint and isolate affinity from provider cache controls.
+
+The confirmation used 24 exact-head pairs in six sequences across two runs on edge-dev3. Both settings used Meta on OpenRouter and scoped affinity. The explicit key reduced billed cost per usable review by 40.0%, with a whole-sequence paired 95% interval of 28.3% to 48.0%. All 216 provider requests reconciled. Both settings identified and cited the 12 seeded or late defects. Some secondary observations differed, including a conditional warning without a demonstrated failure in one cached report. Keep caching opt-in.
 
 ## 7. Rejected approaches
 
