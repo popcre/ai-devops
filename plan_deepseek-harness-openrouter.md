@@ -21,7 +21,7 @@ strategies or certify a third host.
 
 ## STATUS — start here
 
-Use current upstream. Planning baseline: `ec4886f57232a1bb2741b7cf66d5fa1a949a1def`. The combined implementation starts at step 1. Steps 1–4 track on #2549 and #2550, Phase C on #2551. Integrated acceptance and the no-switch hold remain on #2531. Runtime tests used disposable setups and the regular workflow on a test branch. No candidate route shipped or became a default.
+Use current upstream. Planning baseline: `ec4886f57232a1bb2741b7cf66d5fa1a949a1def`. Steps 1–4 track on #2549 and #2550, Phase C on #2551. GitHub activation and rollback rehearsal landed under #2531 as recorded in step 5. Albert explicitly lifted the hold again on November 18, 2026 and requested completion of the default rollout for GitHub and second opinions. The follow-through makes new ordinary DeepSeek conversations use OpenRouter in both entry points, retains each existing conversation's engine, and preserves automatic Muse failover on implicit continuation. Per-user `legacy` settings remain the reversible second-opinion rollback. Final installed and live evidence belongs on #2531.
 
 | Step | Status, 2026-11-16 | Evidence or next gate |
 |---|---|---|

@@ -43,6 +43,19 @@ Muse. Removing the file restores the standard default for new conversations.
 Explicit routes, existing conversations, implementation sessions, and CI
 review routing are independent of this setting.
 
+## DeepSeek second-opinion default
+
+New read-only DeepSeek conversations use DeepSeek Harness through OpenRouter
+in `ai-second-opinion deepseek` and ordinary `ai-deepseek-agent send` calls.
+Existing conversations resume through their stored engine. Formal review,
+explicit system prompts and the direct API's `--repo-tools` contract retain
+their original behavior in `ai-deepseek-agent`.
+
+For rollback, create `~/.config/ai-devops/deepseek-second-opinion-default`
+containing `legacy`. Removing that file restores the OpenRouter default for
+new conversations. The same setting is read by both second-opinion entry
+points. An unreadable or invalid setting refuses before provider contact.
+
 ## `models.env` variables
 
 Command strings the scripts invoke per stage. See [`model-setup.md`](model-setup.md)

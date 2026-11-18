@@ -5,8 +5,8 @@ Route data lives in config/reviewer-routes.json. This module loads and
 validates it, builds the OpenCode / DeepSeek Harness runtime configuration for
 one route, and owns the safe outcome mapping both entry points share (GitHub
 review via bin/ai-review-simple, second opinions via bin/ai-second-opinion and
-bin/ai-deepseek-agent). Nothing here is active until a caller selects a route
-explicitly; every existing default stays unchanged.
+bin/ai-deepseek-agent). GitHub uses the qualified plan by default. New Muse
+and ordinary DeepSeek second opinions select the qualified routes here.
 
 Engines:
   opencode        - the pinned OpenCode runtime with a fresh private profile
@@ -32,6 +32,26 @@ _cache = {}
 
 class RouteError(Exception):
     """An unknown or malformed route selection. Never retried, never defaulted."""
+
+
+def second_opinion_default(reviewer, config_dir=None):
+    """Select a route for a new read-only conversation, with a local rollback."""
+    defaults = {"muse": "auto", "deepseek": "deepseek-openrouter"}
+    if reviewer not in defaults:
+        return None
+    config_dir = config_dir or os.path.expanduser("~/.config/ai-devops")
+    name = "DeepSeek" if reviewer == "deepseek" else "Muse"
+    path = os.path.join(config_dir, f"{reviewer}-second-opinion-default")
+    try:
+        with open(path, "rb") as config:
+            value = config.read(9)
+    except FileNotFoundError:
+        return defaults[reviewer]
+    except OSError:
+        raise RouteError(f"cannot read the {name} default: {path}") from None
+    if value not in (b"legacy", b"legacy\n", b"legacy\r\n"):
+        raise RouteError(f"invalid {name} default: {path}; expected legacy")
+    return None
 
 
 def _load():
