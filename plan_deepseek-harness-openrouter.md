@@ -14,8 +14,8 @@ Tracking: [parent #2531](https://github.com/popcre/ai-devops/issues/2531), [Deep
 The November 17 wrap-up requested a fresh session to implement the remaining
 cache, persistence and token-saving strategies on three machines. Its
 [fleet continuation handoff](https://github.com/popcre/ai-devops/blob/main/HANDOFF.d/2026-11-17T2355Z-edge-dev3-codex-cache-fleet-continuation.md)
-defines the successor's steps, completed proof, installation lessons and the
-third-machine scope clarification. Start there for Phase C/6b; keep current
+defines the successor's steps, completed proof, installation lessons and
+Albert's confirmed targets: edge-dev3, edge-dev and hetz. Start there for Phase C/6b; keep current
 defaults unchanged. This wrap-up does not itself implement or activate those
 strategies or certify a third host.
 
