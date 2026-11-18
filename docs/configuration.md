@@ -31,6 +31,18 @@ and source SHA in `/etc/ai-devops/config-state.json`.
 There are **no secrets** in these files. Model access comes from the Claude/Codex
 CLI login sessions (`~/.claude`, `~/.codex`), not from variables here.
 
+## Muse second-opinion default
+
+New Muse second opinions without an explicit route default to the direct Meta
+connection with OpenRouter failover. To preserve the earlier direct-only
+default for a user on a particular installation, place a plain text file
+named `muse-second-opinion-default` in that user's `~/.config/ai-devops/`
+directory on Ubuntu or Windows. Its only accepted value is `legacy`, with an
+optional trailing newline. An invalid or unreadable file fails before calling
+Muse. Removing the file restores the standard default for new conversations.
+Explicit routes, existing conversations, implementation sessions, and CI
+review routing are independent of this setting.
+
 ## `models.env` variables
 
 Command strings the scripts invoke per stage. See [`model-setup.md`](model-setup.md)
