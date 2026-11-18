@@ -4,6 +4,7 @@ The complete document index is [`docs/INDEX.md`](docs/INDEX.md), generated from 
 
 Read this first. A new or moved document needs the four-key header; then run `ai-doc-health --repo . --fix-index` ([`docs/doc-health.md`](docs/doc-health.md)). Never hand-edit the index.
 
+- edge-dev3 heartbeat rebuild (one shared note, timer currently off): [plan and STATUS](plan_heartbeat-shared-note.md).
 - Ghost-run escape (LANE_EPOCH): [plan and STATUS](plan_ghost-run-epoch.md).
 - DeepSeek reviewer consolidation: [plan and STATUS](plan_deepseek-harness-openrouter.md).
 - Reviewer savings without quality loss: [plan and STATUS](plan_reviewer-quality-cost.md).
