@@ -1,8 +1,8 @@
 ---
-summary: Plan for the shared topic-cut transcript store (#2050); most steps done, the final live-proof step remains
+summary: Completed plan and live acceptance for the shared topic-cut transcript store (#2050)
 kind: plan
-status: open
-read-when: working on the transcript store or its remaining proof step
+status: done
+read-when: reviewing transcript-store ownership, decisions, or installed and published proof
 ---
 
 # Plan — shared, topic-cut transcript store
