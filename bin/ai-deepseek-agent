@@ -582,11 +582,17 @@ PY
 
 pending_hash() { sha256sum "$1" | awk '{print $1}'; }
 make_turn_workspace() { # source dir [stable session parent] -> fresh remote-less copy
-  local src="$1" dir r
+  local src="$1" dir r interrupted
   if [ -n "${2:-}" ]; then
     # Harness resume binds its session to the original working directory.
     # Recreate the snapshot at the same name, still deleting it after each turn.
     dir="$2/deepseek-turn.workspace"
+    if [ -e "$dir" ] || [ -L "$dir" ]; then
+      [ -d "$dir" ] && [ ! -L "$dir" ] || { echo 'Error: interrupted Harness workspace is not a regular directory.' >&2; return 1; }
+      interrupted="$(mktemp -d "$2/interrupted-workspace.XXXXXX")" || return 1
+      mv "$dir" "$interrupted/snapshot" || return 1
+      printf 'Retained interrupted read-only snapshot at %s\n' "$interrupted" >&2
+    fi
     mkdir "$dir" || return 1
   else
     dir="$(mktemp -d "${TMPDIR:-/tmp}/deepseek-turn.XXXXXX")" || return 1
@@ -1806,6 +1812,7 @@ print(value["harness_session"] if value.get("workspace_mode") == "stable-per-ses
 ' "$F")" || { echo "Error: session $ID is not a deepseek-openrouter harness conversation; continue it with its original engine." >&2; exit 1; }
       acquire_lock "$F" || exit 1
       HARNESS_DSH_HOME="$(session_path "$ID" .dsh-home)" || exit 1
+      mkdir -p "$HARNESS_DSH_HOME" || exit 1
       PROMPT_FILE="$(mktemp "$SESS_DIR/.prompt.XXXXXX")" || exit 1
       printf '%s\n' "$MSG" > "$PROMPT_FILE"
       if [ -z "$HARNESS_SID" ]; then

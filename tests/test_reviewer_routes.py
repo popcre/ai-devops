@@ -945,6 +945,10 @@ class DeepseekAgentHarnessTests(Base):
         setting = pathlib.Path(self.or_store).parent.parent / "deepseek-second-opinion-default"
         setting.write_text("legacy\n")
         pathlib.Path(self.repo, "tracked.txt").write_text("updated source\n")
+        home = pathlib.Path(self.repo, ".ai", "deepseek-sessions", session_id + ".dsh-home")
+        interrupted = home / "deepseek-turn.workspace"
+        interrupted.mkdir()
+        (interrupted / "recover.txt").write_text("interrupted fixture\n")
         resumed = self.agent("reply", session_id, "second turn")
         self.assertEqual(resumed.returncode, 0, resumed.stderr)
         self.assertIn("--session-id", self.dsh_log_rows()[-1]["args"])
@@ -953,6 +957,9 @@ class DeepseekAgentHarnessTests(Base):
                 ".dsh-home/deepseek-turn.workspace/repo"), row["cwd"])
             self.assertFalse(pathlib.Path(row["cwd"]).exists())
         self.assertEqual(self.dsh_log_rows()[-1]["tracked"], "updated source\n")
+        retained = list(home.glob("interrupted-workspace.*/snapshot/recover.txt"))
+        self.assertEqual(len(retained), 1)
+        self.assertEqual(retained[0].read_text(), "interrupted fixture\n")
 
     def test_missing_or_store_refuses(self):
         r = self.agent("send", "--route", "deepseek-openrouter", "hello")
@@ -969,6 +976,7 @@ class DeepseekAgentHarnessTests(Base):
         value = json.loads(path.read_text())
         value.pop("workspace_mode")
         path.write_text(json.dumps(value))
+        shutil.rmtree(path.with_suffix(".dsh-home"))
         resumed = self.agent("reply", session_id, "continue the discussion")
         self.assertEqual(resumed.returncode, 0, resumed.stderr)
         row = self.dsh_log_rows()[-1]
