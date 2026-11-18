@@ -512,6 +512,36 @@ check 'lock with an empty owner record is recovered' "timeout 20 '$GH' z"
 mkdir -p "$TMP/state/lock.d"; echo "999999 $(date +%s) other" > "$TMP/state/lock.d/owner"
 AI_GH_NO_WAIT=1 AI_GH_NO_WAIT_LOCK_SECONDS=2 "$GH" z >/dev/null 2>&1; rc=$?
 check 'a fresh lock is not stolen even if its pid looks dead; NO_WAIT gives up with 75' "[ $rc -eq 75 ] && grep -q other '$TMP/state/lock.d/owner'"
+mkdir -p "$TMP/slow-mkdir" "$TMP/slow-lock-state/lock.d"
+printf '99999 %s other\n' "$(date +%s)" > "$TMP/slow-lock-state/lock.d/owner"
+cat > "$TMP/slow-mkdir/mkdir" <<'EOF'
+#!/usr/bin/env bash
+case "${1:-}" in
+  */slow-lock-state/lock.d) printf 'attempt\n' >> "$GH_SLOW_LOCK_LOG"; sleep 2; exit 1 ;;
+esac
+exec "$GH_SLOW_REAL_MKDIR" "$@"
+EOF
+chmod +x "$TMP/slow-mkdir/mkdir"
+GH_SLOW_REAL_MKDIR="$(command -v mkdir)" GH_SLOW_LOCK_LOG="$TMP/slow-lock-attempts" \
+  PATH="$TMP/slow-mkdir:$PATH" AI_GH_STATE_DIR="$TMP/slow-lock-state" \
+  AI_GH_NO_WAIT=1 AI_GH_NO_WAIT_LOCK_SECONDS=1 timeout 60 "$GH" z >/dev/null 2>&1; rc=$?
+check 'NO_WAIT counts slow filesystem work in its actual lock deadline' "[ $rc -eq 75 ] && [ \$(wc -l < '$TMP/slow-lock-attempts') -eq 1 ] && grep -q other '$TMP/slow-lock-state/lock.d/owner'"
+mkdir -p "$TMP/slow-queue-state/admission.d" "$TMP/slow-stat"
+touch "$TMP/slow-queue-state/admission.d/0000000000001.AAAAAA"
+touch "$TMP/slow-queue-state/admission.d/0000000000002.BBBBBB"
+cat > "$TMP/slow-stat/stat" <<'EOF'
+#!/usr/bin/env bash
+case "${*: -1}" in
+  */slow-queue-state/admission.d/000000000000[12].??????) printf 'stat\n' >> "$GH_SLOW_STAT_LOG"; sleep 2 ;;
+esac
+exec "$GH_SLOW_REAL_STAT" "$@"
+EOF
+chmod +x "$TMP/slow-stat/stat"
+: > "$TMP/slow-queue-stats"
+GH_SLOW_REAL_STAT="$(command -v stat)" GH_SLOW_STAT_LOG="$TMP/slow-queue-stats" \
+  PATH="$TMP/slow-stat:$PATH" AI_GH_STATE_DIR="$TMP/slow-queue-state" \
+  AI_GH_NO_WAIT=1 AI_GH_NO_WAIT_LOCK_SECONDS=1 timeout 60 "$GH" z >/dev/null 2>&1; rc=$?
+check 'NO_WAIT also stops an expensive FIFO ticket scan at its deadline' "[ $rc -eq 75 ] && [ \$(wc -l < '$TMP/slow-queue-stats') -le 1 ] && test -f '$TMP/slow-queue-state/admission.d/0000000000001.AAAAAA'"
 AI_GH_NO_WAIT=1 AI_GH_NO_WAIT_LOCK_SECONDS=2 timeout 10 "$GH" auth git-credential get </dev/null >/dev/null 2>&1; rc=$?
 check 'Git credential lookups bypass a held throttle lock' "[ $rc -eq 0 ] && grep -q other '$TMP/state/lock.d/owner'"
 rm -rf "$TMP/state/lock.d"
