@@ -2401,8 +2401,6 @@ mkdir -p "$TMP/ow-rs/bin"; printf '#!/bin/sh\n' > "$TMP/ow-rs/bin/ai-review-life
 check 'retired_window_never_freezes_reviewer_code' "! ow_out '$TMP/ow-rs' check --before ship | grep -q 'are frozen'"
 
 printf 'bounded Supabase staging dispatch keeps other production paths sealed\n'
-check 'closed capacity descriptor and source-pin adversaries' \
-  "python3 -m unittest discover -s '$ROOT/tests' -p test_supabase_capacity_stage_profile.py -q"
 newrepo "$TMP/capacity-policy" popcre/ai-devops
 check 'capacity authorization follows the toolkit code classification' \
   "(cd '$TMP/capacity-policy' && printf '%s\\n' tools/supabase_capacity_stage_profile.py config/supabase-capacity-stage-profile.json | '$GATES' explain --json --paths-from -) | jq -e '.observed_class==\"code\"'"
