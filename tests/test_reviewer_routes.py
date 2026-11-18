@@ -50,6 +50,7 @@ FAKE_OC = textwrap.dedent("""\
         print(json.dumps({"type": "text", "part": {"text": t}}))
     if mode == "credit":
         print(json.dumps({"type": "error", "error": {"message": "HTTP 402 Insufficient Balance"}}))
+        print(json.dumps({"type": "step_finish", "part": {"reason": "error"}}))
         sys.exit(1)
     if mode == "auth":
         print(json.dumps({"type": "error", "error": {"message": "status 401 invalid api key"}}))
@@ -70,6 +71,10 @@ FAKE_OC = textwrap.dedent("""\
         sys.exit(0)
     if mode == "sleep":
         time.sleep(30)
+    if mode == "truncated":
+        text("PARTIAL ANSWER")
+        print(json.dumps({"type": "step_finish", "part": {"reason": "length"}}))
+        sys.exit(0)
     if mode == "paid-failure":
         for _ in range(2):
             print(json.dumps({"type": "step_start", "part": {}}))
@@ -479,6 +484,16 @@ class AttributionTests(Base):
         self.assertEqual(summary["state"], "pass")
         self.assertNotIn("Route", ars.render_comment(summary, self.head))
 
+    def test_harness_duplicate_terminal_response_does_not_qualify(self):
+        ars = self.load_ars()
+        completed = json.dumps({"type": "final", "reason": {"kind": "completed"},
+                                "text": "VERDICT: APPROVE"})
+        for extra in (completed, json.dumps({"type": "final", "reason": {"kind": "error"}})):
+            with self.subTest(extra=extra):
+                answer, error = ars.read_harness_events(completed + "\n" + extra)
+                self.assertEqual(answer, "")
+                self.assertTrue(error)
+
 
 class SecondOpinionRouteTests(Base):
     def run_so(self, *args, **kw):
@@ -507,6 +522,24 @@ class SecondOpinionRouteTests(Base):
         r3 = self.run_so("muse", "--route", "muse-meta", "ask", "s1", "wrong route")
         self.assertEqual(r3.returncode, 2)
         self.assertIn("bound to route", r3.stderr)
+
+    def test_truncated_answer_preserves_last_good_visible_history(self):
+        self.mode("ok", "truncated")
+        args = ("muse", "--route", "muse-openrouter")
+        first = self.run_so(*args, "new", "truncated-case", "first question")
+        self.assertEqual(first.returncode, 0, first.stderr)
+        before = self.meta("muse", "truncated-case")
+        transcript = os.path.join(self.so_dir("muse", "truncated-case"), "transcript.md")
+        with open(transcript, encoding="utf-8") as fh:
+            prior_text = fh.read()
+        second = self.run_so(*args, "ask", "truncated-case", "next question")
+        self.assertEqual(second.returncode, 3)
+        self.assertIn("incomplete answer: length", second.stderr)
+        after = self.meta("muse", "truncated-case")
+        for field in ("turns", "visible", "session", "route"):
+            self.assertEqual(after[field], before[field])
+        with open(transcript, encoding="utf-8") as fh:
+            self.assertEqual(fh.read(), prior_text)
 
     def test_auto_failover_is_atomic(self):
         self.mode("ok", "credit", "ok")
