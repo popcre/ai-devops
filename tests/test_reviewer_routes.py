@@ -496,6 +496,13 @@ class AttributionTests(Base):
 
 
 class SecondOpinionRouteTests(Base):
+    def setUp(self):
+        super().setUp()
+        home = pathlib.Path(self.tmp.name, "user-home")
+        self.muse_default = home / ".config" / "ai-devops" / "muse-second-opinion-default"
+        self.muse_default.parent.mkdir(parents=True)
+        self.env.update(HOME=str(home), USERPROFILE=str(home))
+
     def run_so(self, *args, **kw):
         env = kw.get("env", self.env)
         env.setdefault("AI_SECOND_OPINION_TIMEOUT", "60")
@@ -651,6 +658,39 @@ class SecondOpinionRouteTests(Base):
         self.assertEqual(r2.returncode, 0, r2.stderr)
         self.assertEqual(self.meta("muse", "nd")["route"], "muse-meta")
         self.assertIn("--session", self.oc_calls()[-1]["args"])
+
+    def test_muse_legacy_default_applies_only_to_new_implicit_sessions(self):
+        self.mode("credit", "ok", "ok", "ok")
+        self.muse_default.write_bytes(b"legacy\r\n")
+        failed = self.run_so("muse", "new", "legacy", "first question")
+        self.assertEqual(failed.returncode, 3, failed.stderr)
+        self.assertEqual(len(self.oc_calls()), 1)
+        self.assertNotIn("route", self.meta("muse", "legacy"))
+        self.assertEqual(set(self.oc_calls()[0]["config"]["provider"]), {"meta-model-api"})
+
+        self.muse_default.write_bytes(b"bad value")
+        invalid = self.run_so("muse", "ask", "one-shot question")
+        self.assertEqual(invalid.returncode, 2, invalid.stderr)
+        self.assertIn("invalid Muse default", invalid.stderr)
+        self.assertEqual(len(self.oc_calls()), 1)
+        explicit = self.run_so("muse", "--route", "muse-openrouter", "new", "routed",
+                               "explicit question")
+        self.assertEqual(explicit.returncode, 0, explicit.stderr)
+        self.assertEqual(self.meta("muse", "routed")["route"], "muse-openrouter")
+        resumed = self.run_so("muse", "ask", "legacy", "follow up")
+        self.assertEqual(resumed.returncode, 0, resumed.stderr)
+        self.assertNotIn("route", self.meta("muse", "legacy"))
+        implementation = self.run_so("muse", "implement", "implementation", "write request")
+        self.assertEqual(implementation.returncode, 0, implementation.stderr)
+        self.assertEqual(self.meta("muse", "implementation")["mode"], "implement")
+
+    def test_muse_unreadable_default_fails_before_creating_a_session(self):
+        self.muse_default.mkdir()
+        result = self.run_so("muse", "new", "unreadable", "plain question")
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("cannot read the Muse default", result.stderr)
+        self.assertFalse(os.path.exists(self.so_dir("muse", "unreadable")))
+        self.assertFalse(os.path.exists(os.path.join(self.state, "oc-calls.jsonl")))
 
     def test_legacy_routeless_session_stays_legacy(self):
         # A conversation created before the activation (meta without a route)

@@ -17,7 +17,9 @@ Candidate routes (#2549/#2550, config/reviewer-routes.json) are opt-in through
 "auto" for Muse with same-model failover). Since the #2531 activation
 (2026-11-17) NEW Muse conversations default to that candidate route ("auto");
 existing conversations keep their stored route, and every other provider keeps
-its legacy default without --route.
+its legacy default without --route. A per-user
+~/.config/ai-devops/muse-second-opinion-default file containing "legacy"
+preserves the previous direct-only default for new implicit Muse conversations.
 
 new/ask/review run read-only on a private copy of the repository (HEAD plus
 uncommitted changes, no git remote). implement runs on a private writable copy
@@ -122,6 +124,21 @@ VERDICT: REVISE.
 def die(msg, code=1):
     print(f"ai-second-opinion: {msg}", file=sys.stderr)
     sys.exit(code)
+
+
+def default_muse_route():
+    """Resolve the default for a new implicit Muse conversation."""
+    path = os.path.expanduser("~/.config/ai-devops/muse-second-opinion-default")
+    try:
+        with open(path, "rb") as config:
+            value = config.read(9)
+    except FileNotFoundError:
+        return "auto"
+    except OSError:
+        die("cannot read the Muse default. Check ~/.config/ai-devops/muse-second-opinion-default.", 2)
+    if value not in (b"legacy", b"legacy\n", b"legacy\r\n"):
+        die("invalid Muse default. Set ~/.config/ai-devops/muse-second-opinion-default to legacy.", 2)
+    return None
 
 
 def doctor_diagnostics(provider, state):
@@ -671,12 +688,7 @@ def main(argv):
                 die("the billing probe is bound to its original session identifier", 2)
         else:
             if p == "muse" and route is None and cmd != "implement":
-                # Activation (#2531, 2026-11-17): NEW Muse second opinions
-                # default to the candidate route -- "auto" = muse-meta with
-                # same-model OpenRouter failover. Existing conversations keep
-                # their stored route, other providers stay opt-in, and
-                # reverting this hunk restores the legacy default exactly.
-                route = "auto"
+                route = default_muse_route()
             sdir, meta = start(p, name, args.repo, cmd == "implement", args.base,
                                route=route if route in RR.routes() else None,
                                billing_id=billing_id)
