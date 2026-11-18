@@ -32,7 +32,98 @@ Use current upstream. Planning baseline: `ec4886f57232a1bb2741b7cf66d5fa1a949a1d
 | 5. Enable, verify and retain rollback | On hold | Keep existing defaults during qualification. Follow §13 for the eventual cutover. |
 | 6. Qualify caching separately | Started: wiring + first measurements (#2571, off by default) | [Muse baseline](https://github.com/popcre/ai-devops/issues/2531#issuecomment-6928592964). Phase C can start after step 4. |
 | 6a. Correct cache measurement reporting | Complete 2026-11-17; merged and installed on Ubuntu/Windows | [Acceptance receipt](https://github.com/popcre/ai-devops/issues/2531#issuecomment-6962732060): landed source `7dffdd4845729eac1a29463a60093b94cf134832`, 94 focused checks per OS, matching installed tool hashes and missing/zero/partial smoke results. Reproduce the counter boundary with `python3 tests/test_reviewer_routes.py CacheReceiptTests`. |
-| 6b. Reduce total token spend | Planned, not enabled | Execute the ordered experiments in §9, step 6b under #2551; report acceptance on #2531. No savings forecast or default switch is authorized. |
+| 6b. Reduce total token spend | Fleet code landed in [#2609](https://github.com/popcre/ai-devops/pull/2609) and the trials were evaluated. Experiments remain opt-in. | See fleet evidence below. Exact installed receipts are tracked on [#2551](https://github.com/popcre/ai-devops/issues/2551). No default switch is authorized. |
+
+### Fleet measurement evidence
+
+The code release is `9abcf1beed2ad165022f2847d5edbd6e2f292857`. It sends
+the intended cache keys on both Muse connections and optional stable affinity
+for Muse, DeepSeek, and Hy4 on OpenRouter. Both normal review entry points and
+the standalone DeepSeek Harness path support scoped usage receipts. A live Muse
+OpenRouter review generated four billed requests while OpenCode exposed three
+completed steps. Reported step totals cannot substitute for provider billing.
+
+The lean-prefix trial used two reverse-order passes on public SWR changes
+[#4318](https://github.com/vercel/swr/pull/4318),
+[#4336](https://github.com/vercel/swr/pull/4336),
+[#4310](https://github.com/vercel/swr/pull/4310),
+[#4312](https://github.com/vercel/swr/pull/4312), and
+[#4293](https://github.com/vercel/swr/pull/4293), with clean and seeded controls.
+Each pair received the same model, effort and deadline (85 seconds for
+OpenRouter, 100 for metered Meta). The deadline was a trial constraint and
+does not change the runtime defaults. Completed steps, timeouts and failed
+attempts are included when billing is available. A usable run has a verdict.
+The seeded and clean controls separately check finding coverage and false
+positives. Rounded dollars summarize the sample, not ordinary fleet spend.
+
+| Route | Usable, current → lean | Job billing coverage | Observed spend, current → lean | Decision |
+|---|---:|---:|---:|---|
+| Muse direct | 14/14 → 9/14 | Estimated 14/14 → 8/14 | $0.050637 → $0.017351 subtotal | Leave lean disabled. Five fewer usable results and incomplete cost coverage. |
+| Muse OpenRouter | 9/14 → 9/14 | Provider 14/14 → 14/14 | $0.094945 → $0.074130 | Lower measured spend, with mean elapsed time rising from 52.9 to 58.4 seconds and disagreements on public cases. Keep the probe opt-in. |
+| DeepSeek | 8/14 → 7/14 | Provider 13/14 → 14/14 | $0.207583 subtotal → $0.330455 | No adoption. One fewer usable review and no defensible complete-job saving. |
+| Hy4 | 4/14 → 2/14 | Provider 14/14 → 14/14 | $0.424857 → $0.412466 | No adoption. Cost per usable review rose from about $0.106 to $0.206 under the shared test deadline. |
+
+The direct Meta estimates use [published Contributor rates](https://dev.meta.ai/docs/pricing-rate-limits)
+and request-level usage on public fixtures. The temporary measurement relay
+did not retain request/answer text or change provider settings. Missing terminal
+usage remains unknown. The direct Meta file-map trial reported all three seeded
+defects on manual inspection, but cited line 20 for the dispatch defect on
+line 14 in one pass. Without a trusted full-patch read receipt, that mode is
+refused by the shipped reviewer. Direct Meta's concise trial reported all
+three seeded defects, with one of six jobs in each arm missing complete cost.
+The Muse OpenRouter three-case concise cost rose from $0.006372 to $0.008076.
+Concision stays a qualification probe. A default change needs complete,
+repeatable cost and quality results.
+
+The separate cache comparison used three public SWR changes (4318, 4310 and
+4312), then reversed them in a second pass, for six reviews per arm per
+route. Muse held OpenRouter affinity fixed within each arm while varying
+the explicit cache key. DeepSeek and Hy4 compared a per-job affinity ID with
+one stable ID per sequence, leaving their automatic provider caching intact.
+The 150-second limit was the same within pairs.
+
+| Route | Usable, control → cache trial | Observed spend, control → cache trial | Result |
+|---|---:|---:|---|
+| Muse direct | 6/6 → 5/6 | $0.016273 estimate → $0.011616 estimated subtotal | Two cache-arm jobs lack complete terminal billing. No full comparison. |
+| Muse OpenRouter | 6/6 → 6/6 | $0.028986 → $0.020753 | OpenRouter billed 243,940 versus 477,879 cache reads. Keep available for explicit testing. |
+| DeepSeek | 5/6 → 4/6 | $0.119102 → $0.100936 | The trial cost more per usable review. No broader enablement. |
+| Hy4 | 0/6 → 0/6 | $0.219216 → $0.268168 | Cache reads increased from 483,968 to 539,264, but both arms exhausted the trial deadline. No full-review saving. |
+
+In the separate three-case concise probes, Hy4 returned two usable reviews
+in each arm and billed $0.068990 versus $0.062243. DeepSeek returned two
+versus three, but one control lacked an authoritative record, so its
+$0.020922 covered spend versus $0.018596 cannot establish whole-arm savings.
+The exact-head quality and complete-cost rules take precedence over token
+or duration differences.
+
+The named versus fresh-session comparison used three turns per arm, fresh
+processes, and a 15-minute idle interval before final recall. All four named
+routes recalled both the marker and decision. OpenRouter billed named versus
+fresh at $0.001170 versus $0.003392 for Muse, $0.012159 versus $0.025986 for
+Hy4, and $0.000489 versus $0.000433 for DeepSeek. The covered Meta estimates
+were $0.000680 for named and $0.002007 for fresh, with terminal usage missing
+for one of four named requests and two of 11 fresh requests. These are small
+continuity probes. Persistence is retained for recall and can increase spend,
+as it did for DeepSeek in this sample. No new compaction was justified or
+enabled.
+The forced live Muse transition preserved one visible copy of each question
+and kept recall on the fallback and next resumed turn.
+
+A separate Muse OpenRouter synthetic warm-repeat probe read 22,499 cached
+tokens at roughly 22,540 input tokens and 100,323 cached at roughly 100,440
+input tokens. The marker survived each answer. This does not establish an
+account-wide cold cache or a real-review savings rate. Responses and Chat
+were tested independently without extending retention or enabling stored
+history. A read-only audit of 100 recent advisory review runs found no reruns
+and one possible repeated head/branch group. There is no basis for adding a
+separate cross-job result cache.
+
+In the request-level interface smoke, both Muse OpenRouter and DeepSeek
+returned the expected verdict twice on each interface. The two Muse Chat
+requests cost $0.000191 combined and the two Responses requests $0.000215.
+For DeepSeek the totals were $0.000567 and $0.000565. Hy4 returned usage on
+both interfaces but the smoke output limit was exhausted before a verdict
+on all four calls. No interface change was adopted.
 
 **Token-efficiency amendment, 2026-11-17.** This amendment fixes reporting and
 specifies future experiments; it does not implement prompt trimming, compaction,
@@ -225,9 +316,9 @@ the lead retains all design, merge and release decisions.
    receives a provider-specific prompt cache key. Unset the experiment
    variables for ordinary operation. For qualification, select one of
    `lean` or `concise` with `AI_REVIEW_PROMPT_VARIANT` on an explicit review
-   route. The file-map trial used a separate exact-head patch file. A seeded
-   finding was missed on the direct Meta trial and there was no trusted proof
-   the model read the whole file, so the installed reviewer refuses that mode.
+   route. The file-map trial used a separate exact-head patch file. The direct
+   Meta trial mislocated a seeded finding and there was no trusted proof the
+   model read the whole file, so the installed reviewer refuses that mode.
 
    1. **Establish complete billing first.** Extend the existing shared receipts
       around `bin/ai-review-simple:run_once`, `run_harness_once`, `review` and
@@ -390,7 +481,7 @@ Credential references only. In the `vibe_coding` 1Password vault, resolve Meta d
 - [ ] Candidate lands through the protected queue, old defaults remain during qualification, and any later activation has a separately revertible default change. Confirm commit on `origin/main`, installed revisions and one live check per enabled route.
 - [ ] Record Phase C separately. If caching is released, verify its measured API usage and rollback without changing the review routes. The initial route release can finish while the cache experiment stays disabled.
 - [x] Step 6a reporting repair landed with regression tests and installed Ubuntu/Windows proof: [acceptance receipt](https://github.com/popcre/ai-devops/issues/2531#issuecomment-6962732060), source `7dffdd4845729eac1a29463a60093b94cf134832`. Missing counters stay unknown, measured zero stays zero and defaults remain unchanged. The wider rollout and future Phase C experiments remain open on their existing issues.
-- [ ] Step 6b remains planned until its owned experiments have complete billing coverage, repeatable net savings and preserved review/continuation quality. Keep experiment acceptance on #2551 with parent evidence on #2531; no new tracker or default change is implied.
+- [x] Step 6b experiments evaluated across both Muse connections, DeepSeek and Hy4. The fleet evidence above distinguishes measured savings, rejected changes and incomplete billing or quality. Installed live proof remains on [#2551](https://github.com/popcre/ai-devops/issues/2551) with parent evidence on [#2531](https://github.com/popcre/ai-devops/issues/2531). Keep the independent default activation hold.
 - [ ] Rehearse restoring previous settings without deleting candidate session state. Verify that a live legacy review can complete after rollback.
 - [ ] Update STATUS, current reviewer docs and tracking issue with live evidence. Retire applicable handoffs only after the acceptance conditions are met.
 
