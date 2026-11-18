@@ -61,15 +61,34 @@ grep -q 'CANNOT write' "$tmp/out"
 # 4. A working codex passes.
 cat >"$fake/codex" <<'FAKE'
 #!/usr/bin/env bash
+test -z "${GIT_DIR+x}" || exit 1
+test "$GIT_CONFIG_NOSYSTEM" = 1 || exit 1
 git rev-parse --verify HEAD >/dev/null || exit 1
 test -d .git || exit 1
 printf 'OK' > probe.txt
 FAKE
 chmod +x "$fake/codex"
 FAILED=0
-set +e; check_codex_sandbox >"$tmp/out" 2>&1; set -e
+set +e; GIT_DIR="$tmp/caller-git-dir" check_codex_sandbox >"$tmp/out" 2>&1; set -e
 grep -q 'can write' "$tmp/out"
 [ "$FAILED" = "0" ]
+
+# A fixture failure leaves Codex untested, without clearing another failure.
+REAL_PROBE_GIT="$(command -v git)"
+export REAL_PROBE_GIT
+cat >"$fake/git" <<'FAKE'
+#!/usr/bin/env bash
+if [ "$1" = init ]; then exit 1; fi
+exec "$REAL_PROBE_GIT" "$@"
+FAKE
+chmod +x "$fake/git"
+for prior_failure in 0 1; do
+  FAILED="$prior_failure"
+  check_codex_sandbox >"$tmp/out" 2>&1
+  grep -q 'sandbox not tested: could not initialize the scratch Git repository' "$tmp/out"
+  [ "$FAILED" = "$prior_failure" ]
+done
+rm "$fake/git"
 
 cat > "$fake/gh" <<'FAKE'
 #!/usr/bin/env bash
