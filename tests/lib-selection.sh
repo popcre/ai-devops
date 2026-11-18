@@ -186,9 +186,12 @@ selection_affected_suites() {
   if [ -n "$rules" ]; then
     local raw
     while IFS= read -r raw; do
+      # Native jq writes CRLF when called from Git Bash on Windows.
+      raw="${raw%$'\r'}"
       [ -n "$raw" ] && select_all_list+=("$raw")
     done < <(jq -r '.affected_suite_rules.select_all_globs[]? // empty' <<<"$rules" 2>/dev/null)
     while IFS=$'\t' read -r raw suite; do
+      suite="${suite%$'\r'}"
       [ -n "$raw" ] || continue
       if [ -z "${companion_map[$raw]+x}" ]; then
         companion_globs+=("$raw")

@@ -89,13 +89,13 @@ assert {"ag-grid", "devops-mcp", "synology-monitor"} <= set(p["scoped"])
 clones="$T/clones"; mkdir -p "$clones/theoracle"
 git -C "$clones/theoracle" init -q && git -C "$clones/theoracle" remote add origin https://github.com/u2giants/theoracle.git
 mv "$clones/theoracle" "$clones/oracle"
-# The project key must be the path form the native python sees: Git Bash
-# embeds MSYS paths verbatim in file content, while the policy resolves
-# Windows paths, and the two never match.
-oracle_key="$clones/oracle"
-command -v cygpath >/dev/null 2>&1 && oracle_key="$(cygpath -m "$oracle_key")"
+# Use native paths for both inputs read by Python. Git Bash does not convert
+# paths embedded in JSON, and environment conversion is not always enabled.
+clone_roots="$clones"
+command -v cygpath >/dev/null 2>&1 && clone_roots="$(cygpath -m "$clones")"
+oracle_key="$clone_roots/oracle"
 echo '{"mcpServers":{},"projects":{"'"$oracle_key"'":{"mcpServers":{"recall-ai":{"command":"x"},"mine":{"command":"y"}}}}}' > "$T/claude.json"
-AI_REPO_CLONE_ROOTS="$clones" "$PY3" "$ROOT/bin/mcp_policy.py" deliver --catalog "$T/cfg/state/mcp-catalog.json" --claude-json "$T/claude.json" >/dev/null
+AI_REPO_CLONE_ROOTS="$clone_roots" "$PY3" "$ROOT/bin/mcp_policy.py" deliver --catalog "$T/cfg/state/mcp-catalog.json" --claude-json "$T/claude.json" >/dev/null
 "$PY3" - "$T/claude.json" "$oracle_key" <<'PY' && ok "oracle clone gets trigger; retired pruned; foreign kept" || bad "project delivery wrong"
 import json, os, sys, tomllib
 # Temp paths on the Windows runners can appear long, short, slashed or
