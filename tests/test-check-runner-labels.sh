@@ -105,7 +105,23 @@ const { syncBuiltinESMExports } = require('node:module')
 childProcess.execFileSync = (command, args, { env }) => {
   assert.equal(command, 'gh')
   const prefix = 'repos/popcre/ai-devops'
+  const empty = 'repos/u2giants/empty-fixture'
   switch (args.at(-1)) {
+    case `${empty}/contents/.github/workflows`:
+    case `${empty}/contents`:
+      assert.equal(env.GH_TOKEN, 'contents-fixture')
+      throw Object.assign(new Error('gh failed'), { stderr: 'gh: Not Found (HTTP 404)' })
+    case `${empty}/branches?per_page=1`:
+      assert.equal(env.GH_TOKEN, 'contents-fixture')
+      switch (env.BRANCH_FIXTURE ?? 'empty') {
+        case 'empty':
+          return '[]'
+        case 'has-branch':
+          return '[{"name":"main"}]'
+        case 'denied':
+          throw Object.assign(new Error('gh failed'), { stderr: 'gh: Not Found (HTTP 404)' })
+      }
+      break
     case `${prefix}/contents/.github/workflows`:
       assert.equal(env.GH_TOKEN, 'contents-fixture')
       return JSON.stringify([{ type: 'file', name: 'live.yml' }])
@@ -134,7 +150,7 @@ syncBuiltinESMExports()
 JS
 scan_fixture() {
   GH_TOKEN=contents-fixture RUNNER_POOL_READ_TOKEN=inventory-fixture \
-    node --require "$TMP/mock-gh.cjs" "$TOOL" --repos popcre/ai-devops
+    node --require "$TMP/mock-gh.cjs" "$TOOL" --repos "${1:-popcre/ai-devops}"
 }
 scan_fixture | grep -q "runner label scan clean"
 CODE=0
@@ -148,5 +164,17 @@ grep -q 'UNVERIFIED popcre/ai-devops: runner inventory unavailable' <<< "$OUT"
 if grep -q '^DEAD-LABEL ' <<< "$OUT"; then
   echo "FAIL: unverified label reported dead: $OUT" >&2; exit 1
 fi
+
+echo "== only a successful empty branch list proves a repository has no contents"
+repos="popcre/ai-devops,u2giants/empty-fixture"
+scan_fixture "$repos" | grep -q "runner label scan clean"
+CODE=0
+OUT="$(BRANCH_FIXTURE=has-branch scan_fixture "$repos")" || CODE=$?
+[ "$CODE" -eq 2 ]
+grep -q 'UNVERIFIED u2giants/empty-fixture: workflow listing unavailable' <<< "$OUT"
+CODE=0
+OUT="$(BRANCH_FIXTURE=denied scan_fixture "$repos")" || CODE=$?
+[ "$CODE" -eq 2 ]
+grep -q 'UNVERIFIED u2giants/empty-fixture: workflow listing unavailable' <<< "$OUT"
 
 echo "PASS test-check-runner-labels"

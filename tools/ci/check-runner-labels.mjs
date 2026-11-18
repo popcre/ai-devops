@@ -160,8 +160,13 @@ function scanRepo(repo, allowed, unverified) {
   const endpoint = `repos/${repo}/contents`
   const out = gh(['api', `${endpoint}/.github/workflows`], { missingAllowed: true })
   if (out === null) {
-    // A 404 can conceal denied access. Confirm the token can read contents.
-    gh(['api', endpoint])
+    // A 404 can conceal denied access. Prove readable contents or no branches.
+    if (gh(['api', endpoint], { missingAllowed: true }) === null) {
+      const branches = JSON.parse(gh(['api', `repos/${repo}/branches?per_page=1`]))
+      if (!Array.isArray(branches) || branches.length > 0) {
+        throw new Error('cannot confirm the repository has no workflow files')
+      }
+    }
     return rows
   }
   const entries = JSON.parse(out)
