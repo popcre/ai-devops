@@ -114,3 +114,5 @@ check 'companion suites survive without a path_suites entry' \
 all_includes_new="$(printf '%s\n' 'tools/lib/unknown-thing.sh' | selection_affected_suites "$ROOT" "${ALL_SUITES[@]}" "$new_suite_name")"
 check 'a missing entry cannot skip a new suite from the fail-closed set' \
   'yes' "$(printf '%s\n' "$all_includes_new" | grep -qF "$new_suite_name" && echo yes || echo no)"
+
+[ "$fails" -eq 0 ]
