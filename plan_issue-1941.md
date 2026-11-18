@@ -20,6 +20,8 @@ read-when: Reviewing the Windows GitHub availability fix and its live evidence (
 
 [#1941](https://github.com/popcre/ai-devops/issues/1941) is closed. The remaining sections record the original plan for reference.
 
+The [original Windows handoff](https://github.com/popcre/ai-devops/blob/e22b71a9013c24d93055d99d95e9d4ba79ec3028/HANDOFF.d/2026-10-21T2014Z-al8960ofc-claude-ai-gh-auth-hang.md) records the separate review-snapshot repair, the Windows installer test choice, and the early GitHub transport failures. Its pending Windows housekeeping and PR-waiter checks are covered by the signed live receipt above.
+
 ## 1. Ultimate goal
 
 On Albert's Windows machine al8960ofc, the daily housekeeping report and the PR waiter must actually see GitHub. Housekeeping says "GitHub: available" and shows real merged/open status for worktrees and branches, not UNKNOWN. `ai-pr-wait` reads a PR. Each GitHub call stops costing ~42 s of local overhead. **If a step conflicts with this goal, the goal wins — stop and flag it.**
