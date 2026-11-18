@@ -2,11 +2,14 @@ name: ai-review
 
 # Advisory AI review (#2041, plan_simple-reviewer-rebuild.md REVISION phase A).
 # One reviewer per PR, picked by PR number mod 4 over muse, glm, deepseek,
-# stepfun, falling through to the next on unavailable. It runs once per PR,
-# skips docs-only PRs, posts one comment and records an `ai-review` check that
-# is success or neutral, never failure. A REJECT or REVISE opens a
-# `review-finding` issue for the automatic fixer (review-fixer.yml).
-# Provider keys stay in runner-local config, never here.
+# stepfun, falling through to the next on unavailable. Since the #2531
+# activation (2026-11-17) that rotation expands into the qualified candidate
+# routes (muse -> muse-meta with same-model OpenRouter failover, deepseek ->
+# deepseek-openrouter, hy4-openrouter as the final fallback; glm and stepfun
+# stay legacy). It runs once per PR, skips docs-only PRs, posts one comment
+# and records an `ai-review` check that is success or neutral, never failure.
+# A REJECT or REVISE opens a `review-finding` issue for the automatic fixer
+# (review-fixer.yml). Provider keys stay in runner-local config, never here.
 
 on:
   pull_request:
@@ -100,29 +103,23 @@ jobs:
           script="$GITHUB_WORKSPACE/toolkit/bin/ai-review-simple"
           base="$(git -C pr merge-base "$BASE_SHA" "$HEAD_SHA")"
           mkdir -p results; : > results/order
-          # Candidate routes (#2549/#2550) are opt-in: the input is empty and
-          # AI_REVIEW_CANDIDATE_ROUTES is unset on main, so the normal rotation
-          # below is the only default path.
-          # Fix (#2531, 2026-11-17): a GitHub expression inside a bash ${:-}
-          # default leaves a stray `}` once it renders empty, so every
-          # pull_request run computed candidate_routes='}' and crashed the
-          # opt-in branch instead of reaching the rotation below. Assign in
-          # two steps so no rendered brace ever lands inside the bash default.
+          # Activation (#2531, 2026-11-17): the normal rotation now expands
+          # into the qualified candidate route plan (muse -> muse-meta then
+          # muse-openrouter same-model failover, deepseek -> deepseek-openrouter,
+          # hy4-openrouter as the final fallback; glm and stepfun stay legacy).
+          # AI_REVIEW_CANDIDATE_ROUTES or the candidate_routes input still
+          # forces an explicit plan; reverting this commit restores the legacy
+          # rotation unchanged.
+          # Two-step assignment: a GitHub expression inside a bash ${:-}
+          # default leaves a stray `}` once it renders empty (the #2584 bug);
+          # no rendered brace may land inside the bash default.
           candidate_routes="${{ inputs.candidate_routes || '' }}"
           candidate_routes="${AI_REVIEW_CANDIDATE_ROUTES:-$candidate_routes}"
-          if [ -n "$candidate_routes" ]; then
-            python3 "$script" --run-plan "$candidate_routes" --repo pr --base "$base" \
-              --head "$HEAD_SHA" --results-dir results
-            exit 0
+          if [ -z "$candidate_routes" ]; then
+            candidate_routes="$(python3 "$script" --candidate-plan "$PR")"
           fi
-          for p in $(python3 "$script" --rotation "$PR"); do
-            echo "$p" >> results/order
-            rc=0
-            python3 "$script" --provider "$p" --repo pr --base "$base" --head "$HEAD_SHA" \
-              --out "results/$p.json" || rc=$?
-            echo "$p: ai-review-simple exit $rc (0 verdict, 3 unavailable, 2 refused)"
-            [ "$rc" = 0 ] && break
-          done
+          python3 "$script" --run-plan "$candidate_routes" --repo pr --base "$base" \
+            --head "$HEAD_SHA" --results-dir results
           exit 0
       - name: Comment, record the check, open a finding issue
         continue-on-error: true

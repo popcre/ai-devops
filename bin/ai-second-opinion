@@ -14,8 +14,10 @@ facts, key lookup and the OpenCode binary come from bin/ai-review-simple, so
 the advisory CI reviewer and these second opinions share one definition.
 Candidate routes (#2549/#2550, config/reviewer-routes.json) are opt-in through
 --route (deepseek-openrouter, muse-meta, muse-openrouter, hy4-openrouter, or
-"auto" for Muse with same-model failover); without --route every default
-behavior is unchanged.
+"auto" for Muse with same-model failover). Since the #2531 activation
+(2026-11-17) NEW Muse conversations default to that candidate route ("auto");
+existing conversations keep their stored route, and every other provider keeps
+its legacy default without --route.
 
 new/ask/review run read-only on a private copy of the repository (HEAD plus
 uncommitted changes, no git remote). implement runs on a private writable copy
@@ -663,6 +665,13 @@ def main(argv):
             if billing_id and billing_id != meta.get("billing_id"):
                 die("the billing probe is bound to its original session identifier", 2)
         else:
+            if p == "muse" and route is None and cmd != "implement":
+                # Activation (#2531, 2026-11-17): NEW Muse second opinions
+                # default to the candidate route -- "auto" = muse-meta with
+                # same-model OpenRouter failover. Existing conversations keep
+                # their stored route, other providers stay opt-in, and
+                # reverting this hunk restores the legacy default exactly.
+                route = "auto"
             sdir, meta = start(p, name, args.repo, cmd == "implement", args.base,
                                route=route if route in RR.routes() else None,
                                billing_id=billing_id)
