@@ -172,6 +172,20 @@ check 'every fixed non-preferred Windows job runs on GitHub-hosted; routed secti
 check 'no job routes to the daily-use desktop or an unqualified host' "! grep -E '^[[:space:]]*runs-on:' '$workflow' | grep -Eq 'ai-devops-windows\]|edge-dev\]'"
 check 'scheduled cancellation is actionable' "sed -n '/^  report-scheduled-failure:/,\$p' '$workflow' | grep -q \"contains(needs.\\*.result, 'cancelled')\""
 
+ci_red_wiring_ok() {
+  local reporter
+  reporter="$(sed -n '/^  report-ci-red:/,$p' "$workflow")"
+  printf '%s\n' "$reporter" | grep -qF 'needs: [fast-classifier, doc-safety, linux-offline, windows-offline]' &&
+    printf '%s\n' "$reporter" | grep -qF 'doc-safety=${{ needs.doc-safety.result }}' &&
+    printf '%s\n' "$reporter" | grep -qF 'windows-offline=${{ needs.windows-offline.outputs.section_result || needs.windows-offline.result }}' &&
+    printf '%s\n' "$reporter" | grep -qF 'github.event.pull_request.head.repo.full_name == github.repository' &&
+    printf '%s\n' "$reporter" | grep -qF "github.actor != 'dependabot[bot]'" &&
+    printf '%s\n' "$reporter" | grep -qF 'group: verify-ci-red' &&
+    printf '%s\n' "$reporter" | grep -qF 'queue: max' &&
+    job_has windows-offline verification-report 'section_result: ${{ needs.windows-offline-section.result }}'
+}
+check 'CI reporting includes PR Windows and doc safety, excludes read-only PRs, and serializes writers' ci_red_wiring_ok
+
 check 'docs are prose-only' "classify pull_request 'docs/example.md' | classification_contains '^run_long=false$'"
 check 'root plans are prose-only' "classify pull_request 'plan_example.md' | classification_contains '^run_long=false$'"
 check 'skills always run long' "classify pull_request 'skills/shared/example/SKILL.md' | classification_contains '^run_long=true$'"

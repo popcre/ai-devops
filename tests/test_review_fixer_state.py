@@ -508,6 +508,34 @@ class StateTests(unittest.TestCase):
         self.assertEqual({x["target"]: x["issues"] for x in plan["include"]}, {"other": [], "owner/work": [7]})
         self.assertTrue(all(len(x["key"]) == 64 for x in plan["include"]))
 
+    def test_scheduled_fixer_accepts_an_issue_from_live_reporter_code(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = ROOT / "tests/fixtures/mock-gh-ci-red.sh"
+            mock_gh = Path(tmp) / "gh"
+            shutil.copyfile(fixture, mock_gh)
+            mock_gh.chmod(0o755)
+            issue_body = Path(tmp) / "issue.md"
+            environment = dict(os.environ, PATH=tmp + os.pathsep + os.environ["PATH"],
+                               GH_LOG=str(Path(tmp) / "gh.log"), GH_BODY_FILE=str(issue_body),
+                               GH_FIXTURE_ISSUE="", GH_LOOKUP_FAIL_FOR="")
+            subprocess.run(
+                [shutil.which("bash") or "bash", str(ROOT / "tools/ci/report-scheduled-failure.sh"),
+                 "--run-url", "https://github.com/o/r/actions/runs/1", "--repo", "o/r",
+                 "--per-test", "--results", "windows-offline=failure", "--event", "pull_request",
+                 "--pr-number", "2", "--head-sha", HEAD],
+                env=environment, check=True, capture_output=True, text=True,
+            )
+            self.issue.update(body=issue_body.read_text(encoding="utf-8"), labels=[{"name": "ci-red"}])
+
+        with patch.object(m, "paged", side_effect=lambda endpoint:
+                          [self.issue] if "labels=ci-red" in endpoint else []):
+            plan = self.event_plan("schedule", {})
+        self.assertEqual([(item["target"], item["issues"]) for item in plan["include"]],
+                         [("owner/work", [7])])
+        recorded, _ = self.state.source(self.issue)
+        self.assertEqual(recorded["reviewed_head"], HEAD)
+        self.assertTrue(self.state.check(recorded))
+
     def event_plan(self, event, payload, number=None):
         with tempfile.TemporaryDirectory() as tmp:
             event_path = Path(tmp) / "event.json"

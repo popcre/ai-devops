@@ -62,20 +62,26 @@ fi
 # three later green runs. Advisory: blocks nothing.
 if [ "$PER_TEST" -eq 1 ]; then
   find_ci_red_issue() {
-    # Exact title match on an open ci-red issue. Title is deterministic.
-    local job_name="$1" title="ci-red: $1"
-    gh issue list --repo "$REPO" --state open --label ci-red \
-      --search "in:title \"${title}\"" --json number,title \
-      --jq ".[] | select(.title == \"${title}\") | .number" 2>/dev/null | head -1
+    # Read the issue list itself so a serialized successor does not depend
+    # on the search index already knowing about a newly created issue.
+    local title="ci-red: $1"
+    gh api --paginate "repos/$REPO/issues?state=open&labels=ci-red&per_page=100" \
+      --jq ".[] | select(.pull_request == null and .title == \"$title\") | .number" | sed -n '1p'
   }
 
   green_count() {
     local issue_num="$1"
     gh issue view "$issue_num" --repo "$REPO" --json comments \
-      --jq "[.comments[].body | select(contains(\"${GREEN_MARK}\"))] | length" 2>/dev/null || echo 0
+      --jq "[.comments[].body | select(contains(\"${GREEN_MARK}\"))] | length"
+  }
+
+  ci_red_failed() {
+    printf 'report-scheduled-failure: %s: %s\n' "$job" "$1" >&2
+    report_failed=1
   }
 
   opened=0
+  report_failed=0
   # Accept space- or newline-separated name=conclusion pairs. Split safely.
   while IFS= read -r entry; do
     case "$entry" in
@@ -84,18 +90,31 @@ if [ "$PER_TEST" -eq 1 ]; then
     esac
     job="${entry%%=*}"
     conclusion="${entry#*=}"
+    if [[ ! "$job" =~ ^[A-Za-z0-9_-]+$ ]]; then
+      ci_red_failed 'invalid job name'
+      continue
+    fi
 
     # Green tracking: a success closes ci-red issues after three greens.
     case "$conclusion" in
       success)
-        existing_green="$(find_ci_red_issue "$job")"
+        if ! existing_green="$(find_ci_red_issue "$job")"; then
+          ci_red_failed 'could not look up the existing issue'
+          continue
+        fi
         if [ -n "$existing_green" ]; then
-          gh issue comment "$existing_green" --repo "$REPO" \
-            --body "${GREEN_MARK} Green run: ${RUN_URL}" 2>/dev/null || true
-          greens="$(green_count "$existing_green")"
+          if ! gh issue comment "$existing_green" --repo "$REPO" \
+            --body "${GREEN_MARK} Green run: ${RUN_URL}" ||
+             ! greens="$(green_count "$existing_green")"; then
+            ci_red_failed 'could not record or count the successful run'
+            continue
+          fi
           if [ "${greens:-0}" -ge 3 ]; then
-            gh issue close "$existing_green" --repo "$REPO" \
-              --comment "Closed automatically: three later green runs of \`${job}\`. Last: ${RUN_URL}" 2>/dev/null || true
+            if ! gh issue close "$existing_green" --repo "$REPO" \
+              --comment "Closed automatically: three later green runs of \`${job}\`. Last: ${RUN_URL}"; then
+              ci_red_failed 'could not close the issue'
+              continue
+            fi
             printf 'report-scheduled-failure: closed #%s after %s green runs\n' "$existing_green" "$greens"
           fi
         fi
@@ -133,21 +152,32 @@ Guidance: result is a real test outcome. Diagnose the failing suite.
 A test failing on two or more unrelated changes is treated as flaky and gets this same issue.
 This issue is advisory: it blocks nothing."
 
-    existing="$(find_ci_red_issue "$job")"
+    if ! existing="$(find_ci_red_issue "$job")"; then
+      ci_red_failed 'could not look up the existing issue; skipping to avoid duplicates'
+      continue
+    fi
     # Labels may not exist yet; create before every attach.
     gh label create ci-red --repo "$REPO" --color D93F0B --force >/dev/null 2>&1 || true
     if [ -n "$existing" ]; then
-      gh issue comment "$existing" --repo "$REPO" --body "$body" 2>/dev/null || true
+      if ! gh issue comment "$existing" --repo "$REPO" --body "$body"; then
+        ci_red_failed 'could not update the issue'
+        continue
+      fi
       printf 'report-scheduled-failure: updated issue #%s label=ci-red\n' "$existing"
     else
-      number="$(gh issue create --repo "$REPO" --title "$title" --body "$body" --label ci-red)"
+      # The workflow token cannot trigger a second workflow. The fixer picks
+      # up the labelled issue on its existing scheduled sweep.
+      if ! number="$(gh issue create --repo "$REPO" --title "$title" --body "$body" --label ci-red)"; then
+        ci_red_failed 'could not create the issue'
+        continue
+      fi
       printf 'report-scheduled-failure: opened %s label=ci-red\n' "$number"
     fi
     opened=$(( opened + 1 ))
   done <<EOF
 $(printf '%s\n' "$RESULTS" | tr ' ' '\n')
 EOF
-  exit 0
+  exit "$report_failed"
 fi
 # ── end per-test mode ─────────────────────────────────────────────────────
 
