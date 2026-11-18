@@ -1,37 +1,24 @@
 ---
-summary: Plan for issue 1941 slow ai-gh auth status on Windows - symptom partly mitigated on main, live diagnosis and fix still open.
+summary: Closed Windows GitHub availability issue 1941 with measured quota pacing, a single housekeeping query, and installed verification.
 kind: plan
-status: open
-read-when: Fixing slow ai-gh auth status on Windows (issue 1941)
+status: done
+read-when: Reviewing the Windows GitHub availability fix and its live evidence (issue 1941)
 ---
 
 # Implementation plan — popcre/ai-devops#1941: `ai-gh auth status` slow on Windows; housekeeping / ai-pr-wait report GitHub unavailable
 
-## VERDICT (read first)
-
-**Partly mitigated on main, not fixed.** Checked against main `f2b4f5bd` (2026-11-04):
-
-- The housekeeping *symptom* is very likely gone: PR #2320 (commit `eabb3f6a`, 2026-11-03) raised the per-call bound in `bin/ai-housekeeping` from 30 s to 300 s (`GH_CALL_TIMEOUT`, `bin/ai-housekeeping:269-284`) and reports a throttle timeout (rc 124) distinctly (`:600`, `:615`). The measured cost on al8960ofc was ~42 s per `ai-gh auth status` (issue comment, 2026-10-21 11:25 PM EDT), well under 300 s. Live proof of it on al8960ofc has **not** been recorded.
-- The *cause*: about 42 s of `ai-gh`'s own per-call overhead on Windows, with the lock idle. It is undiagnosed and still present in code. Housekeeping also pays for a separate `auth status` probe before the call it actually needs (`:289` then `:299`). That doubles the wait.
-- `ai-pr-wait` reading a PR on al8960ofc: unproven since 2026-10-21.
-- The credential-helper contributor was already repaired (#1951 bypass at `bin/ai-gh:116`; helper re-pointed 2026-10-21).
-
-So the work is: diagnose the overhead live, remove the redundant probe, and fix the overhead only if diagnosis names one specific step. Then prove all three checklist items live on al8960ofc.
-
-## STATUS
+## STATUS (2026-11-18)
 
 | Step | State | Evidence |
 |---|---|---|
-| 1 Live timing diagnosis on al8960ofc | ⬜ open | — |
-| 2 Drop redundant `auth status` probe in housekeeping | ⬜ open | — |
-| 3 Targeted ai-gh overhead fix (conditional) | ⬜ open | — |
-| 4 Tests green | ⬜ open | — |
-| 5 PR, merge, install on al8960ofc | ⬜ open | — |
-| 6 Live proof + issue checklist | ⬜ open | — |
+| 1 Live timing diagnosis on al8960ofc | Done | The 42.216-second call included 17.068 seconds of mandatory low-quota spacing and 3.081 seconds of normal spacing after a quota probe. |
+| 2 Drop redundant `auth status` probe in housekeeping | Done | [#2625](https://github.com/popcre/ai-devops/pull/2625) uses the governed PR inventory as the availability check. |
+| 3 Targeted ai-gh overhead fix (conditional) | Not needed | The trace found no removable step meeting the plan's 20-second threshold. Keep the quota controls. |
+| 4 Tests green | Done | Focused Linux and native Windows housekeeping tests passed. The Linux PR waiter suite passed. |
+| 5 PR, merge, install on al8960ofc | Done | Installed and verified `d604b90c`. |
+| 6 Live proof + issue checklist | Done | Housekeeping reached GitHub and reported nine merged candidates. The installed waiter read the exact merge result. [Signed live receipt](https://github.com/popcre/ai-devops/issues/1941#issuecomment-6987484780) |
 
-Fresh session starts at Step 1.
-
-Handoff: the planning session was read-only and could not create a `HANDOFF.d/` file. **The implementer's first commit must add `HANDOFF.d/<UTC>-<machine>-<agent>-ai-gh-windows-overhead-1941.md`.** It links to this plan (copy this plan into the repo as `plan_ai-gh-windows-overhead-1941.md`), and the plan links back to it.
+[#1941](https://github.com/popcre/ai-devops/issues/1941) is closed. The remaining sections record the original plan for reference.
 
 ## 1. Ultimate goal
 
@@ -62,7 +49,7 @@ NOT in this plan:
 - Bypassing `ai-gh` with bare `gh` in housekeeping. This is forbidden by the comment at `bin/ai-housekeeping:253-256`.
 - Linux performance work.
 
-## 5. Current state of the code (main `f2b4f5bd`)
+## 5. Pre-fix code (main `f2b4f5bd`)
 
 - `bin/ai-housekeeping:259-284`: `GH` resolves to `bin/ai-gh`. `gh_call` runs it through `bash` with `timeout ${AI_HOUSEKEEPING_GH_TIMEOUT_SECONDS:-300}`.
 - `:286-293`: `gh_call auth status` sets `GH_OK`.
@@ -73,7 +60,7 @@ NOT in this plan:
 - `bin/ai-gh:~517-540`: per call it spawns the real `gh auth token` up to **twice** (hash, then PAT class check). It may then make a paced `/user` request (`sleep_ms` until spacing elapses) when the identity cache is missing or negative and older than 300 s. On Windows each `gh.exe` spawn plus pipes through `sha256sum`/`awk` is slow, and the paced sleep can be long. This is the leading suspect, but it is **unmeasured**.
 - Tests: `tests/test-ai-housekeeping.sh` (#2320 added probe-timeout cases), `tests/test-ai-gh.sh`, `tests/test-ai-gh-admission.py`, `tests/test-ai-gh-app-auth.sh`.
 
-## 6. Key findings / root cause
+## 6. Pre-fix findings and diagnostic hypotheses
 
 - Lock contention was ruled out (lock idle during sampling, 2026-10-21).
 - A stale credential helper pointing at a staging copy's ai-gh was a separate contributor. It is fixed.
@@ -97,7 +84,7 @@ Locked:
 Open, with criteria:
 - Whether Step 3 happens at all. Do it only if Step 1 attributes ≥ 20 s of the overhead to one identifiable block that can be changed without altering semantics (for example, the duplicate `auth token` spawn, or re-running the `/user` lookup every call because the cache is never written on Windows). Otherwise record the measurement on the issue and stop at Step 2.
 
-## 9. Steps
+## 9. Original steps
 
 **Step 1 — Live diagnosis on al8960ofc (no code change).**
 Reach al8960ofc over SSH (see section 12). In Git Bash, in the installed checkout, run:
