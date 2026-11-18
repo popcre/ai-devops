@@ -30,6 +30,7 @@ defaults, **and the secret/MCP/SSH plumbing** (Phase 2 of
 | Claude/Codex skills | repo → machine (repo is source of truth) | `bin/ai-adopt-globals` → `bin/ai-install-skills` |
 | Global instructions (`CLAUDE.md`, Codex `AGENTS.md`) | repo → machine; shared body replaced, machine section preserved and verified | `bin/ai-adopt-globals` |
 | Claude tool permissions (`~/.claude/settings.json` allow list) | repo → machine, **checked every run (step 5b)**; merged in when missing, never removed | `bin/ai-claude-permissions` (list: `config/claude-permissions.allow`) |
+| Claude plugins (`/slm-agent:evaluate` and other plugin skills) | repo → machine, **checked every run (step 5c)**; installed when missing, never removed | `bin/ai-claude-plugins` (list: `config/claude-plugins.tsv`) |
 | Blocker-watch timer (re-surfaces stuck state; registration is OUT) | repo → machine, **checked every run (step 1c)** | `bin/ai-blocker-watch schedule` |
 | Auto-memory | machine ↔ private memory hub (lossless transaction) | `bin/ai-memory-sync` |
 | gcloud dflow defaults | apply on machine | `bin/ai-gcloud-dflow` |
@@ -259,6 +260,16 @@ clone + `./install.sh` (Ubuntu) first.
    `Blocked —` with the parse error (never ask Albert to decide). To add a permission for every machine, add the line to
    `config/claude-permissions.allow` in the repo and commit; never hand-edit one
    machine's settings file.
+
+   **5c. Ensure the required Claude plugins:** `bin/ai-claude-plugins`.
+   Installs every plugin in `config/claude-plugins.tsv` that this machine is
+   missing (user scope, so its skills appear in every project as
+   `/<plugin>:<skill>`); it never removes or updates one. Say its verdict out
+   loud: `OK all N required Claude plugin(s) already present`, `ADDED N`
+   (new sessions pick them up), or `SKIP` when the machine has no `claude`
+   command. A `FAIL` line is a network or plugin-manager error — rerun once,
+   then report it `Blocked —` with the line. To add a plugin for every
+   machine, add its line to `config/claude-plugins.tsv` and commit.
 6. **Set gcloud defaults** (when this machine uses gcloud): `bin/ai-gcloud-dflow`.
    Skips cleanly if gcloud isn't installed.
 6b. **Pin the Git commit identity:** `bin/ai-git-identity`. Idempotent; prints

@@ -637,6 +637,15 @@ run_stage required "Claude closeout hook" "$REPO_ROOT/bin/ai-install-completion-
 run_stage required "Claude PR-poll guard hook" "$REPO_ROOT/bin/ai-install-pr-poll-guard-hook"
 
 # --------------------------------------------------------------------------
+# 4.8b Claude plugins. Plugin skills (`/slm-agent:evaluate`, ...) are installed
+#     per machine by the Claude Code plugin manager, so the list lives in
+#     config/claude-plugins.tsv and the missing ones are installed at USER
+#     scope here. Optional: it needs the network and the `claude` command, and
+#     a machine without the command is reported SKIP.
+# --------------------------------------------------------------------------
+run_stage optional "Claude plugins" "$REPO_ROOT/bin/ai-claude-plugins"
+
+# --------------------------------------------------------------------------
 # 4.9 Session temp cleanup (plan_session-temp-cleanup.md). Each Claude Code
 #     session gets its own temp folder that its SessionEnd hook deletes, plus a
 #     30-minute backup sweep for crashed sessions. Linux only; SKIP elsewhere.
