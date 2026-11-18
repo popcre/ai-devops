@@ -11,7 +11,10 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+from bash_resolution import resolve_bash
+
 ROOT = Path(__file__).resolve().parents[1]
+BASH, _ = resolve_bash()
 HELPER = ROOT / "tools/public-boundary-version-spans.py"
 DATA = json.loads((ROOT / "tests/fixtures/public-boundary-versions/cases.json").read_text())
 SPEC = importlib.util.spec_from_file_location("version_spans", HELPER)
@@ -96,9 +99,9 @@ class VersionSpans(unittest.TestCase):
         (self.root / "tomllib.py").write_text('raise RuntimeError("untrusted target import")\n')
         subprocess.run(["git", "-C", str(self.root), "add", "requirements.txt"], check=True)
         env = dict(os.environ, PYTHONPATH=str(self.root))
-        command = ["bash", str(ROOT / "bin/ai-public-boundary-check"), str(self.root)]
+        command = [BASH, str(ROOT / "bin/ai-public-boundary-check"), str(self.root)]
         clean = subprocess.run(command, env=env, text=True, capture_output=True)
-        self.assertEqual(clean.returncode, 0, clean.stderr)
+        self.assertEqual(clean.returncode, 0, clean.stderr + clean.stdout)
         for suffix in [" # " + DATA["other_private"], " # " + DATA["project"], " # " + DATA["credential"], " # https://" + DATA["other_private"] + "/", " # https://" + DATA["public_endpoint"] + "/"]:
             (self.root / "requirements.txt").write_text(pin + suffix + "\n")
             self.assertNotEqual(subprocess.run(command, env=env, capture_output=True).returncode, 0)
@@ -111,7 +114,7 @@ class VersionSpans(unittest.TestCase):
         (self.root / "requirements.txt").write_text(DATA["requirements"][0][1] + "\n")
         subprocess.run(["git", "-C", str(self.root), "add", "requirements.txt"], check=True)
         # The missing helper must never turn an unclassified match into PASS.
-        result = subprocess.run(["bash", str(tool), str(self.root)], capture_output=True)
+        result = subprocess.run([BASH, str(tool), str(self.root)], capture_output=True)
         self.assertNotEqual(result.returncode, 0)
 
     def test_direct_standard_network_calls_only(self):
@@ -191,9 +194,9 @@ class VersionSpans(unittest.TestCase):
         policy = self.root / "policy.py"
         policy.write_text(source + "\n")
         subprocess.run(["git", "-C", str(self.root), "add", "policy.py"], check=True)
-        command = ["bash", str(ROOT / "bin/ai-public-boundary-check"), str(self.root)]
-        clean = subprocess.run(command, capture_output=True)
-        self.assertEqual(clean.returncode, 0, clean.stderr)
+        command = [BASH, str(ROOT / "bin/ai-public-boundary-check"), str(self.root)]
+        clean = subprocess.run(command, text=True, capture_output=True)
+        self.assertEqual(clean.returncode, 0, clean.stderr + clean.stdout)
         for suffix in [" # " + DATA["project"], " # " + DATA["credential"], " # https://" + DATA["public_endpoint"] + "/"]:
             policy.write_text(source + suffix + "\n")
             self.assertNotEqual(subprocess.run(command, capture_output=True).returncode, 0)
