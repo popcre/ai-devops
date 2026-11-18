@@ -16,8 +16,8 @@ Candidate routes (#2549/#2550, config/reviewer-routes.json) are opt-in through
 --route (deepseek-openrouter, muse-meta, muse-openrouter, hy4-openrouter, or
 "auto" for Muse with same-model failover). Since the #2531 activation
 (2026-11-17) NEW Muse conversations default to that candidate route ("auto");
-existing conversations keep their stored route, and every other provider keeps
-its legacy default without --route. A per-user
+new read-only DeepSeek conversations default to deepseek-openrouter. Existing
+conversations keep their stored route. A per-user
 ~/.config/ai-devops/muse-second-opinion-default file containing "legacy"
 preserves the previous direct-only default for new implicit Muse conversations.
 
@@ -124,21 +124,6 @@ VERDICT: REVISE.
 def die(msg, code=1):
     print(f"ai-second-opinion: {msg}", file=sys.stderr)
     sys.exit(code)
-
-
-def default_muse_route():
-    """Resolve the default for a new implicit Muse conversation."""
-    path = os.path.expanduser("~/.config/ai-devops/muse-second-opinion-default")
-    try:
-        with open(path, "rb") as config:
-            value = config.read(9)
-    except FileNotFoundError:
-        return "auto"
-    except OSError:
-        die("cannot read the Muse default. Check ~/.config/ai-devops/muse-second-opinion-default.", 2)
-    if value not in (b"legacy", b"legacy\n", b"legacy\r\n"):
-        die("invalid Muse default. Set ~/.config/ai-devops/muse-second-opinion-default to legacy.", 2)
-    return None
 
 
 def doctor_diagnostics(provider, state):
@@ -420,7 +405,13 @@ def record_usage(sdir, route, spec, stdout, outcome, started, billing_id):
 def run_opencode(provider, sdir, meta, prompt, route=None):
     """One turn. Returns the answer text; exits 3 when the provider is unavailable."""
     known = RR.routes()
+    if route is None:
+        route = "auto" if meta.get("auto_route") else meta_route(meta)
+    elif route != "auto":
+        meta.pop("auto_route", None)
     auto = route == "auto"
+    if auto:
+        meta["auto_route"] = True
     if route and route != "auto" and route not in known:
         die(f"unknown reviewer route: {route}", 2)
     if auto and provider != "muse":
@@ -687,8 +678,11 @@ def main(argv):
             if billing_id and billing_id != meta.get("billing_id"):
                 die("the billing probe is bound to its original session identifier", 2)
         else:
-            if p == "muse" and route is None and cmd != "implement":
-                route = default_muse_route()
+            if route is None and cmd != "implement":
+                try:
+                    route = RR.second_opinion_default(p)
+                except RR.RouteError as error:
+                    die(str(error), 2)
             sdir, meta = start(p, name, args.repo, cmd == "implement", args.base,
                                route=route if route in RR.routes() else None,
                                billing_id=billing_id)
@@ -702,6 +696,11 @@ def main(argv):
         return 0
 
     if cmd == "review":
+        if route is None:
+            try:
+                route = RR.second_opinion_default(p)
+            except RR.RouteError as error:
+                die(str(error), 2)
         repo = git(args.repo, "rev-parse", "--show-toplevel").strip()
         base = args.base or "origin/main"
         mb = git(repo, "merge-base", base, "HEAD").strip()

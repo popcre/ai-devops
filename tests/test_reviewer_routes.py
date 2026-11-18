@@ -620,6 +620,32 @@ class SecondOpinionRouteTests(Base):
         self.assertEqual(r.returncode, 3)
         self.assertEqual(self.meta("deepseek", "ds2")["session"], "session-unknown-9")
 
+    def test_deepseek_default_and_rollback_preserve_conversation_routes(self):
+        self.mode("approve")
+        result = self.run_so("deepseek", "new", "ds-default", "hello")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.meta("deepseek", "ds-default")["route"], "deepseek-openrouter")
+        setting = self.muse_default.with_name("deepseek-second-opinion-default")
+        setting.write_text("legacy\n")
+        legacy = self.run_so("deepseek", "new", "ds-legacy", "hello")
+        self.assertEqual(legacy.returncode, 0, legacy.stderr)
+        self.assertNotIn("route", self.meta("deepseek", "ds-legacy"))
+        resumed = self.run_so("deepseek", "ask", "ds-default", "again")
+        self.assertEqual(resumed.returncode, 0, resumed.stderr)
+        self.assertIn("--session-id", self.dsh_calls()[-1]["args"])
+        setting.unlink()
+        resumed_legacy = self.run_so("deepseek", "ask", "ds-legacy", "again")
+        self.assertEqual(resumed_legacy.returncode, 0, resumed_legacy.stderr)
+        self.assertNotIn("route", self.meta("deepseek", "ds-legacy"))
+
+    def test_invalid_deepseek_default_refuses_before_contact(self):
+        setting = self.muse_default.with_name("deepseek-second-opinion-default")
+        setting.write_text("bad value")
+        result = self.run_so("deepseek", "new", "ds-invalid", "hello")
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("invalid DeepSeek default", result.stderr)
+        self.assertEqual(self.dsh_calls(), [])
+
     def test_implement_rejects_route(self):
         self.mode("ok")
         r = self.run_so("muse", "--route", "muse-meta", "implement", "x1", "do it")
@@ -658,6 +684,14 @@ class SecondOpinionRouteTests(Base):
         self.assertEqual(r2.returncode, 0, r2.stderr)
         self.assertEqual(self.meta("muse", "nd")["route"], "muse-meta")
         self.assertIn("--session", self.oc_calls()[-1]["args"])
+
+    def test_default_muse_continuation_keeps_automatic_failover(self):
+        self.mode("ok", "auth", "ok")
+        first = self.run_so("muse", "new", "default-failover", "first question")
+        self.assertEqual(first.returncode, 0, first.stderr)
+        resumed = self.run_so("muse", "ask", "default-failover", "second question")
+        self.assertEqual(resumed.returncode, 0, resumed.stderr)
+        self.assertEqual(self.meta("muse", "default-failover")["route"], "muse-openrouter")
 
     def test_muse_legacy_default_applies_only_to_new_implicit_sessions(self):
         self.mode("credit", "ok", "ok", "ok")
@@ -703,6 +737,7 @@ class SecondOpinionRouteTests(Base):
         with open(mp) as fh:
             m = json.load(fh)
         m.pop("route", None)
+        m.pop("auto_route", None)
         m.pop("visible", None)
         with open(mp, "w") as fh:
             json.dump(m, fh)
@@ -752,7 +787,8 @@ FAKE_AGENT_DSH = textwrap.dedent("""\
         if os.path.isfile(pp):
             patch = open(pp).read()
         with open(log, "a") as fh:
-            fh.write(json.dumps({"args": args, "cwd": os.getcwd(),
+            fh.write(json.dumps({"args": args, "cwd": os.getcwd(), "task": task,
+                                 "tracked": open("tracked.txt").read() if os.path.exists("tracked.txt") else None,
                                  "has_or_key": bool(os.environ.get("OPENROUTER_API_KEY")),
                                  "has_ds_key": bool(os.environ.get("DEEPSEEK_API_KEY")),
                                  "patch": patch}) + "\\n")
@@ -899,10 +935,49 @@ class DeepseekAgentHarnessTests(Base):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("live provider response (deepseek-openrouter)", r.stdout)
 
+    def test_harness_is_default_and_resumes_without_route_flag(self):
+        self.protect_or_store()
+        pathlib.Path(self.or_store).with_name("deepseek-api-key").unlink()
+        result = self.agent("send", "hello there")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        session_id = next(line.split(":", 1)[1].strip() for line in result.stdout.splitlines()
+                          if line.startswith("SESSION_ID:"))
+        setting = pathlib.Path(self.or_store).parent.parent / "deepseek-second-opinion-default"
+        setting.write_text("legacy\n")
+        pathlib.Path(self.repo, "tracked.txt").write_text("updated source\n")
+        resumed = self.agent("reply", session_id, "second turn")
+        self.assertEqual(resumed.returncode, 0, resumed.stderr)
+        self.assertIn("--session-id", self.dsh_log_rows()[-1]["args"])
+        for row in self.dsh_log_rows():
+            self.assertTrue(row["cwd"].replace("\\", "/").endswith(
+                ".dsh-home/deepseek-turn.workspace/repo"), row["cwd"])
+            self.assertFalse(pathlib.Path(row["cwd"]).exists())
+        self.assertEqual(self.dsh_log_rows()[-1]["tracked"], "updated source\n")
+
     def test_missing_or_store_refuses(self):
         r = self.agent("send", "--route", "deepseek-openrouter", "hello")
         self.assertEqual(r.returncode, 1)
         self.assertIn("openrouter reviewer key store is missing", r.stderr)
+
+    def test_older_harness_conversation_replays_visible_history_once(self):
+        self.protect_or_store()
+        first = self.agent("send", "remember the public fixture marker")
+        self.assertEqual(first.returncode, 0, first.stderr)
+        session_id = next(line.split(":", 1)[1].strip() for line in first.stdout.splitlines()
+                          if line.startswith("SESSION_ID:"))
+        path = pathlib.Path(self.repo, ".ai", "deepseek-sessions", session_id + ".json")
+        value = json.loads(path.read_text())
+        value.pop("workspace_mode")
+        path.write_text(json.dumps(value))
+        resumed = self.agent("reply", session_id, "continue the discussion")
+        self.assertEqual(resumed.returncode, 0, resumed.stderr)
+        row = self.dsh_log_rows()[-1]
+        self.assertNotIn("--session-id", row["args"])
+        self.assertIn("remember the public fixture marker", row["task"])
+        self.assertIn("continue the discussion", row["task"])
+        migrated = json.loads(path.read_text())
+        self.assertEqual(migrated["workspace_mode"], "stable-per-session")
+        self.assertEqual(len(migrated["turns"]), 4)
 
     def test_route_refuses_review_combination(self):
         self.protect_or_store()

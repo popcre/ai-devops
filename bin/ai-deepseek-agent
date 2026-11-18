@@ -5,9 +5,11 @@
 # talk back and forth with DeepSeek about anything -- a plan, a design, a
 # piece of code, an environment/config question, a debugging theory, a
 # disagreement -- the same way codex-second-opinion lets Claude debate Codex.
-# DeepSeek sees the FULL conversation history on every turn (there is no
-# native DeepSeek CLI with session-resume, so this script keeps the thread in
-# a JSON transcript file and resends it each time).
+# New ordinary conversations run in the read-only DeepSeek Harness through
+# OpenRouter and resume its saved session. Existing direct API conversations
+# keep their stored history and transport. A local
+# ~/.config/ai-devops/deepseek-second-opinion-default containing legacy restores
+# the direct default for new conversations.
 #
 # Usage:
 #   ai-deepseek-agent send "<message>" [--file FILE]... [--model deepseek-flash] [--system "<system prompt>"] [--review]
@@ -273,11 +275,6 @@ key_store_ok() { # [store-path]
 }
 if [ "$SUBCMD" = store-key ] && [ "${1:-}" = --if-missing ] && key_store_ok; then
   echo 'DeepSeek protected key store already present.'; exit 0
-fi
-if [ "$SUBCMD" != store-key ] && { [ "$SUBCMD" = send ] || [ "$SUBCMD" = reply ] || [ "$SUBCMD" = balance ] || { [ "$SUBCMD" = doctor ] && [ "${1:-}" = --live ]; }; } && [ -z "${DEEPSEEK_API_KEY:-}" ]; then
-  key_store_ok || { echo 'Error: DeepSeek protected key store is missing or insecure. Run ai-deepseek-agent store-key outside a review.' >&2; exit 1; }
-  IFS= read -r DEEPSEEK_API_KEY < "$KEY_STORE" || DEEPSEEK_API_KEY=""
-  [ -n "$DEEPSEEK_API_KEY" ] || { echo 'Error: DeepSeek protected key store is empty.' >&2; exit 1; }
 fi
 if [ -z "${DEEPSEEK_API_KEY:-}" ] && [ "$SUBCMD" = store-key ]; then
   if [ -n "${AI_DEEPSEEK_REEXEC:-}" ]; then
@@ -584,9 +581,16 @@ PY
 }
 
 pending_hash() { sha256sum "$1" | awk '{print $1}'; }
-make_turn_workspace() { # source dir -> print a fresh disposable remote-less copy
+make_turn_workspace() { # source dir [stable session parent] -> fresh remote-less copy
   local src="$1" dir r
-  dir="$(mktemp -d "${TMPDIR:-/tmp}/deepseek-turn.XXXXXX")" || return 1
+  if [ -n "${2:-}" ]; then
+    # Harness resume binds its session to the original working directory.
+    # Recreate the snapshot at the same name, still deleting it after each turn.
+    dir="$2/deepseek-turn.workspace"
+    mkdir "$dir" || return 1
+  else
+    dir="$(mktemp -d "${TMPDIR:-/tmp}/deepseek-turn.XXXXXX")" || return 1
+  fi
   if [ "${REVIEW:-0}" = 1 ]; then
     # The review snapshot already holds the exact source; copy it verbatim.
     cp -a "$src/." "$dir/" || { rm -rf "$dir"; return 1; }
@@ -762,10 +766,18 @@ except (ValueError, KeyError, IndexError, TypeError, OSError):
 PY
 }
 
+load_direct_key() {
+  [ -z "$DEEPSEEK_PROVIDER_KEY" ] || return 0
+  key_store_ok || { echo 'Error: DeepSeek protected key store is missing or insecure. Run ai-deepseek-agent store-key outside a review.' >&2; return 1; }
+  IFS= read -r DEEPSEEK_PROVIDER_KEY < "$KEY_STORE" || DEEPSEEK_PROVIDER_KEY=""
+  [ -n "$DEEPSEEK_PROVIDER_KEY" ] || { echo 'Error: DeepSeek protected key store is empty.' >&2; return 1; }
+}
+
 call_api() {
   # $1 = messages JSON, $2 = reply text file. Runs curl as an owned child so a
   # signal cannot release the conversation lock while the request still runs.
   local msgs_file="$1" reply_file="$2" req_file resp_file status_file http_code rc
+  load_direct_key || return 1
   if [ -n "${LOCK_DIR:-}" ]; then
     if [ -n "$REVIEW_SOURCE_WORKSPACE" ]; then
       reviewer_event_evidence require-report deepseek "$REVIEW_SOURCE_WORKSPACE" || return 1
@@ -1369,12 +1381,25 @@ evidence and return BLOCKED instead of inferring it.
 End the response with a literal ## Verdict heading followed on the next line by exactly APPROVE, REJECT, or BLOCKED.'
 
 # --- Candidate engine: DeepSeek Harness through OpenRouter (#2549) --------
-# Opt-in through --route deepseek-openrouter on send/reply/doctor --live.
+# New ordinary second opinions use deepseek-openrouter. Formal review and
+# repository-tool API conversations retain their existing contracts.
 # Read-only: the turn runs in a disposable remote-less copy of the repository
 # made non-writable for the turn; the direct engine and every legacy session
 # keep their existing behavior and on-disk format.
 harness_refuse_combinations() {
   [ "$#" -eq 0 ] || { echo "Error: --route deepseek-openrouter cannot be combined with $*." >&2; exit 2; }
+}
+harness_default_route() {
+  "$PYTHON" - "$SOURCE_TOOLS/../tools" "$CFG_DIR" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import reviewer_routes as routes
+try:
+    print(routes.second_opinion_default("deepseek", sys.argv[2]) or "")
+except routes.RouteError as error:
+    print(str(error), file=sys.stderr)
+    raise SystemExit(2)
+PY
 }
 harness_ready() {
   [ "$ROUTE" = deepseek-openrouter ] || { echo 'Error: --route accepts only deepseek-openrouter.' >&2; exit 2; }
@@ -1409,6 +1434,7 @@ harness_write_session() { # id turns-json-file out
 import json, sys
 sid, turns_path, out = sys.argv[1:]
 json.dump({"schema_version": 1, "engine": "deepseek-harness", "route": "deepseek-openrouter",
+           "workspace_mode": "stable-per-session",
            "harness_session": sid, "turns": json.load(open(turns_path, encoding="utf-8"))},
           open(out, "w", encoding="utf-8"), indent=1)
 ' "$1" "$2" "$3"
@@ -1433,6 +1459,7 @@ case "$SUBCMD" in
   balance)
     [ "$#" -eq 0 ] || { echo "Usage: ai-deepseek-agent balance" >&2; exit 2; }
     # This official GET creates no conversation and reads only the protected cache.
+    load_direct_key || exit 1
     printf '%s' "$DEEPSEEK_PROVIDER_KEY" | "$PYTHON" "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../tools/deepseek_balance.py"
     ;;
   finalize)
@@ -1536,7 +1563,7 @@ case "$SUBCMD" in
       || { [ -z "$ROUTE" ] || { echo 'Error: --route accepts only deepseek-openrouter.' >&2; exit 2; }; }
     CREDENTIAL_READY=0
     if [ -n "$DEEPSEEK_PROVIDER_KEY" ] || key_store_ok; then CREDENTIAL_READY=1; fi
-    [ "$CREDENTIAL_READY" -eq 1 ] || { echo 'Error: DeepSeek protected key store is unavailable. Run ai-deepseek-agent store-key outside a review.' >&2; exit 1; }
+    [ -n "$ROUTE" ] || [ "$CREDENTIAL_READY" -eq 1 ] || { echo 'Error: DeepSeek protected key store is unavailable. Run ai-deepseek-agent store-key outside a review.' >&2; exit 1; }
     printf 'PASS  curl available\nPASS  Python available (%s)\nPASS  bounded provider timeout (%ss)\n' "$PYTHON" "$CALL_TIMEOUT"
     if [ "$LIVE" -eq 1 ] && [ -n "$ROUTE" ]; then
       harness_ready
@@ -1629,6 +1656,9 @@ for m in data:
 
 $REVIEW_INSTRUCTION"
 
+    if [ -z "$ROUTE" ] && [ "$REVIEW" = 0 ] && [ -z "$GOVERNED_HEAD$SYSTEM" ] && [ "$REPO_TOOLS" = 0 ]; then
+      ROUTE="$(harness_default_route)" || exit 2
+    fi
     if [ -n "$ROUTE" ]; then
       harness_ready
       harness_refuse_combinations $([ "$REVIEW" = 1 ] && printf %s --review) $([ -n "$GOVERNED_HEAD" ] && printf %s --governed-verdict) $([ -n "$OPT_BASE" ] && printf %s --base) $([ -n "$OPT_ASSERT_HEAD" ] && printf %s --assert-head) $([ "$REPO_TOOLS" = 1 ] && printf %s --repo-tools)
@@ -1640,7 +1670,7 @@ $REVIEW_INSTRUCTION"
       PROMPT_FILE="$(mktemp "$SESS_DIR/.prompt.XXXXXX")" || exit 1
       printf '%s\n' "$MSG" > "$PROMPT_FILE"
       HARNESS_SID_FILE="$PROMPT_FILE.sid"
-      WORK="$(make_turn_workspace "$REPO_ROOT")" || exit 1
+      WORK="$(make_turn_workspace "$REPO_ROOT" "$HARNESS_DSH_HOME")" || exit 1
       ACTIVE_TURN_WORKSPACE="$WORK"
       harness_make_readonly "$WORK"
       if ! REPLY="$(harness_run "$PROMPT_FILE" "" "$WORK")"; then
@@ -1745,6 +1775,15 @@ $REVIEW_INSTRUCTION"
     configure_governed_review || exit 1
     F="$(session_path "$ID")" || exit 2
     [ -f "$F" ] || { echo "Error: no such session: $ID" >&2; exit 1; }
+    if [ -z "$ROUTE" ]; then
+      ROUTE="$("$PYTHON" - "$F" <<'PY'
+import json, sys
+with open(sys.argv[1], encoding="utf-8") as session:
+    value = json.load(session)
+print(value.get("route", "") if isinstance(value, dict) and value.get("engine") == "deepseek-harness" else "")
+PY
+)" || exit 2
+    fi
     session_verdict_mode_matches || exit 1
     if recovery_required "$ID"; then echo "Error: this conversation is marked recovery-required because its attachment record fell behind its transcript; its evidence list would understate what DeepSeek saw. Reconcile or delete it before continuing." >&2; exit 1; fi
     if [ "$REVIEW" = 1 ] && ! review_system_present "$F"; then echo "Error: this conversation was not started as a formal review with this exact verdict mode and head, so its system prompt is not the review evidence boundary. Continue with its original mode/head, or start a new formal review." >&2; exit 1; fi
@@ -1763,14 +1802,33 @@ except (OSError, ValueError): raise SystemExit(1)
 if not isinstance(value, dict) or value.get("engine") != "deepseek-harness" \
         or value.get("route") != "deepseek-openrouter" or not value.get("harness_session"):
     raise SystemExit(1)
-print(value["harness_session"])
+print(value["harness_session"] if value.get("workspace_mode") == "stable-per-session" else "")
 ' "$F")" || { echo "Error: session $ID is not a deepseek-openrouter harness conversation; continue it with its original engine." >&2; exit 1; }
       acquire_lock "$F" || exit 1
       HARNESS_DSH_HOME="$(session_path "$ID" .dsh-home)" || exit 1
       PROMPT_FILE="$(mktemp "$SESS_DIR/.prompt.XXXXXX")" || exit 1
       printf '%s\n' "$MSG" > "$PROMPT_FILE"
+      if [ -z "$HARNESS_SID" ]; then
+        # Older Harness sessions bound themselves to a deleted temporary path.
+        # Recreate their visible conversation in a new scoped runtime session.
+        "$PYTHON" - "$F" "$PROMPT_FILE" <<'PY'
+import json, sys
+with open(sys.argv[1], encoding="utf-8") as session:
+    turns = json.load(session).get("turns", [])
+if not isinstance(turns, list) or any(not isinstance(turn, dict) or
+        turn.get("role") not in ("user", "assistant") or
+        not isinstance(turn.get("content"), str) for turn in turns):
+    raise SystemExit("Error: cannot replay invalid visible conversation history.")
+with open(sys.argv[2], encoding="utf-8") as prompt:
+    pending = prompt.read()
+with open(sys.argv[2], "w", encoding="utf-8") as prompt:
+    prompt.write("Continue this prior visible conversation:\n" + json.dumps(turns) +
+                 "\n\nNew request:\n" + pending)
+PY
+        [ "$?" -eq 0 ] || exit 1
+      fi
       HARNESS_SID_FILE="$PROMPT_FILE.sid"
-      WORK="$(make_turn_workspace "$REPO_ROOT")" || exit 1
+      WORK="$(make_turn_workspace "$REPO_ROOT" "$HARNESS_DSH_HOME")" || exit 1
       ACTIVE_TURN_WORKSPACE="$WORK"
       harness_make_readonly "$WORK"
       if ! REPLY="$(harness_run "$PROMPT_FILE" "$HARNESS_SID" "$WORK")"; then
@@ -1793,6 +1851,7 @@ print(value["harness_session"])
 import json, sys
 value = json.load(open(sys.argv[1], encoding="utf-8"))
 value["harness_session"] = sys.argv[2]
+value["workspace_mode"] = "stable-per-session"
 json.dump(value, open(sys.argv[3], "w", encoding="utf-8"), indent=1)
 ' "$NEWF" "$HARNESS_SID" "$NEWF.session" && mv -f "$NEWF.session" "$NEWF"
       if ! write_atomic "$F" "$NEWF"; then

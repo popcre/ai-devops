@@ -20,6 +20,9 @@ ai_test_public_sources "$TMP"
 export AI_REVIEW_EVENT_DIR="$TMP/reviewer-events"
 export AI_DEEPSEEK_TEST_DIR="$TMP"
 mkdir -p "$TMP/bin" "$TMP/home/.config/ai-devops" "$TMP/repo"
+# This suite verifies the legacy API/session contract. Route defaults and
+# native Harness continuation are covered in test_reviewer_routes.py.
+printf 'legacy\n' > "$TMP/home/.config/ai-devops/deepseek-second-opinion-default"
 git -C "$TMP/repo" init -q; git -C "$TMP/repo" config user.email test@example.com; git -C "$TMP/repo" config user.name Test
 printf '.ai/\n' >> "$TMP/repo/.git/info/exclude"
 printf 'test\n' > "$TMP/repo/tracked"; git -C "$TMP/repo" add tracked; git -C "$TMP/repo" commit -qm init
