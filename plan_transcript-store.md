@@ -9,7 +9,7 @@ read-when: working on the transcript store or its remaining proof step
 
 **Issue:** popcre/ai-devops#2050.
 **Design record:** [docs/transcript-store-decision-2026-10-29.md](docs/transcript-store-decision-2026-10-29.md).
-**Handoff:** [HANDOFF.d/2026-10-29T2015Z-edge-dev3-claude-transcript-store-plan.md](HANDOFF.d/2026-10-29T2015Z-edge-dev3-claude-transcript-store-plan.md).
+**Original handoff:** [October 29 planning record](https://github.com/popcre/ai-devops/blob/b5060d1b3ebe29c02a788bda1e751f78e53e2dbe/HANDOFF.d/2026-10-29T2015Z-edge-dev3-claude-transcript-store-plan.md).
 
 ## STATUS (read first; do not re-plan)
 
@@ -25,7 +25,7 @@ read-when: working on the transcript store or its remaining proof step
 | 8 Reader helper and `transcript-query` skill | ✅ done | PR #2098; Windows proof https://github.com/popcre/ai-devops/issues/2062#issuecomment-6518699681 |
 | 9 Mining checks | ✅ done (6 checks pass ≥14/20) | PRs #2121, #2135; counts on #2063 |
 
-**Closed 2026-10-31:** all nine steps done; #2050 and #2059–#2063 closed.
+**Closed 2026-10-31:** all nine steps done; #2050 and #2059–#2063 closed. The [second daily refresh](https://github.com/popcre/ai-devops/issues/2061#issuecomment-6550440933) published a verified store with all 6,490 review labels and zero failed chunks. The [decision record](docs/transcript-store-decision-2026-10-29.md) preserves the planning rulings.
 
 **Hetz follow-up closed 2026-11-04 (#2373):** the repo-owned Ubuntu
 `bin/ai-transcripts-to-dropbox-hetz` now runs through the existing nightly
