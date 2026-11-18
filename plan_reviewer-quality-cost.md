@@ -13,16 +13,16 @@ Pay less for reviews while keeping every finding, citation, and final decision a
 
 ## STATUS
 
-Start at Step 1. Execution owner takes custody on [#2619](https://github.com/popcre/ai-devops/issues/2619). [Launch handoff](HANDOFF.d/2026-11-18T1549Z-edge-dev3-codex-reviewer-quality-cost.md).
+Execution receipts and follow-up ownership are on [#2619](https://github.com/popcre/ai-devops/issues/2619). [Launch handoff](HANDOFF.d/2026-11-18T1549Z-edge-dev3-codex-reviewer-quality-cost.md).
 
 | Step | State on 2026-11-18 | Evidence to attach |
 | --- | --- | --- |
-| 1. Freeze baseline and cases | Open | Host source/default receipts and immutable case manifest |
-| 2. Safe implementation | Open | Exact-head offline results and before/after request checks |
-| 3. Install safe changes | Open | Native Ubuntu and Windows receipts and ordinary live reviews |
-| 4. Muse caching pilot | Open | Paired billed costs and scored reviews for all three hosts |
-| 5. Separate experiments | Open | Per-route and per-setting qualification records |
-| 6. Decide and close | Open | Rollback evidence, decision by setting, and signed live proof |
+| 1. Freeze baseline and cases | Recorded | All three installed hosts matched the #2609 pin. The issue carries exact public fixture heads and billing attribution. |
+| 2. Safe implementation | Merged | [#2621](https://github.com/popcre/ai-devops/pull/2621) rejects explicit incomplete output, preserves retry and fallback behavior, and leaves request assembly and route defaults untouched. |
+| 3. Install safe changes | Held for default parity | The exact candidate source passed ordinary live review from isolated copies on all three platforms. Installing the merged release would also activate [#2580](https://github.com/popcre/ai-devops/pull/2580) on the pinned hosts. |
+| 4. Muse caching pilot | Measured | OpenRouter charged $0.035351 with the explicit key off and $0.017384 with it on. Both arms produced nine usable reviews. The setting remains opt-in. |
+| 5. Separate experiments | See execution receipts | DeepSeek, Hy4 and Muse direct are recorded independently on the issue. Endpoint, text, output-budget, and history comparisons are distinct from the cache pilot. |
+| 6. Decide and close | Open | The fleet keeps the tested #2609 source. Keep the installation proof open until an authorized merged release preserves the observed host defaults. |
 
 ## 2. Application
 
