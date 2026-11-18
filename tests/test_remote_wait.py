@@ -459,6 +459,7 @@ class ActiveCompletionRemoteTests(unittest.TestCase):
         self.assertTrue(saved["active_source_protocol_verified"])
         self.assertFalse(saved["active_completion_qualified"])
 
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux parent uses directory descriptors for private receipt storage")
     def test_failed_private_storage_leaves_no_qualified_publication(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "atomic.json"
