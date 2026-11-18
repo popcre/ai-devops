@@ -4,6 +4,7 @@ set -u
 PY3="$(command -v python3 || command -v python)"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 . "$ROOT/tests/lib-test-harness.sh"
+. "$ROOT/tests/lib-test-timing.sh"
 T="$(mktemp -d)"; trap 'rm -rf "$T"' EXIT
 mkdir -p "$T/cfg/state" "$T/Claude" "$T/codex"
 export AI_DEVOPS_CONFIG="$T/cfg" CLAUDE_DESKTOP_CONFIG="$T/Claude/claude_desktop_config.json" CODEX_CONFIG="$T/codex/config.toml"
@@ -44,16 +45,39 @@ cat > "$T/cfg/state/mcp-catalog.json" <<'EOF'
  "codex-cli":{"command":"/usr/bin/codex","args":["mcp-server"],"env":{"MCP_TOOL_TIMEOUT":"1"}}}
 EOF
 
-# Run under a held installer checkout lock on fd 9, exactly as update.sh does;
-# the background waiter must not inherit it (edge-dev3 2026-10-06).
+# Match update.sh's flock and directory-lock routes. The detached launch must
+# close fd 9 even when the platform uses the directory lock for exclusion.
 LOCK="$T/install.lock"
-( exec 9>"$LOCK"; flock -n 9 || exit 1
-  CLAUDE_DESKTOP_STATE=running "$ROOT/bin/setup-desktop-apps.sh" --claude-only >/dev/null )
-sleep 0.2
+mkdir "$T/fixture-bin"
+cat > "$T/fixture-bin/nohup" <<'EOF'
+#!/usr/bin/env bash
+[[ $# -eq 3 && "$2" == --claude-only && "$3" == --wait-for-desktop-exit ]] || exit 2
+if { : >&9; } 2>/dev/null; then
+  printf 'installer descriptor inherited\n'
+else
+  printf 'installer descriptor closed\n'
+fi
+EOF
+chmod +x "$T/fixture-bin/nohup"
+(
+  exec 9>"$LOCK"
+  if command -v flock >/dev/null 2>&1; then
+    flock -n 9 || exit 1
+  else
+    mkdir "$LOCK.d" || exit 1
+    trap 'rmdir "$LOCK.d"' EXIT
+    if mkdir "$LOCK.d" 2>/dev/null; then exit 1; fi
+  fi
+  PATH="$T/fixture-bin:$PATH" CLAUDE_DESKTOP_STATE=running "$ROOT/bin/setup-desktop-apps.sh" --claude-only >/dev/null
+) || bad "could not launch the desktop waiter under an installer lock"
+wait_log="$T/cfg/state/claude-desktop-mcp-sync.log"
+poll_until 30 'detached desktop waiter ran' 'test -s "$wait_log"' &&
+  grep -qx 'installer descriptor closed' "$wait_log" && ok "desktop waiter closes the installer descriptor" || bad "desktop waiter inherited the installer descriptor or did not launch"
 if command -v flock >/dev/null 2>&1; then
   ( exec 8>"$LOCK"; flock -n 8 ) && ok "desktop waiter does not hold the installer lock" || bad "desktop waiter inherited the installer lock (fd 9)"
+else
+  ( mkdir "$LOCK.d" && rmdir "$LOCK.d" ) && ok "directory installer lock can be reacquired" || bad "directory installer lock was not released"
 fi
-pkill -f -- "--claude-only --wait-for-desktop-exit" 2>/dev/null
 grep -q '"railway"' "$CLAUDE_DESKTOP_CONFIG" && ok "running Claude Desktop: config untouched" || bad "wrote while Claude Desktop ran"
 
 CLAUDE_DESKTOP_STATE=stopped "$ROOT/bin/setup-desktop-apps.sh" >/dev/null || bad "script failed"
