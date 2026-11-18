@@ -607,7 +607,7 @@ jobs:
     timeout-minutes: 3
     # Issue lookup and creation must serialize across PRs and merge groups.
     concurrency:
-      group: verify-ci-red
+      group: verify-ci-red-${{ vars.LANE_EPOCH || '0' }}
       queue: max
     permissions:
       contents: read
