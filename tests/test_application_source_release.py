@@ -8,6 +8,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -96,6 +97,189 @@ class ReleaseProof(unittest.TestCase):
                 self.assertNotIn("BASH_ENV", options["env"])
                 self.assertNotIn("BASH_FUNC_cat%%", options["env"])
                 self.assertEqual(options["timeout"], 600)
+
+    def prepare_refresh(self, repo, fast_forward=False):
+        sandbox = self.base if fast_forward else self.g("rev-parse", "HEAD")
+        self.g("remote", "set-url", "origin", f"https://github.com/{repo}.git")
+        self.g("checkout", "-q", "develop")
+        if not fast_forward:
+            (self.root / "app.js").write_text("// fixture\n")
+        (self.root / "shared-db").mkdir()
+        (self.root / "shared-db/mirror.sql").write_text("-- published fixture\n")
+        self.g("add", ".")
+        self.g("commit", "-qm", "published develop update")
+        develop = self.g("rev-parse", "HEAD")
+        self.g("update-ref", "refs/remotes/origin/sandbox-albert", sandbox)
+        self.g("update-ref", "refs/remotes/origin/develop", develop)
+        self.g("checkout", "-q", "--detach", sandbox)
+        worktree = self.root.parent / "isolated-refresh"
+        self.g("worktree", "add", "--quiet", "--detach", str(worktree), sandbox)
+        self.root = worktree
+        os.chdir(worktree)
+        self.g("merge", "-q", "--no-edit", "--ff-only" if fast_forward else "--no-ff", develop)
+        return {"sandbox-albert": sandbox, "develop": develop}
+
+    @contextlib.contextmanager
+    def refresh_api(self, refs):
+        seen = []
+        def exact_ref(root, repo, helper, env, branch):
+            seen.append(branch)
+            value = refs[branch]
+            return value() if callable(value) else value
+        with patch.object(release, "installed_helper", return_value=(Path("/fixture/managed-ai-gh"), {"source": "fixed"})), \
+                patch.object(release, "remote_ref", side_effect=exact_ref), \
+                patch.object(release, "frontend_cloud_proof", return_value={"sandbox_trigger": "fixed"}):
+            yield seen
+
+    def test_published_frontend_merge_uses_both_fresh_canonical_refs(self):
+        repo = "popcre/designflow-frontend"
+        refs = self.prepare_refresh(repo)
+        with self.refresh_api(refs) as seen:
+            proof = release.prove_refresh(self.root, repo, refs["sandbox-albert"], self.env)
+        self.assertEqual(proof["head"], self.g("rev-parse", "HEAD"))
+        self.assertEqual(seen, ["sandbox-albert", "develop", "develop", "sandbox-albert"])
+
+    def test_published_frontend_mirror_fast_forward(self):
+        repo = "popcre/designflow-frontend"
+        refs = self.prepare_refresh(repo, fast_forward=True)
+        with self.refresh_api(refs):
+            proof = release.prove_refresh(self.root, repo, refs["sandbox-albert"], self.env)
+        self.assertEqual(proof["head"], refs["develop"])
+
+    def test_local_edits_in_merge_or_worktree_are_refused(self):
+        repo = "popcre/designflow-frontend"
+        refs = self.prepare_refresh(repo)
+        publication = self.root / "shared-db/mirror.sql"
+        publication.write_text("-- local alteration\n")
+        with self.assertRaisesRegex(ValueError, "worktree must be clean"):
+            release.refresh_context(self.root, repo, refs["sandbox-albert"], self.env)
+        self.g("add", ".")
+        self.g("commit", "-q", "--amend", "--no-edit")
+        with self.assertRaisesRegex(ValueError, "tree differs from the exact published develop tree"):
+            release.refresh_context(self.root, repo, refs["sandbox-albert"], self.env)
+
+    def test_refuses_unpublished_parent_and_remote_drift(self):
+        repo = "popcre/designflow-frontend"
+        refs = self.prepare_refresh(repo)
+        sandbox = refs["sandbox-albert"]
+        with self.refresh_api({**refs, "sandbox-albert": "1" * 40}):
+            with self.assertRaisesRegex(ValueError, "differs from fresh canonical remote"):
+                release.prove_refresh(self.root, repo, sandbox, self.env)
+        remote_develop = iter([refs["develop"], "2" * 40])
+        with self.refresh_api({**refs, "develop": lambda: next(remote_develop)}):
+            with self.assertRaisesRegex(ValueError, "remote refresh parent moved"):
+                release.prove_refresh(self.root, repo, sandbox, self.env)
+
+    def test_refuses_alternate_push_origin_and_hidden_local_dirt(self):
+        repo = "popcre/designflow-frontend"
+        refs = self.prepare_refresh(repo)
+        self.g("remote", "set-url", "--push", "origin", "https://github.com/other/designflow-frontend.git")
+        with self.assertRaisesRegex(ValueError, "canonical fetch and push origin"):
+            release.refresh_context(self.root, repo, refs["sandbox-albert"], self.env)
+        self.g("config", "--unset", "remote.origin.pushurl")
+        self.g("update-index", "--assume-unchanged", "shared-db/mirror.sql")
+        with self.assertRaisesRegex(ValueError, "hidden working-copy differences"):
+            release.refresh_context(self.root, repo, refs["sandbox-albert"], self.env)
+
+    def test_published_refresh_refuses_wrong_repository_and_untrusted_platform(self):
+        repo = "popcre/designflow-frontend"
+        refs = self.prepare_refresh(repo)
+        with self.assertRaisesRegex(ValueError, "target or base refused"):
+            release.refresh_context(self.root, "popcre/designflow-tracking", refs["sandbox-albert"], self.env)
+        with patch.object(sys, "platform", "win32"):
+            with self.assertRaisesRegex(ValueError, "require qualified Linux"):
+                release.prove_refresh(self.root, repo, refs["sandbox-albert"], self.env)
+        self.g("checkout", "-qb", "master")
+        with self.assertRaisesRegex(ValueError, "isolated sandbox-albert or detached worktree"):
+            release.refresh_context(self.root, repo, refs["sandbox-albert"], self.env)
+
+    def test_native_refresh_keeps_action_and_archive_guards(self):
+        repo = "popcre/designflow-frontend"
+        refs = self.prepare_refresh(repo)
+        self.g("checkout", "-q", "develop")
+        (self.root / "unapproved-chat.jsonl").write_text("{}\n")
+        self.g("add", ".")
+        self.g("commit", "-qm", "synthetic raw archive path")
+        develop = self.g("rev-parse", "HEAD")
+        self.g("update-ref", "refs/remotes/origin/develop", develop)
+        self.g("checkout", "-q", "--detach", refs["sandbox-albert"])
+        toolkit = Path(__file__).resolve().parents[1]
+        env = {**self.env, "AI_TASK_GATES_DIR": str(Path(self.temp.name) / "isolated-state")}
+        command = ["/bin/bash", str(toolkit / "bin/ai-task-gates")]
+        start = subprocess.run(command + ["start", "--class", "deployment", "--base", "HEAD"],
+                               cwd=self.root, env=env, capture_output=True)
+        self.assertEqual(start.returncode, 0, start.stderr.decode())
+        self.g("merge", "-q", "--no-edit", "--no-ff", develop)
+        args = ["--published-sandbox-refresh", "--acknowledge", "synthetic owner instruction"]
+        for action, failure in [("production", b"requires deployment"), ("deploy", b"raw transcript")]:
+            checked = subprocess.run(command + ["check", "--before", action] + args,
+                                     cwd=self.root, env=env, capture_output=True)
+            self.assertEqual(checked.returncode, 3, checked.stderr.decode())
+            self.assertIn(failure, checked.stderr)
+
+    def test_frontend_refresh_cloud_trigger_and_test_build_are_required(self):
+        repo = "popcre/designflow-frontend"
+        self.prepare_refresh(repo, fast_forward=True)
+        (self.root / ".dockerignore").write_text("shared-db\n")
+        (self.root / "Dockerfile").write_text("RUN yarn test\nRUN yarn build:${NODE_ENV}\n")
+        self.g("add", ".")
+        self.g("commit", "-qm", "published application test build inputs")
+        develop = self.g("rev-parse", "HEAD")
+        toolkit = Path(__file__).resolve().parents[1]
+        policy = json.loads((toolkit / "config/task-gates.json").read_text())
+        target = policy["application_source_releases"][repo]["target"]
+        project, region = target["project"], target["region"]
+        linked = f"projects/{project}/locations/{region}/connections/popcre/repositories/pop-dflow-frontend"
+        github = f"https://github.com/{repo}.git"
+        develop_trigger = "a" * 36
+        sandbox_trigger = "b" * 36
+        build_id = "c" * 36
+        def trigger(identifier, branch, service, ignored):
+            return {"id": identifier, "name": service, "filename": "cloudbuild.yaml",
+                    "repositoryEventConfig": {"repository": linked, "repositoryType": "GITHUB",
+                                              "push": {"branch": f"^{branch}$"}},
+                    "ignoredFiles": ignored, "substitutions": {
+                        "_REGION": region, "_APP_ENV": branch, "_SERVICE_NAME": service}}
+        sandbox = trigger(sandbox_trigger, "sandbox-albert", target["service"], [])
+        development = trigger(develop_trigger, "develop", "popcre-frontend-dev", ["shared-db/**"])
+        build = {"id": build_id, "status": "SUCCESS", "buildTriggerId": develop_trigger,
+                 "sourceProvenance": {"resolvedGitSource": {"url": github, "revision": develop}},
+                 "substitutions": {"COMMIT_SHA": develop}, "steps": [
+                     {"id": "Build", "name": "gcr.io/cloud-builders/docker",
+                      "status": "SUCCESS", "args": ["build", "."]}]}
+        responses = {
+            ("config", "list"): None,
+            ("builds", "repositories"): {"name": linked, "remoteUri": github},
+            ("builds", "triggers"): [sandbox, development],
+            ("builds", "list"): [build],
+            ("builds", "describe"): build,
+        }
+        original_run = release.run
+        cloud_home = self.root.parent / "cloud-home"
+        (cloud_home / ".config").mkdir(parents=True, mode=0o700)
+        (cloud_home / ".config" / "gcloud").mkdir(mode=0o700)
+        def boundary(argv, root, env, **kwargs):
+            if argv[0] != "/fixture/gcloud":
+                return original_run(argv, root, env, **kwargs)
+            self.assertEqual(env, {"HOME": str(cloud_home), "PATH": "/usr/bin:/bin"})
+            return json.dumps(responses[tuple(argv[2:4])]).encode()
+        with patch.object(release, "public_binary", return_value="/fixture/gcloud"), \
+                patch("pwd.getpwuid", return_value=SimpleNamespace(pw_dir=str(cloud_home))), \
+                patch.object(release, "run", side_effect=boundary):
+            supplied = {**self.env, "HTTPS_PROXY": "fixture.invalid", "CLOUDSDK_CONFIG": "/foreign",
+                        "SSL_CERT_DIR": "/foreign", "GOOGLE_APPLICATION_CREDENTIALS": "/foreign"}
+            self.assertEqual(release.frontend_cloud_proof(self.root, develop, supplied),
+                             {"sandbox_trigger": sandbox_trigger, "tested_develop_build": build_id,
+                              "tested_develop_source": develop})
+            build["steps"][0]["status"] = "FAILURE"
+            with self.assertRaisesRegex(ValueError, "test-and-build step unavailable"):
+                release.frontend_cloud_proof(self.root, develop, self.env)
+            sandbox["disabled"] = True
+            with self.assertRaisesRegex(ValueError, "enabled Cloud Build target is unavailable"):
+                release.frontend_cloud_proof(self.root, develop, self.env)
+            responses[("config", "list")] = {"proxy": {"address": "fixture.invalid"}}
+            with self.assertRaisesRegex(ValueError, "alternate Cloud Build endpoint, proxy"):
+                release.frontend_cloud_proof(self.root, develop, self.env)
 
     def test_native_additive_contributor_proofs_include_ui_and_code(self):
         source = (Path(__file__).resolve().parents[1] / "bin/ai-task-gates").read_text()

@@ -80,6 +80,7 @@ usage: ai-task-gates <command> [options]
         [--first-install] [--application-release-target MANIFEST]
         [--action-manifest-stdin --action-stage initial-forward|original-restoration]
         [--application-workflow-target .ai-devops/application-workflow-target.json]
+        [--published-sandbox-refresh]
         Recompute the change set and decide whether ACTION may start.
   authorize-install --target-head SHA --installed-checkout PATH
         --installed-launcher PATH --review-report PATH --reviewer-approval REPORT
@@ -272,12 +273,12 @@ applicable_path_rules(){
 # Merged gate for one class: union of required proofs and forbidden actions
 # from the central default, every matching central rule, and the consumer file.
 merged_gate(){
-  local identity="$1" class="$2" pattern kind
+  local identity="$1" class="$2" scope="${3:-all}" pattern kind
   load_rule_table; load_consumer_table
   if [ "$TG_TABLE_OK" = 1 ] && [ -z "${TG_CONSUMER_ROWS[fallback]:-}" ]; then
     for kind in required forbidden; do
       {
-        printf '%s' "${TG_ROWS[D$'\x1f'$kind$'\x1f'$class]:-}"
+        [ "$scope" != all ] || printf '%s' "${TG_ROWS[D$'\x1f'$kind$'\x1f'$class]:-}"
         for pattern in "${TG_MATCHES[@]+"${TG_MATCHES[@]}"}"; do
           [ -n "$pattern" ] || continue
           tg_identity_match "$pattern" "$identity" || continue
@@ -289,7 +290,7 @@ merged_gate(){
     return 0
   fi
   {
-    jqr --arg c "$class" '(.default.gates[$c].required//[])[]' "$POLICY_FILE"
+    [ "$scope" != all ] || jqr --arg c "$class" '(.default.gates[$c].required//[])[]' "$POLICY_FILE"
     while IFS= read -r pattern; do
       [ -n "$pattern" ] || continue
       tg_identity_match "$pattern" "$identity" || continue
@@ -299,7 +300,7 @@ merged_gate(){
     [ -f "$CONSUMER_FILE" ] && jqr --arg c "$class" '(.gates[$c].required//[])[]' "$CONSUMER_FILE" 2>/dev/null
   } | LC_ALL=C sort -u | sed 's/^/required\t/'
   {
-    jqr --arg c "$class" '(.default.gates[$c].forbidden_actions//[])[]' "$POLICY_FILE"
+    [ "$scope" != all ] || jqr --arg c "$class" '(.default.gates[$c].forbidden_actions//[])[]' "$POLICY_FILE"
     while IFS= read -r pattern; do
       [ -n "$pattern" ] || continue
       tg_identity_match "$pattern" "$identity" || continue
@@ -676,6 +677,60 @@ application_release_supplement(){
   local py
   py="$(command -v python3 || command -v python)" || return 1
   "$py" "$ROOT/tools/application_source_release.py" "$@"
+}
+
+published_sandbox_refresh(){
+  local quote="$1" classified_head="$2" base start proof reason contributor cls path gate
+  [ "$IDENTITY" = popcre/designflow-frontend ] \
+    || blocked 'ai-task-gates: STOP. Published mirror refresh has one exact DesignFlow frontend sandbox target.'
+  [ "$POLICY_FILE" = "$ROOT/config/task-gates.json" ] \
+    || blocked 'ai-task-gates: STOP. Published refresh requires the canonical toolkit policy.'
+  base="$(state_field base)"
+  start="$(state_field start_head)"
+  [ "$(state_field declared_class)" = deployment ] && [ -n "$base" ] && [ "$start" = "$base" ] \
+    || blocked 'ai-task-gates: STOP. Start a deployment task on the published sandbox head before preparing the refresh.'
+  [ "$OBSERVED_CLASS" = shared-db ] \
+    || blocked 'ai-task-gates: STOP. Published refresh requires a classified mirror-only change.'
+  for contributor in "${CONTRIBUTORS[@]}"; do
+    contributor="$(printf '%b' "$contributor")"
+    cls="${contributor%%$'\t'*}"; path="${contributor#*$'\t'}"
+    [[ "$cls" = shared-db && "$path" = shared-db/* ]] \
+      || blocked 'ai-task-gates: STOP. Published mirror refresh cannot contribute source outside the read-only mirror.'
+  done
+  # Shared-db authorship gates still apply to its repository. The only default
+  # prohibition replaced here is deploy on an exact copy of the published
+  # mirror, with no application source change. Local prohibitions still win.
+  gate="$(merged_gate "$IDENTITY" deployment; merged_gate "$IDENTITY" shared-db repository)"
+  if grep -Fxq $'forbidden\tdeploy' <<<"$gate"; then
+    blocked 'ai-task-gates: STOP. Repository-specific deployment prohibition remains binding.'
+  fi
+  while IFS= read -r gate; do
+    case "$gate" in
+      ''|claim-admission|cloud-build-release-review|designflow-no-app-owned-schema|designflow-no-self-merge|\
+      governed-shared-db-branch-and-pr|local-tests|owner-authorization|route-to-shared-db-repository|\
+      sandbox-branch-pr-to-develop|shared-db-branch-and-pr|stop-and-route-to-u2giants-shared-db|target-identity-proof) ;;
+      *) blocked 'ai-task-gates: STOP. This release declaration requires a proof outside the published mirror route.' ;;
+    esac
+  done < <(printf '%s\n' "$gate" | sed -n 's/^required\t//p')
+  validate_application_release_policy
+  APP_RELEASE_EXPECTED_TARGET="$(jqr --arg repo "$IDENTITY" '.application_source_releases[$repo].target' "$POLICY_FILE")"
+  application_release_json_valid "$CONSUMER_FILE_NAME" consumer \
+    && application_release_json_valid "$APP_RELEASE_MANIFEST_PATH" manifest \
+    && application_release_file_blob "$CONSUMER_FILE_NAME" >/dev/null \
+    && application_release_file_blob "$APP_RELEASE_MANIFEST_PATH" >/dev/null \
+    || blocked 'ai-task-gates: STOP. The frontend release manifest and consumer declaration must be exact committed files.'
+  proof="$(/usr/bin/python3 -I "$ROOT/tools/application_source_release.py" prove-refresh "$TOPLEVEL" "$IDENTITY" "$base")" \
+    || blocked 'ai-task-gates: STOP. Exact published-upstream refresh proof refused.'
+  jq -e --arg h "$classified_head" '.head==$h' <<<"$proof" >/dev/null 2>&1 \
+    && [ "$(git -C "$TOPLEVEL" rev-parse HEAD)" = "$classified_head" ] \
+    || blocked 'ai-task-gates: STOP. The refresh source moved after classification.'
+  reason="source=$proof owner=$quote"
+  state_record_override published-sandbox-refresh deploy "$reason" "$OBSERVED_CLASS" \
+    && jq -e --arg r "$reason" '.overrides | any(.kind=="published-sandbox-refresh" and .action=="deploy" and .reason==$r)' \
+      "$(state_path)" >/dev/null 2>&1 \
+    || blocked 'ai-task-gates: STOP. Published sandbox refresh receipt could not be recorded.'
+  printf 'ai-task-gates: verified published-only refresh for %s through the normal Cloud Build sandbox-albert branch push.\n' "$IDENTITY"
+  printf 'ai-task-gates: verified the enabled sandbox target and a passing build with the exact frontend application tree.\n'
 }
 
 application_release_contributor_gates(){
@@ -1313,6 +1368,7 @@ cmd_check(){
   local target_head="" installed_checkout="" installed_launcher="" first_install=0
   local small_entry="" small_rows="" small_quote="" action_manifest_stdin=0 action_manifest_file="" action_stage=initial-forward
   local application_release_target="" application_workflow_target="" base_explicit=0 application_release_ready=0
+  local published_refresh=0 refresh_head=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --scoped-skills-plan) need_value "$@"; scoped_skills_plan="$2"; shift 2 ;;
@@ -1331,10 +1387,20 @@ cmd_check(){
       --first-install) first_install=1; shift ;;
       --application-release-target) need_value "$@"; application_release_target="$2"; shift 2 ;;
       --application-workflow-target) need_value "$@"; application_workflow_target="$2"; shift 2 ;;
+      --published-sandbox-refresh) published_refresh=1; shift ;;
       *) die "unknown option for check: $1" ;;
     esac
   done
   [ -n "$action" ] || die 'check requires --before ACTION.'
+  if [ "$published_refresh" -eq 1 ]; then
+    [ "$action" = deploy ] && [ -n "$acknowledge" ] && [ "$base_explicit" -eq 0 ] \
+      && [ -z "$application_release_target$application_workflow_target$reviewer_approval$small_entry$target_head$installed_checkout$installed_launcher$scoped_skills_plan" ] \
+      && [ "$first_install" -eq 0 ] && [ "$action_manifest_stdin" -eq 0 ] \
+      || blocked 'ai-task-gates: STOP. Published sandbox refresh requires deployment and only the exact owner authorization.'
+    [ -z "${BASH_ENV+x}${ENV+x}" ] \
+      && /usr/bin/python3 -I "$ROOT/tools/application_source_release.py" refresh-preflight "$PWD" \
+      || blocked 'ai-task-gates: STOP. Published sandbox refresh requires the maintained canonical GitHub ref verifier; pre-discovery confinement refused.'
+  fi
   if [ -z "$small_entry" ]; then
     [ -z "$small_rows$small_quote" ] || die '--row-count and --owner-quote need --small-owner-entry.'
   else
@@ -1408,6 +1474,10 @@ cmd_check(){
   fi
   if [ "$action" = deploy ]; then
     resolve_repo
+    if [ "$published_refresh" -eq 1 ]; then
+      refresh_head="$(git -C "$TOPLEVEL" rev-parse HEAD)" \
+        || blocked 'ai-task-gates: STOP. The published refresh source HEAD is unavailable.'
+    fi
     if [[ "$IDENTITY" = popcre/ai-devops || "$IDENTITY" = u2giants/ai-devops ]]; then
       start_head="$(state_field start_head)"
       [ -n "$start_head" ] || blocked 'ai-task-gates: STOP. Toolkit installation requires a task declaration recorded before updating the host checkout.'
@@ -1419,7 +1489,7 @@ cmd_check(){
     fi
   fi
   prepare "$base" ""
-  if [ "$action" = deploy ] && [ -z "$application_release_target" ]; then
+  if [ "$action" = deploy ] && [ -z "$application_release_target" ] && [ "$published_refresh" -eq 0 ]; then
     case "$IDENTITY" in
       popcre/designflow-tracking|popcre/designflow-frontend|popcre/designflow-item-master)
         # Opt-in persists after its declaration becomes upstream. A later
@@ -1435,6 +1505,10 @@ cmd_check(){
   # always judges the original change-set paths — historical files that merely
   # exist in the repository never rewrite the verdict.
   refuse_raw_archives "$action" "${RAW_ARCHIVE_PATHS:-}"
+  if [ "$published_refresh" -eq 1 ]; then
+    published_sandbox_refresh "$acknowledge" "$refresh_head"
+    return 0
+  fi
   source_changed_count="$CHANGED_COUNT"
   if [ "$action" = deploy ] && [[ "$IDENTITY" = popcre/ai-devops || "$IDENTITY" = u2giants/ai-devops ]] && [ "$source_changed_count" -eq 0 ]; then
     # No AI reviewer verdict gates a toolkit installation (#2041); the
