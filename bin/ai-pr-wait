@@ -571,7 +571,7 @@ while :; do
   # (#2095 finding 2), so the advisory report only runs while the wait continues.
   if [ -n "$ADVISORY" ] && [ -z "$FAILED" ] && [ "$ADVISORY" != "$LAST_ADVISORY" ]; then
     say "PR #$PR non-required checks failed (advisory; still waiting):"
-    while IFS=$'\t' read -r aname aconc; do
+    while IFS=$'\t' read -r aname aconc _; do
       [ -n "$aname" ] && say "  - $aname ($aconc)  required=false"
     done <<<"$ADVISORY"
     LAST_ADVISORY="$ADVISORY"
