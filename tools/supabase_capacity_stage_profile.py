@@ -22,6 +22,8 @@ SOURCE_FILES = frozenset({
     ".github/workflows/stage-pgss-capacity.yml",
     "scripts/stage_pgss_capacity.py",
     "scripts/pgss-stage-exclusive.mjs",
+    "scripts/gh-read.mjs",
+    "scripts/lib/claim-recovery-dependencies.mjs",
     "config/pgss-capacity-stage.json",
     "scripts/shared_db_live_proof.py",
 })

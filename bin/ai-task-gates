@@ -1721,10 +1721,14 @@ sys.stdout.buffer.write(("\n".join(names) + "\n").encode("utf-8", "surrogateesca
         # A separate closed profile grants only the pinned no-restart workflow
         # dispatch. It never grants a manual cloud mutation or a restart. The
         # initial caller qualification is Linux; other platforms stay sealed.
-        infra_main="$(cd / && env -i PATH=/usr/bin:/bin HOME=/nonexistent GIT_CONFIG_NOSYSTEM=1 \
-          GIT_CONFIG_GLOBAL=/dev/null GIT_TERMINAL_PROMPT=0 \
-          timeout 30 git ls-remote --exit-code https://github.com/popcre/shared-db.git refs/heads/main 2>/dev/null \
-          | awk 'NR==1 && $2=="refs/heads/main" {print $1}')" || infra_main=""
+        infra_main=""
+        if [ "$(uname -s)" = Linux ]; then
+          infra_main="$(cd / && /usr/bin/env -i PATH=/usr/bin:/bin HOME=/nonexistent \
+            GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_TERMINAL_PROMPT=0 \
+            /usr/bin/timeout 30 /usr/bin/git ls-remote --exit-code \
+            https://github.com/popcre/shared-db.git refs/heads/main 2>/dev/null \
+            | /usr/bin/awk 'NR==1 && $2=="refs/heads/main" {print $1}')" || infra_main=""
+        fi
         if [ "$action" = production ] && [ "$declared" = infrastructure ] \
           && [ "$release_gate" = reviewed-production-dispatch ] \
           && [ "$(uname -s)" = Linux ] && [ -z "${BASH_ENV+x}${ENV+x}" ] \
