@@ -787,7 +787,8 @@ FAKE_AGENT_DSH = textwrap.dedent("""\
         if os.path.isfile(pp):
             patch = open(pp).read()
         with open(log, "a") as fh:
-            fh.write(json.dumps({"args": args, "cwd": os.getcwd(),
+            fh.write(json.dumps({"args": args, "cwd": os.getcwd(), "task": task,
+                                 "tracked": open("tracked.txt").read() if os.path.exists("tracked.txt") else None,
                                  "has_or_key": bool(os.environ.get("OPENROUTER_API_KEY")),
                                  "has_ds_key": bool(os.environ.get("DEEPSEEK_API_KEY")),
                                  "patch": patch}) + "\\n")
@@ -943,14 +944,40 @@ class DeepseekAgentHarnessTests(Base):
                           if line.startswith("SESSION_ID:"))
         setting = pathlib.Path(self.or_store).parent.parent / "deepseek-second-opinion-default"
         setting.write_text("legacy\n")
+        pathlib.Path(self.repo, "tracked.txt").write_text("updated source\n")
         resumed = self.agent("reply", session_id, "second turn")
         self.assertEqual(resumed.returncode, 0, resumed.stderr)
         self.assertIn("--session-id", self.dsh_log_rows()[-1]["args"])
+        for row in self.dsh_log_rows():
+            self.assertTrue(row["cwd"].replace("\\", "/").endswith(
+                ".dsh-home/deepseek-turn.workspace/repo"), row["cwd"])
+            self.assertFalse(pathlib.Path(row["cwd"]).exists())
+        self.assertEqual(self.dsh_log_rows()[-1]["tracked"], "updated source\n")
 
     def test_missing_or_store_refuses(self):
         r = self.agent("send", "--route", "deepseek-openrouter", "hello")
         self.assertEqual(r.returncode, 1)
         self.assertIn("openrouter reviewer key store is missing", r.stderr)
+
+    def test_older_harness_conversation_replays_visible_history_once(self):
+        self.protect_or_store()
+        first = self.agent("send", "remember the public fixture marker")
+        self.assertEqual(first.returncode, 0, first.stderr)
+        session_id = next(line.split(":", 1)[1].strip() for line in first.stdout.splitlines()
+                          if line.startswith("SESSION_ID:"))
+        path = pathlib.Path(self.repo, ".ai", "deepseek-sessions", session_id + ".json")
+        value = json.loads(path.read_text())
+        value.pop("workspace_mode")
+        path.write_text(json.dumps(value))
+        resumed = self.agent("reply", session_id, "continue the discussion")
+        self.assertEqual(resumed.returncode, 0, resumed.stderr)
+        row = self.dsh_log_rows()[-1]
+        self.assertNotIn("--session-id", row["args"])
+        self.assertIn("remember the public fixture marker", row["task"])
+        self.assertIn("continue the discussion", row["task"])
+        migrated = json.loads(path.read_text())
+        self.assertEqual(migrated["workspace_mode"], "stable-per-session")
+        self.assertEqual(len(migrated["turns"]), 4)
 
     def test_route_refuses_review_combination(self):
         self.protect_or_store()
