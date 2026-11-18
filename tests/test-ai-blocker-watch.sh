@@ -275,8 +275,10 @@ check 'a chain three deep is escalated in the digest' "grep -q 'Priority' '$TMP/
 check 'owned or active blockers stay out of the digest' "! grep -qE 'o/r#(6|8|9|10)\b' '$TMP/home/digest-$day.md'"
 
 # Second scan: GitHub now holds our comment on #7 — no re-post, no digest churn.
-alarmcmt="$(jq -n --arg at "$(date -u -d '2 hours ago' +%Y-%m-%dT%H:%M:%SZ)" '[{body:"<!-- ai-blocker-watch:unowned:o/r#7 --> take it",createdAt:$at}]')"
-mkissue 7 "gate bug" "$alarmcmt" '[{"source":{"number":1,"state":"CLOSED"}}]' '[{"number":20,"state":"OPEN","repository":{"nameWithOwner":"o/r"}}]' "$(date -u -d '2 hours ago' +%Y-%m-%dT%H:%M:%SZ)"
+# updatedAt describes the same comment, so a separate clock read would invent activity.
+alarm_at="$(date -u -d '2 hours ago' +%Y-%m-%dT%H:%M:%SZ)"
+alarmcmt="$(jq -n --arg at "$alarm_at" '[{body:"<!-- ai-blocker-watch:unowned:o/r#7 --> take it",createdAt:$at}]')"
+mkissue 7 "gate bug" "$alarmcmt" '[{"source":{"number":1,"state":"CLOSED"}}]' '[{"number":20,"state":"OPEN","repository":{"nameWithOwner":"o/r"}}]' "$alarm_at"
 echo "[{\"number\":31,\"title\":\"ai-blocker-watch digest $day\"}]" > "$FAKE/digest_search.json"
 rm -f "$FAKE/edited"
 c_before="$(grep -c 'issue comment' "$FAKE/comments")"
