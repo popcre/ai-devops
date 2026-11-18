@@ -106,36 +106,36 @@ def opencode_provider_block(spec, cache=None):
     shapes, custom OpenAI-compatible connection for OpenRouter).
 
     cache (Phase C, #2551, opt-in only) carries {"prompt_cache_key": str,
-    "session_id": str}; OpenCode merges `body` into every request body and
-    sends `headers` alongside, so Meta's prompt_cache_key rides the body on
-    both Muse connections and OpenRouter's session id rides the header.
+    "session_id": str}. Both adapters forward model options into the request
+    body. The direct Responses adapter uses its camel-case option name.
+    OpenCode owns its session header, so send OpenRouter's affinity identifier
+    in the body.
     Nothing is added when cache is None: defaults are unchanged."""
     provider_id = spec["model"].split("/", 1)[0]
     model_id = spec["model"].split("/", 1)[1]
     key = (cache or {}).get("prompt_cache_key")
     session = (cache or {}).get("session_id")
-    extra = {}
-    if key:
-        extra["body"] = {"prompt_cache_key": key}
-    if provider_id != "meta-model-api" and session:
-        extra["headers"] = {"x-session-id": session}
     if provider_id == "meta-model-api":  # the direct Muse connection (existing spec)
+        model = {"name": "Muse Spark 1.3 Contributor",
+                 "limit": {"context": 1048576, "output": 65536}}
+        if key:
+            model["options"] = {"promptCacheKey": key}
         return {"meta-model-api": {
             "npm": "@ai-sdk/openai", "name": "Meta Model API",
             "options": {"baseURL": "https://api.meta.ai/v1",
                         "apiKey": "{env:%s}" % spec["key_env"]},
-            "models": {"muse-spark-1.3-contributor": {
-                "name": "Muse Spark 1.3 Contributor",
-                "limit": {"context": 1048576, "output": 65536}}},
-            **extra}}
+            "models": {"muse-spark-1.3-contributor": model}}}
+    model = {"name": model_id, "tool_call": True,
+             "limit": {"context": 1048576, "output": 65536}}
+    options = {name: value for name, value in
+               (("prompt_cache_key", key), ("session_id", session)) if value}
+    if options:
+        model["options"] = options
     return {provider_id: {
         "npm": "@ai-sdk/openai-compatible", "name": provider_id,
         "options": {"baseURL": spec["base_url"] or OPENROUTER_URL,
                     "apiKey": "{env:%s}" % spec["key_env"]},
-        "models": {model_id: {
-            "name": model_id, "tool_call": True,
-            "limit": {"context": 1048576, "output": 65536}}},
-        **extra}}
+        "models": {model_id: model}}}
 
 
 CACHE_VERSION = "aidv1"

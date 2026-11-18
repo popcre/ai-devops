@@ -842,6 +842,10 @@ class CacheReceiptTests(unittest.TestCase):
 class CacheQualificationTests(SecondOpinionRouteTests):
     """Phase C (#2551): opt-in cache identifiers, prompt order and receipts."""
 
+    def openrouter_options(self, call):
+        provider = call["config"]["provider"]["openrouter-muse"]
+        return provider["models"]["meta/muse-spark-1.3-contributor"].get("options", {})
+
     def test_usage_coverage_and_failed_attempt_costs(self):
         self.env["AI_REVIEW_USAGE"] = "1"
         self.mode("paid-failure", "cachefinish")
@@ -887,9 +891,9 @@ class CacheQualificationTests(SecondOpinionRouteTests):
         self.mode("ok")
         proc, result = self.run_review(route="muse-openrouter")
         self.assertEqual(proc.returncode, 0, proc.stderr)
-        cfg = self.oc_calls()[0]["config"]["provider"]["openrouter-muse"]
-        key = cfg["body"]["prompt_cache_key"]
-        session = cfg["headers"]["x-session-id"]
+        cfg = self.openrouter_options(self.oc_calls()[0])
+        key = cfg["prompt_cache_key"]
+        session = cfg["session_id"]
         self.assertTrue(key.startswith("aidv1-"))
         self.assertTrue(session.startswith("aidv1-s-"))
         self.assertLessEqual(len(key), 256)
@@ -898,15 +902,15 @@ class CacheQualificationTests(SecondOpinionRouteTests):
         # stable across a second identical review; the session id follows the head
         self.mode("ok")
         self.run_review(route="muse-openrouter")
-        cfg2 = self.oc_calls()[1]["config"]["provider"]["openrouter-muse"]
-        self.assertEqual(cfg2["body"]["prompt_cache_key"], key)
-        self.assertEqual(cfg2["headers"]["x-session-id"], session)
+        cfg2 = self.openrouter_options(self.oc_calls()[1])
+        self.assertEqual(cfg2["prompt_cache_key"], key)
+        self.assertEqual(cfg2["session_id"], session)
         # a different namespace isolates the shared key
         self.env["AI_REVIEW_CACHE_NAMESPACE"] = "other"
         self.mode("ok")
         self.run_review(route="muse-openrouter")
-        cfg3 = self.oc_calls()[2]["config"]["provider"]["openrouter-muse"]
-        self.assertNotEqual(cfg3["body"]["prompt_cache_key"], key)
+        cfg3 = self.openrouter_options(self.oc_calls()[2])
+        self.assertNotEqual(cfg3["prompt_cache_key"], key)
         del self.env["AI_REVIEW_CACHE_NAMESPACE"]
 
     def test_meta_gets_cache_key_without_openrouter_session_header(self):
@@ -915,7 +919,9 @@ class CacheQualificationTests(SecondOpinionRouteTests):
         proc, _ = self.run_review(route="muse-meta")
         self.assertEqual(proc.returncode, 0, proc.stderr)
         cfg = self.oc_calls()[0]["config"]["provider"]["meta-model-api"]
-        self.assertTrue(cfg["body"]["prompt_cache_key"].startswith("aidv1-"))
+        options = cfg["models"]["muse-spark-1.3-contributor"]["options"]
+        self.assertTrue(options["promptCacheKey"].startswith("aidv1-"))
+        self.assertNotIn("session_id", options)
         self.assertNotIn("headers", cfg)
 
     def test_cache_off_by_default_everywhere(self):
@@ -923,6 +929,7 @@ class CacheQualificationTests(SecondOpinionRouteTests):
         proc, _ = self.run_review(route="muse-openrouter")
         self.assertEqual(proc.returncode, 0, proc.stderr)
         cfg = self.oc_calls()[0]["config"]["provider"]["openrouter-muse"]
+        self.assertEqual(self.openrouter_options(self.oc_calls()[0]), {})
         self.assertNotIn("body", cfg)
         self.assertNotIn("headers", cfg)
 
@@ -978,9 +985,9 @@ class CacheQualificationTests(SecondOpinionRouteTests):
         self.mode("ok")
         r2 = self.run_so("muse", "--route", "muse-openrouter", "ask", "cs", "again")
         self.assertEqual(r2.returncode, 0, r2.stderr)
-        cfgs = [c["config"]["provider"]["openrouter-muse"] for c in self.oc_calls()]
-        self.assertEqual(cfgs[0]["body"]["prompt_cache_key"], cfgs[1]["body"]["prompt_cache_key"])
-        self.assertEqual(cfgs[0]["headers"]["x-session-id"], cfgs[1]["headers"]["x-session-id"])
+        cfgs = [self.openrouter_options(call) for call in self.oc_calls()]
+        self.assertEqual(cfgs[0]["prompt_cache_key"], cfgs[1]["prompt_cache_key"])
+        self.assertEqual(cfgs[0]["session_id"], cfgs[1]["session_id"])
 
 
 
