@@ -15,6 +15,8 @@ import tempfile
 import textwrap
 import unittest
 
+from bash_resolution import resolve_bash
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCRIPT = os.path.join(ROOT, "bin", "ai-review-simple")
 SO = os.path.join(ROOT, "bin", "ai-second-opinion")
@@ -847,16 +849,17 @@ class DeepseekAgentHarnessTests(Base):
         subprocess.run(g[:3] + ["add", "tracked.txt"], check=True)
         subprocess.run(g + ["commit", "-qm", "init"], check=True)
         self.dsh_log = os.path.join(self.fx, "dsh-log.jsonl")
-        test_dir, home_dir, path_sep = self.fx, os.path.join(self.fx, "home"), os.pathsep
-        if os.name == "nt":  # Git Bash fixtures use POSIX-style paths and separators
+        self.bash, _ = resolve_bash()
+        self.assertIsNotNone(self.bash, "the DeepSeek fixture needs Bash")
+        test_dir, home_dir = self.fx, os.path.join(self.fx, "home")
+        if os.name == "nt":  # The wrapper consumes Git Bash paths for these two settings.
             test_dir = subprocess.run(["cygpath", "-u", self.fx], capture_output=True,
                                       text=True, check=True).stdout.strip()
             home_dir = subprocess.run(["cygpath", "-u", os.path.join(self.fx, "home")],
                                       capture_output=True, text=True, check=True).stdout.strip()
-            path_sep = ":" if ":" in os.environ.get("PATH", "") else os.pathsep
         self.agent_env = dict(os.environ, HOME=home_dir,
                               USERPROFILE=os.path.join(self.fx, "home"),
-                              PATH=(test_dir + "/bin" + path_sep + os.environ.get("PATH", "")),
+                              PATH=os.pathsep.join((os.path.join(self.fx, "bin"), os.environ.get("PATH", ""))),
                               AI_DEEPSEEK_TEST_DIR=test_dir,
                               AI_REVIEW_EVENT_DIR=os.path.join(self.fx, "events"),
                               AI_REVIEW_SIMPLE_DSH=self.fake_agent_dsh,
@@ -866,8 +869,8 @@ class DeepseekAgentHarnessTests(Base):
         for k in ("DEEPSEEK_API_KEY", "AI_MUSE_KEY", "AI_OPENROUTER_KEY"):
             self.agent_env.pop(k, None)
         # The direct store is populated through the script's own protected flow.
-        subprocess.run(["bash", os.path.join(ROOT, "bin", "ai-deepseek-agent"), "store-key"],
-                       env=self.agent_env, cwd=self.repo, capture_output=True, timeout=120)
+        stored = self.agent("store-key")
+        self.assertEqual(stored.returncode, 0, stored.stdout + stored.stderr)
         self.or_store = os.path.join(self.fx, "home", ".config", "ai-devops", "secrets",
                                      "openrouter-reviewer-key")
 
@@ -877,15 +880,16 @@ class DeepseekAgentHarnessTests(Base):
             fh.write("or-agent-key-123456789012345\n")
         if os.name == "nt":
             helper = os.path.join(ROOT, "bin", "windows-private-file.ps1")
-            subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
-                            "-Command", ". '%s'; Protect-AiDevOpsPrivatePath -Path '%s'"
-                            % (helper, self.or_store)], check=True, capture_output=True)
+            protected = subprocess.run(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass",
+                                        "-Command", ". '%s'; Protect-AiDevOpsPrivatePath -Path '%s'"
+                                        % (helper, self.or_store)], capture_output=True, text=True)
+            self.assertEqual(protected.returncode, 0, protected.stdout + protected.stderr)
         else:
             os.chmod(os.path.dirname(self.or_store), 0o700)
             os.chmod(self.or_store, 0o600)
 
     def agent(self, *args):
-        return subprocess.run(["bash", os.path.join(ROOT, "bin", "ai-deepseek-agent"), *args],
+        return subprocess.run([self.bash, os.path.join(ROOT, "bin", "ai-deepseek-agent"), *args],
                               env=self.agent_env, cwd=self.repo, capture_output=True,
                               text=True, timeout=180)
 
