@@ -99,6 +99,11 @@ printf 'x\n' > "$TMP/repo/.ai/reviews/leak.key"; git -C "$TMP/repo" add -f .ai/r
 if bash "$ROOT/bin/ai-public-boundary-check" "$TMP/repo" >/dev/null 2>&1; then echo 'FAIL: secret-bearing file type passed under path allowlist'; exit 1; fi
 git -C "$TMP/repo" reset -q HEAD; rm -rf "$TMP/repo/.ai" "$TMP/repo/tools"
 
-python3 "$ROOT/tests/test-public-boundary-versions.py"
+# Native Windows Python can resolve the WSL launcher before Git Bash on PATH.
+fixture_bash="$BASH"
+if command -v cygpath >/dev/null 2>&1; then
+  fixture_bash="$(cygpath -w "$fixture_bash")"
+fi
+AI_TEST_BASH="$fixture_bash" python3 "$ROOT/tests/test-public-boundary-versions.py"
 bash "$ROOT/bin/ai-public-boundary-check" "$ROOT" >/dev/null || { echo 'FAIL: current repository violates public boundary'; exit 1; }
 echo 'PASS: seeded transcript, AI artifact, credential, topology, tailnet hostname, and project violations fail the public boundary gate; .ai/reviewer-issues packages pass without laundering secrets; the allowlist clears words without laundering identifiers; path-allowlisted evidence publishes pass without laundering identifiers or secret types'
