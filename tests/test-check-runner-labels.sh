@@ -96,35 +96,45 @@ set -e
 [ "$CODE" -eq 2 ] || { echo "FAIL: expected exit 2 for broken config, got $CODE" >&2; exit 1; }
 
 echo "== live path fixture uses its scoped inventory token and all runner pages"
-mkdir "$TMP/bin"
-cat > "$TMP/bin/gh" <<'BASH'
-#!/usr/bin/env bash
-set -euo pipefail
-case "${*: -1}" in
-  */contents/.github/workflows)
-    [ "$GH_TOKEN" = contents-fixture ]
-    printf '%s\n' '[{"type":"file","name":"live.yml"}]'
-    ;;
-  */contents/.github/workflows/live.yml)
-    [ "$GH_TOKEN" = contents-fixture ]
-    printf '{"encoding":"base64","content":"%s"}\n' "$(printf '    runs-on: custom-fixture\n' | base64)"
-    ;;
-  */actions/runners\?per_page=100)
-    [ "$GH_TOKEN" = inventory-fixture ]
-    [ "$*" = "api --paginate --slurp repos/popcre/ai-devops/actions/runners?per_page=100" ]
-    case "${INVENTORY_FIXTURE:-live}" in
-      live) printf '%s\n' '[{"runners":[]},{"runners":[{"labels":[{"name":"CUSTOM-fixture"}]}]}]' ;;
-      empty) printf '%s\n' '[{"runners":[]}]' ;;
-      denied) printf '%s\n' 'gh: Resource not accessible (HTTP 403)' >&2; exit 1 ;;
-    esac
-    ;;
-  *) exit 1 ;;
-esac
-BASH
-chmod +x "$TMP/bin/gh"
+# Native Windows Node resolves gh.exe instead of extensionless PATH shims.
+cat > "$TMP/mock-gh.cjs" <<'JS'
+const assert = require('node:assert/strict')
+const childProcess = require('node:child_process')
+const { syncBuiltinESMExports } = require('node:module')
+
+childProcess.execFileSync = (command, args, { env }) => {
+  assert.equal(command, 'gh')
+  const prefix = 'repos/popcre/ai-devops'
+  switch (args.at(-1)) {
+    case `${prefix}/contents/.github/workflows`:
+      assert.equal(env.GH_TOKEN, 'contents-fixture')
+      return JSON.stringify([{ type: 'file', name: 'live.yml' }])
+    case `${prefix}/contents/.github/workflows/live.yml`:
+      assert.equal(env.GH_TOKEN, 'contents-fixture')
+      return JSON.stringify({
+        encoding: 'base64',
+        content: Buffer.from('    runs-on: custom-fixture\n').toString('base64'),
+      })
+    case `${prefix}/actions/runners?per_page=100`:
+      assert.equal(env.GH_TOKEN, 'inventory-fixture')
+      assert.deepEqual(args.slice(0, -1), ['api', '--paginate', '--slurp'])
+      switch (env.INVENTORY_FIXTURE ?? 'live') {
+        case 'live':
+          return JSON.stringify([{ runners: [] }, { runners: [{ labels: [{ name: 'CUSTOM-fixture' }] }] }])
+        case 'empty':
+          return JSON.stringify([{ runners: [] }])
+        case 'denied':
+          throw Object.assign(new Error('gh failed'), { stderr: 'gh: Resource not accessible (HTTP 403)' })
+      }
+      break
+  }
+  throw new Error('unexpected gh request')
+}
+syncBuiltinESMExports()
+JS
 scan_fixture() {
-  PATH="$TMP/bin:$PATH" GH_TOKEN=contents-fixture RUNNER_POOL_READ_TOKEN=inventory-fixture \
-    node "$TOOL" --repos popcre/ai-devops
+  GH_TOKEN=contents-fixture RUNNER_POOL_READ_TOKEN=inventory-fixture \
+    node --require "$TMP/mock-gh.cjs" "$TOOL" --repos popcre/ai-devops
 }
 scan_fixture | grep -q "runner label scan clean"
 CODE=0
