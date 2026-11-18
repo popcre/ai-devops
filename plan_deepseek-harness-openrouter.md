@@ -212,17 +212,22 @@ the lead retains all design, merge and release decisions.
    credential belongs only in the read-only reconciliation process. Runtime
    step totals may miss auxiliary requests and do not establish actual cost.
    OpenRouter analytics filtered by the reviewer key and opaque session ID
-   proved this gap even when every observed step succeeded. Preserve unknown
-   when provider evidence cannot be matched. Never publish private IDs.
+   proved this gap even when every observed step succeeded. Join local
+   receipts to a protected query by the SHA-256 fingerprint of its opaque
+   billing ID. Preserve unknown when provider evidence cannot be matched.
+   Never publish private IDs or credentials. A billing probe starts a new
+   qualification session. Omit the probe ID to continue existing sessions
+   with their original state and settings.
 
    With `AI_REVIEW_CACHE=1`, all three OpenRouter routes can keep affinity
    independently of Muse's cache key. DeepSeek uses the pinned Harness route's
    deployment header, and Hy4 and Muse use the OpenCode request body. Only Muse
    receives a provider-specific prompt cache key. Unset the experiment
    variables for ordinary operation. For qualification, select one of
-   `lean`, `file-map`, or `concise` with `AI_REVIEW_PROMPT_VARIANT` on an
-   explicit review route. The file-map experiment keeps the complete patch
-   readable in the exact-head workspace.
+   `lean` or `concise` with `AI_REVIEW_PROMPT_VARIANT` on an explicit review
+   route. The file-map trial used a separate exact-head patch file. A seeded
+   finding was missed on the direct Meta trial and there was no trusted proof
+   the model read the whole file, so the installed reviewer refuses that mode.
 
    1. **Establish complete billing first.** Extend the existing shared receipts
       around `bin/ai-review-simple:run_once`, `run_harness_once`, `review` and
@@ -350,6 +355,16 @@ Run `bash tests/test-ai-review-simple.sh`, `bash tests/test-ai-deepseek-agent.sh
 Run a minimum of five independent fresh candidate requests per route on each supported OS in addition to the GitHub runs. Record actual route, verdict, elapsed time, restart receipt and platform. Separate terminal policy outcomes from failed authentication in tests and live receipts. Record baseline timings per entry point and assess Hy4 on previously unscored TypeScript fixtures before declaring it production-ready.
 
 Phase C adds exact request-capture tests for the three cache cases above. Verify Muse direct receives the upstream key, Muse through OpenRouter receives both fields, and stable/reordered and switched-route cases obey their scope. Use paired cache-disabled and cache-enabled fixtures with identical input policy, model and effort. Each route receipt distinguishes a missing measurement from a zero hit, and reports the no-switch control. Replay a cold/warm pair, five distinct TypeScript PRs and one growing second opinion across restart per Muse route. Run the long-context and retention comparisons independently so an inconclusive test cannot masquerade as measured savings. Record Hy4 and DeepSeek separately from Muse.
+
+At the exact merged release, prove the named-session restart and opt-in
+review behavior independently on edge-dev3 and hetz (native Ubuntu) and
+edge-dev (native Windows). On each host record the installer receipt, exact
+source, route/model/runtime, declared effort and source fixture, one paired
+cache-off/on review for DeepSeek, Hy4 and both Muse connections, and two
+fresh-process restarts of a real named session. Verify ordinary behavior with
+the experiment disabled and retain the session during that rollback rehearsal.
+Keep the 24-hour retention arm inactive unless its separate storage authority
+is documented. Responses can be compared with response storage disabled.
 
 For this reporting-only amendment run the three suites in step 6a; broader
 DeepSeek suites above apply when their execution paths change. The new

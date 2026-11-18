@@ -41,7 +41,8 @@ def main():
         print(f"error: route {args.route} is not a deepseek-harness route", file=sys.stderr)
         return 2
     try:
-        affinity_id = RR.billing_session_id() or RR.cache_affinity_id(
+        billing_id = RR.billing_session_id()
+        affinity_id = billing_id or RR.cache_affinity_id(
             args.route, os.path.realpath(args.dsh_home), "named-session"
         )
     except RR.RouteError as error:
@@ -85,12 +86,12 @@ def main():
     cmd.append("-")
     started = time.monotonic()
 
-    def observe(outcome):
+    def observe(outcome, events=""):
         if os.environ.get("AI_REVIEW_USAGE") != "1":
             return
         receipt = reviewer_attempt(
-            "", route=args.route, model=spec["model"], engine=spec["engine"],
-            outcome=outcome, elapsed=time.monotonic() - started,
+            events, route=args.route, model=spec["model"], engine=spec["engine"],
+            outcome=outcome, elapsed=time.monotonic() - started, billing_id=billing_id,
         )
         path = os.path.join(args.dsh_home, "usage.jsonl")
         try:
@@ -135,7 +136,7 @@ def main():
                 error_text.append(json.dumps(detail or reason or "final without completion")[:2000])
     problem = "\n".join(x for x in (error_text + [(err or "")[-2000:]]) if x.strip())
     answered = bool(final_text and not error_text and proc.returncode == 0)
-    observe("answer" if answered else "failed")
+    observe("answer" if answered else "failed", out)
     if not answered:
         print("error: no completed final answer"
               + (f": {problem[:800]}" if problem else ""), file=sys.stderr)

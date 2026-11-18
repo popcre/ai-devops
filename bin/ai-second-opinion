@@ -31,6 +31,7 @@ Exit codes: 0 answered, 1 usage or local error, 3 provider unavailable
 import importlib.machinery
 import importlib.util
 import contextlib
+import hashlib
 import io
 import json
 import os
@@ -351,14 +352,15 @@ def run_harness_turn(provider, sdir, meta, prompt, spec, route):
         out, err = proc.communicate(prompt, timeout=timeout)
     except subprocess.TimeoutExpired:
         kill_process_tree(proc)
-        record_usage(sdir, route, spec, "", "timeout", started)
+        record_usage(sdir, route, spec, "", "timeout", started, meta.get("billing_id"))
         meta.update(state="failed", updated=time.time())
         save_meta(sdir, meta)
         die(f"{provider}: no answer within {timeout}s.", 3)
     final, ev_err = ars.read_harness_events(out)
     sid = resume or harness_session_id(out)
     answer = ars.redact((final or "").strip(), key)
-    record_usage(sdir, route, spec, out, "answer" if answer else "failed", started)
+    record_usage(sdir, route, spec, out, "answer" if answer else "failed", started,
+                 meta.get("billing_id"))
     label = f"{provider} via {route}" if route else provider
     with open(os.path.join(sdir, "transcript.md"), "a", encoding="utf-8") as fh:
         fh.write(f"\n\n## Request ({time.strftime('%Y-%m-%d %H:%M:%S')})\n\n{prompt}\n"
@@ -379,7 +381,7 @@ def sanitized_replay(meta):
     return "\n".join(blocks) + "\n\nAnswer the new request below under the same rules.\n\n"
 
 
-def record_usage(sdir, route, spec, stdout, outcome, started):
+def record_usage(sdir, route, spec, stdout, outcome, started, billing_id):
     if not route or os.environ.get("AI_REVIEW_USAGE") != "1":
         return
     from reviewer_usage import append_reviewer_attempt, reviewer_attempt
@@ -387,6 +389,7 @@ def record_usage(sdir, route, spec, stdout, outcome, started):
     receipt = reviewer_attempt(
         stdout, route=route, model=spec["model"], engine=spec["engine"],
         outcome=outcome, elapsed=time.monotonic() - started,
+        billing_id=billing_id if spec.get("base_url") == RR.OPENROUTER_URL else None,
     )
     path = os.path.join(sdir, "usage.jsonl")
     try:
@@ -477,14 +480,15 @@ def _run_opencode_turn(provider, sdir, meta, prompt, spec, effective, auto, new_
         partial = exc.stdout or b""
         if isinstance(partial, bytes):
             partial = partial.decode("utf-8", errors="replace")
-        record_usage(sdir, effective, spec, partial, "timeout", started)
+        record_usage(sdir, effective, spec, partial, "timeout", started, meta.get("billing_id"))
         meta.update(state="failed", updated=time.time())
         save_meta(sdir, meta)
         die(f"{provider}: no answer within {timeout}s.", 3)
     meta["session"] = meta.get("session") or session_id(out)
     full, final, ev_err = ars.read_events(out)
     answer = ars.redact((final or full or "").strip(), key)
-    record_usage(sdir, effective, spec, out, "answer" if answer else "failed", started)
+    record_usage(sdir, effective, spec, out, "answer" if answer else "failed", started,
+                 meta.get("billing_id"))
     label = f"{provider} via {effective}" if effective else provider
     with open(os.path.join(sdir, "transcript.md"), "a", encoding="utf-8") as fh:
         fh.write(f"\n\n## Request ({time.strftime('%Y-%m-%d %H:%M:%S')})\n\n{prompt}\n"
@@ -537,8 +541,9 @@ def _muse_failover(provider, sdir, meta, prompt, first_error):
         die(f"{provider}: muse-meta failed ({first_error[:300]}) and the muse-openrouter "
             f"continuation also failed ({exc.code}); last-good session retained.", 3)
     with open(os.path.join(sdir, "transcript.md"), "a", encoding="utf-8") as fh:
+        replay_digest = hashlib.sha256(resume_context.encode("utf-8")).hexdigest()
         fh.write(f"\n\n<!-- route failover: muse-meta -> muse-openrouter "
-                 f"({time.strftime('%Y-%m-%d %H:%M:%S')}) -->\n")
+                 f"({time.strftime('%Y-%m-%d %H:%M:%S')}); replay SHA-256 {replay_digest} -->\n")
     return answer
 
 

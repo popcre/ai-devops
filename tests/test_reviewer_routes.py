@@ -886,6 +886,24 @@ class CacheQualificationTests(SecondOpinionRouteTests):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertNotIn("usage_attempts", result)
 
+    def test_usage_observes_top_level_session_and_rejects_conflicting_duplicates(self):
+        from reviewer_usage import reviewer_attempt
+        first = {"type": "step_finish", "sessionID": "fixture",
+                 "part": {"messageID": "reply", "id": "part", "tokens": {"input": 10}}}
+        second = {"type": "step_finish", "sessionID": "fixture",
+                  "part": {"messageID": "reply", "id": "second", "tokens": {"input": 3}}}
+        conflict = {**first, "part": {**first["part"], "tokens": {"input": 99}}}
+        receipt = reviewer_attempt(
+            "\n".join(json.dumps(event) for event in (first, first, second, conflict)),
+            route="muse-openrouter", model="fixture", engine="opencode",
+            outcome="failed", elapsed=1, billing_id="bill-" + "f" * 32,
+        )
+        self.assertEqual(receipt["step_finishes"], 2)
+        self.assertEqual(receipt["adapter_counters"]["input_uncached"],
+                         {"subtotal": 3, "reported_steps": 1})
+        self.assertEqual(len(receipt["billing_fingerprint"]), 64)
+        self.assertNotIn("bill-", json.dumps(receipt))
+
     def test_usage_records_both_failover_attempts_without_conversation_text(self):
         self.env["AI_REVIEW_USAGE"] = "1"
         self.mode("ok", "credit", "cachefinish")
@@ -1015,17 +1033,20 @@ class CacheQualificationTests(SecondOpinionRouteTests):
                          "VERDICT: APPROVE", "VERDICT: REJECT", "VERDICT: REVISE"):
             self.assertIn(required, prompt)
 
-    def test_context_expansion_keeps_required_evidence(self):
-        ars = self.ars
-        work = os.path.join(self.tmp.name, "review-work")
-        os.mkdir(work)
-        prompt = ars.build_prompt(self.repo, self.base, self.head, "file-map", work)
-        self.assertIn("a.txt", prompt)
-        self.assertNotIn("+two", prompt)
-        evidence, = pathlib.Path(work).glob(".review-evidence-*/full.patch")
-        self.assertIn(evidence.parent.name + "/full.patch", prompt)
-        self.assertEqual(evidence.read_text(encoding="utf-8"),
-                         ars.git(self.repo, "diff", f"{self.base}...{self.head}"))
+    def test_lean_requires_template_scope_section(self):
+        from unittest.mock import patch
+        broken = pathlib.Path(self.tmp.name, "wrong-template.md")
+        broken.write_text("No scope heading", encoding="utf-8")
+        with patch.object(self.ars, "TEMPLATE", broken):
+            with self.assertRaisesRegex(RR.RouteError, "missing its scope section"):
+                self.ars.build_prompt(self.repo, self.base, self.head, "lean")
+
+    def test_review_refuses_candidate_without_inline_patch(self):
+        self.env["AI_REVIEW_PROMPT_VARIANT"] = "file-map"
+        proc, result = self.run_review(route="muse-openrouter")
+        self.assertEqual(proc.returncode, 2)
+        self.assertIn("unknown reviewer prompt variant", result["error"])
+        self.assertEqual(self.oc_calls(), [])
 
     def test_concise_report_preserves_findings_and_verdict(self):
         original = self.ars.build_prompt(self.repo, self.base, self.head)

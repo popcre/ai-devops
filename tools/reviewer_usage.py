@@ -12,6 +12,7 @@ CLI's first-party model catalog whenever that row is readable.
 import argparse
 import datetime
 import decimal
+import hashlib
 import json
 import math
 import os
@@ -43,13 +44,13 @@ def nested(obj, *keys):
     return obj
 
 
-def reviewer_attempt(stdout, *, route, model, engine, outcome, elapsed):
+def reviewer_attempt(stdout, *, route, model, engine, outcome, elapsed, billing_id=None):
     """Observed runtime events cannot count hidden retries or establish billing."""
     fields = {
         'input_uncached': ('input',), 'output_visible': ('output',), 'reasoning': ('reasoning',),
         'cache_read': ('cache', 'read'), 'cache_write': ('cache', 'write'),
     }
-    starts, finishes, seen = 0, [], set()
+    starts, finishes, seen = 0, [], {}
     if engine == 'opencode':
         for line in (stdout or '').splitlines():
             try:
@@ -58,13 +59,20 @@ def reviewer_attempt(stdout, *, route, model, engine, outcome, elapsed):
                 continue
             kind = nested(event, 'type')
             part = nested(event, 'part')
-            identity = tuple(nested(part, field) for field in ('sessionID', 'messageID', 'id'))
+            session = nested(event, 'sessionID') or nested(part, 'sessionID')
+            if nested(part, 'sessionID') not in (None, session):
+                continue
+            identity = (session, nested(part, 'messageID'), nested(part, 'id'))
             if kind in ('step_start', 'step_finish') and all(
                 isinstance(item, str) and item for item in identity
             ):
-                if (kind, identity) in seen:
+                key = (kind, identity)
+                if key in seen:
+                    index = seen[key]
+                    if kind == 'step_finish' and finishes[index] != part:
+                        finishes[index] = None
                     continue
-                seen.add((kind, identity))
+                seen[key] = len(finishes)
             if kind == 'step_start':
                 starts += 1
             elif kind == 'step_finish':
@@ -80,7 +88,7 @@ def reviewer_attempt(stdout, *, route, model, engine, outcome, elapsed):
     estimates = [number(nested(part, 'cost'), tokens=False) for part in finishes]
     # OpenCode can emit zero when model pricing is missing.
     measured_estimates = [value for value in estimates if value]
-    return {
+    receipt = {
         'route': route, 'model': model, 'engine': engine,
         'outcome': outcome, 'elapsed_seconds': round(elapsed, 3),
         'source': 'runtime-events',
@@ -94,6 +102,9 @@ def reviewer_attempt(stdout, *, route, model, engine, outcome, elapsed):
         'provider_request_count': None,
         'billed_cost_usd': None,
     }
+    if billing_id:
+        receipt['billing_fingerprint'] = hashlib.sha256(billing_id.encode('utf-8')).hexdigest()
+    return receipt
 
 
 def append_reviewer_attempt(path, receipt):
