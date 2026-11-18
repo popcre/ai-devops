@@ -475,9 +475,8 @@ def run_once(provider, prompt, work, home, tmp, key, timeout, spec=None, observe
         return None, "", f"timeout after {timeout}s", None
     full, final, ev_err, stop_failure = read_events(out)
     if stop_failure:
-        if observe:
-            observe(out, "failed")
-        return None, "", f"incomplete reviewer output: {stop_failure}", cache_receipts(out)
+        full = final = ""
+        ev_err = f"{ev_err}\nincomplete reviewer output: {stop_failure}".strip()
     text = final_report(final, full)
     verdict = parse_verdict(final) or parse_verdict(full)
     if observe:

@@ -50,6 +50,7 @@ FAKE_OC = textwrap.dedent("""\
         print(json.dumps({"type": "text", "part": {"text": t}}))
     if mode == "credit":
         print(json.dumps({"type": "error", "error": {"message": "HTTP 402 Insufficient Balance"}}))
+        print(json.dumps({"type": "step_finish", "part": {"reason": "error"}}))
         sys.exit(1)
     if mode == "auth":
         print(json.dumps({"type": "error", "error": {"message": "status 401 invalid api key"}}))
