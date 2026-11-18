@@ -21,6 +21,14 @@ check() {
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
+windows_fixture=0
+case "$(uname -s 2>/dev/null || true)" in
+  MINGW*|MSYS*|CYGWIN*)
+    windows_fixture=1
+    FIXTURE_ACL_ROOT="$(cygpath -w "$TMP")" powershell.exe -NoProfile -NonInteractive \
+      -Command '$sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value; & icacls.exe "$env:FIXTURE_ACL_ROOT" /inheritance:r /grant:r ("*" + $sid + ":(OI)(CI)(F)") | Out-Null; exit $LASTEXITCODE' || exit 1
+    ;;
+esac
 export AI_GH_STATE_DIR="$TMP/gh-state" AI_GH_MIN_SPACING_SECONDS=0 AI_GH_QUOTA_PROBE_SECONDS=off
 mkdir -p "$TMP/bin" "$TMP/repo"
 git -C "$TMP/repo" init -q
@@ -310,7 +318,11 @@ done
 # Exercise the real production context reader; no test context override.
 unset AI_PR_WAIT_TEST_CONTEXT_KEY
 export AI_PR_WAIT_SNAPSHOT_DIR="$TMP/production-cache"
-mkdir -m 700 -p "$TMP/production-state/identities"
+if [ "$windows_fixture" -eq 1 ]; then
+  mkdir -p "$TMP/production-state/identities" || exit 1
+else
+  mkdir -m 700 -p "$TMP/production-state/identities" || exit 1
+fi
 export AI_GH_STATE_DIR="$TMP/production-state"
 for identity in missing unknown; do
   set_cancel_world
@@ -319,7 +331,9 @@ for identity in missing unknown; do
     fixture_key="$(printf '3 github.com %s' "$fixture_hash" | sha256sum | cut -d' ' -f1)"
     printf 'unknown 1\n' > "$AI_GH_STATE_DIR/identities/$fixture_key"
     printf '%064d\n' 0 > "$AI_GH_STATE_DIR/principal-salt"
-    chmod 600 "$AI_GH_STATE_DIR/identities/$fixture_key" "$AI_GH_STATE_DIR/principal-salt"
+    if [ "$windows_fixture" -eq 0 ]; then
+      chmod 600 "$AI_GH_STATE_DIR/identities/$fixture_key" "$AI_GH_STATE_DIR/principal-salt" || exit 1
+    fi
   fi
   # Live-shaped 35 jobs, preserving the six original mandatory successes.
   jq --arg head "$GOOD_HEAD" '.[0].jobs += [range(107;135)|{id:.,name:("section-"+tostring),status:"completed",conclusion:"success",run_id:9001,run_attempt:1,head_sha:$head}]|.[0].total_count=35' "$TMP/cancel-jobs" > "$TMP/change"; mv "$TMP/change" "$TMP/cancel-jobs"
