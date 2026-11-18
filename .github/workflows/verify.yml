@@ -475,6 +475,8 @@ jobs:
       !cancelled() && github.event_name != 'merge_group'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    outputs:
+      section_result: ${{ needs.windows-offline-section.result }}
     steps:
       - name: Aggregate the Windows offline lane
         env:
@@ -591,45 +593,53 @@ jobs:
 
   # One ci-red issue per failing test on merge-group and PR runs (step 1.4).
   # Advisory: blocks nothing. Capacity failures produce none. Auto-closes
-  # after three later green runs of the same test.
+  # after three later green runs of the same test. Fork PRs still show the
+  # advisory check results without starting a write job.
   report-ci-red:
-    needs: [fast-classifier, linux-offline, windows-offline-complete]
+    needs: [fast-classifier, doc-safety, linux-offline, windows-offline]
     if: >-
       always() && !cancelled() &&
-      (github.event_name == 'pull_request' || github.event_name == 'merge_group')
+      (github.event_name == 'merge_group' ||
+       (github.event_name == 'pull_request' &&
+        github.event.pull_request.head.repo.full_name == github.repository &&
+        github.actor != 'dependabot[bot]'))
     runs-on: ubuntu-24.04
     timeout-minutes: 3
+    # Issue lookup and creation must serialize across PRs and merge groups.
+    concurrency:
+      group: verify-ci-red
+      queue: max
     permissions:
       contents: read
       issues: write
       pull-requests: read
     env:
-      GH_TOKEN: ${{ github.token }}
       RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - name: Open or close ci-red issues per failing test
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          MERGE_GROUP_REF: ${{ github.event.merge_group.head_ref }}
         run: |
           needs_summary=""
           for pair in \
             "fast-classifier=${{ needs.fast-classifier.result }}" \
+            "doc-safety=${{ needs.doc-safety.result }}" \
             "linux-offline=${{ needs.linux-offline.result }}" \
-            "windows-offline-complete=${{ needs.windows-offline-complete.result }}"; do
+            "windows-offline=${{ needs.windows-offline.outputs.section_result || needs.windows-offline.result }}"; do
             needs_summary="$needs_summary$pair "
           done
-          PR_NUMBER=""
-          HEAD_SHA=""
-          EVENT="${{ github.event_name }}"
-          if [ "$EVENT" = "pull_request" ]; then
-            PR_NUMBER="${{ github.event.pull_request.number }}"
-            HEAD_SHA="${{ github.event.pull_request.head.sha }}"
-          elif [ "$EVENT" = "merge_group" ]; then
+          if [ "$GITHUB_EVENT_NAME" = "merge_group" ]; then
             # head_ref is gh-readonly-queue/<base>/pr-<N>-<sha>
-            ref="${{ github.event.merge_group.head_ref }}"
-            PR_NUMBER="$(printf '%s' "$ref" | sed -n 's|.*/pr-\([0-9][0-9]*\)-.*|\1|p')"
+            PR_NUMBER="$(printf '%s' "$MERGE_GROUP_REF" | sed -n 's|.*/pr-\([0-9][0-9]*\)-.*|\1|p')"
             if [ -n "$PR_NUMBER" ]; then
-              HEAD_SHA="$(gh api "repos/${{ github.repository }}/pulls/${PR_NUMBER}" --jq '.head.sha' 2>/dev/null || true)"
+              HEAD_SHA="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq '.head.sha' 2>/dev/null || true)"
             fi
           fi
           bash tools/ci/report-scheduled-failure.sh \
@@ -637,6 +647,6 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --results "$needs_summary" \
             --per-test \
-            --event "$EVENT" \
+            --event "$GITHUB_EVENT_NAME" \
             --pr-number "$PR_NUMBER" \
             --head-sha "$HEAD_SHA"
