@@ -7,7 +7,7 @@ read-when: Rebuilding or re-enabling the edge-dev3 runner heartbeat, or fixing i
 
 # Implementation plan — edge-dev3 heartbeat as one quiet shared note (popcre/ai-devops#2346)
 
-## STATUS (2026-11-18 3:05 PM EST)
+## STATUS (2026-11-18 4:55 PM EST)
 
 | Step | State | Evidence |
 |---|---|---|
@@ -26,6 +26,8 @@ Until step 5 every routed job in 28 repositories runs on GitHub's machines.
 Handoff: [HANDOFF.d/2026-11-18T1957Z-edge-dev-claude-heartbeat-shared-note-plan.md](HANDOFF.d/2026-11-18T1957Z-edge-dev-claude-heartbeat-shared-note-plan.md).
 This plan supersedes [plan_issue-2346.md](plan_issue-2346.md) (same issue,
 smaller fix that this design makes unnecessary).
+Revised 2026-11-18 after an outside second opinion; see "Second opinion" near
+the end for what changed and why.
 
 ---
 
@@ -171,10 +173,14 @@ NOT in this plan:
    in `.github/workflows/edge-dev3-route.yml:55-62`). A public repository can
    be fetched by git from any repository, organization or personal, without a
    login. So one note stored in `popcre/ai-devops` is readable by all 28.
-6. **Git transfers are not API requests.** `git push` and `git fetch` to
-   github.com do not count against the 5,000-per-hour REST allowance. One push
-   therefore replaces up to 28 API writes at zero allowance cost. Step 0
-   proves this on the real host before anything is built on it.
+6. **Hypothesis, not yet proven: git transfers are not API requests.**
+   `git push` and `git fetch` to github.com are expected not to count against
+   the 5,000-per-hour REST allowance, and a ref outside `refs/heads/` is
+   expected to accept pushes and be fetchable without a login (this is known
+   to work for `refs/notes/*`; it is undocumented for other names). If both
+   hold, one push replaces up to 28 API writes at zero allowance cost.
+   Nothing is built on this until step 0 has proven it on the real host,
+   including a 30-minute run at the real cadence.
 
 ## 7. Approaches considered and rejected
 
@@ -196,6 +202,10 @@ NOT in this plan:
   problem (kept as the documented fallback in step 0 if the custom ref fails).
 - **Reading the note through the GitHub API from the router.** Needs a token
   with access to another repository's settings; the git fetch needs none.
+- **Reading the note from `raw.githubusercontent.com`** (raised in the second
+  opinion, withdrawn by the reviewer). That service caches for 300 seconds,
+  which would eat the whole 330-second freshness limit against a 120-second
+  refresh. A git fetch reads the ref directly.
 - **Leaving the heartbeat off.** Loses the capability the owner asked for on
   2026-11-03 and sends private-repository work to paid minutes.
 
@@ -214,19 +224,32 @@ Locked (do not relitigate):
   or when the last publish is `REFRESH` (120 s) old. At most one push per run.
 - **L5:** back-off — after a failed push do not try again for
   `min(60 × 2^(failures−1), 900)` seconds; reset on success.
-- **L6:** the router prefers the shared note's line for its own repository;
-  if the fetch fails or there is no usable line it uses the old `HEARTBEAT`
-  input exactly as today. Every doubtful case stays "hosted".
-- **L7:** the router fetches the note anonymously with git, with a 20-second
-  limit, and never fails the job because of it.
+- **L6:** the router uses the shared note **only** when the note has exactly
+  one line for its own repository **and** that line's value is well-formed
+  (matches the existing strict pattern). A well-formed line is authoritative
+  even when it says stale, busy, offline or a future time — those mean
+  "hosted", with no rescue from the old variable. Anything else (no file,
+  oversized file, no line, duplicate lines, malformed value) is treated as a
+  damaged note and the router uses the old `HEARTBEAT` input exactly as today.
+  Every doubtful case stays "hosted".
+- **L7:** the router fetches the note with git into a fresh temporary
+  directory (never inside the `.edge-dev3-route` checkout), first with the
+  job's own token (the calling repository's `GITHUB_TOKEN`, which has its own
+  allowance, not Albert's), then without any login if that fails. 20-second
+  limit per attempt. The fetch can never fail the job.
 - **L8:** no calling repository changes; the workflow's inputs stay the same.
 
 Open (implementer's judgment, with criteria):
 
-- **O1 — ref location.** If step 0 shows the custom ref cannot be pushed or
-  cannot be fetched anonymously, use the branch `refs/heads/runner-status`
-  instead, and confirm no workflow runs on pushes to it. Record which was used
-  in STATUS. Anything else: stop and flag.
+- **O1 — ref location.** The custom ref is preferred. If step 0 shows it
+  cannot be pushed or cannot be fetched without a login, the branch
+  `refs/heads/runner-status` is an equally valid, pre-approved fallback — but
+  only after checking, and recording in STATUS, that nothing reacts to pushes
+  on it: no workflow with a matching `push` trigger (read every `push:` block
+  under `.github/workflows`), no ruleset that covers it
+  (`gh api repos/popcre/ai-devops/rulesets`), and no webhook
+  (`gh api repos/popcre/ai-devops/hooks`). Record which ref was used in
+  STATUS. Anything else: stop and flag.
 - **O2 — names of helper functions and test labels.**
 
 ## 9. The plan
@@ -249,41 +272,69 @@ repository under `$(mktemp -d)` create a blob from a one-line test file, a tree
 `git push --force $URL <commit>:$REF` five times with new content; record the
 allowance again.
 
-Then from a different machine with no credentials
-(`GIT_TERMINAL_PROMPT=0 git -c credential.helper= fetch --depth 1 $URL $REF` in
-an empty repository, then `git show FETCH_HEAD:$FILE`).
+Then from a different machine with no credentials, in a fresh empty directory:
+`git init -q . && GIT_TERMINAL_PROMPT=0 git -c credential.helper= fetch --no-tags --depth 1 $URL $REF`,
+then `git show FETCH_HEAD:$FILE`.
+
+**Soak (added after the second opinion).** Five pushes prove nothing about the
+real rhythm. In the same kind of transient unit, push new content once every
+60 seconds for 30 minutes (30 pushes — twice the real rate). For every push
+record: exit code, seconds taken, and git's stderr. Record the allowance
+before and after.
 
 Gate — you'll know it worked when: all five pushes succeed; the allowance
 counter moved by no more than the two reads you made yourself (run when no other
 traffic is expected, or repeat to be sure); the anonymous fetch prints the last
-content; and `gh run list -R popcre/ai-devops --limit 5` shows no run triggered
-by the pushes. If the push or anonymous fetch of the custom ref fails, apply O1
-and repeat. If git pushes turn out to consume the allowance, **stop**: the
-design's premise is false; report to the owner.
+content; `gh run list -R popcre/ai-devops --limit 5` shows no run triggered
+by the pushes; and in the soak **all 30 pushes succeed**, none takes longer
+than 20 seconds, and git's stderr never mentions a rejection, a rate limit or
+"abuse". If the push or anonymous fetch of the custom ref fails, apply O1
+and repeat (including the soak). If git pushes turn out to consume the
+allowance, or any soak push is rejected or throttled, **stop**: the design's
+premise is false; report to the owner. Do not "fix" a failed soak by pushing
+less often — that changes routing behaviour and is the owner's call.
 
 ### Step 1 — router reads the shared note — `lead-only`
 
 Reason: reshapes the logic that decides where every job runs.
 
 - `tools/ci/edge-dev3-route.sh`: add optional input `HEARTBEAT_FILE` (path).
-  After the fork / `pull_request_target` checks (`:23-26`) and before the
+  After the fork / `pull_request_target` checks (`:23-26`) — these must stay
+  first, so no note can ever send such a job to the desktop — and before the
   format check (`:27`): if `HEARTBEAT_FILE` is a readable regular file no
-  larger than 65,536 bytes, take the lines whose first tab-separated field
-  equals `$REPOSITORY` exactly (case-sensitive, after stripping a trailing
-  carriage return). If there is **exactly one** such line, use its second
-  field as the heartbeat value in place of `$HEARTBEAT`. In every other case
-  (no file, too big, no line, more than one line) keep `$HEARTBEAT`. The
-  existing strict format, age (`MAX_AGE`, `-60` future tolerance), state and
-  label checks then run unchanged on whichever value was chosen. Append the
-  source (`shared note` / `repository variable`) to the `reason:` line on
-  stderr. Update the header comment.
+  larger than 65,536 bytes, read it line by line; strip one trailing carriage
+  return from the **whole line** before splitting; skip empty lines; take the
+  lines whose first tab-separated field equals `$REPOSITORY` exactly
+  (case-sensitive). If there is **exactly one** such line **and** the rest of
+  that line (everything after the first tab) matches the existing strict
+  pattern `^(online|offline),(idle|busy),([0-9]{9,11})$`, use it as the
+  heartbeat value in place of `$HEARTBEAT`. In every other case (no file, too
+  big, no line, more than one line, malformed value, extra tab-separated
+  fields) keep `$HEARTBEAT` (L6). The existing age (`MAX_AGE`, `-60` future
+  tolerance), state and label checks then run unchanged on whichever value
+  was chosen. Append the source (`shared note` / `repository variable`) to the
+  `reason:` line on stderr. Update the header comment.
 - `.github/workflows/edge-dev3-route.yml`, step `route` (`:63-75`): before
-  running the script, fetch the note inside the existing checkout:
-  `timeout 20 git -C .edge-dev3-route -c credential.helper= fetch --quiet --depth 1 https://github.com/popcre/ai-devops.git refs/runner-status/edge-dev3 && git -C .edge-dev3-route show FETCH_HEAD:edge-dev3.tsv > "$RUNNER_TEMP/edge-dev3.tsv" || rm -f "$RUNNER_TEMP/edge-dev3.tsv"`,
-  with `GIT_TERMINAL_PROMPT=0`; pass `HEARTBEAT_FILE: ${{ runner.temp }}/edge-dev3.tsv`
-  in `env`. The fetch must not be able to fail the step (`|| true` semantics).
-  Update the header comment to describe the shared note; keep the caller
-  pattern text unchanged (L8).
+  running the script, fetch the note in a **fresh temporary directory**, never
+  inside `.edge-dev3-route` (that checkout is sparse and shallow; a second
+  fetch into it is fragile). Shape, as one shell function called twice:
+  `d=$(mktemp -d "$RUNNER_TEMP/note.XXXXXX") && git -C "$d" init -q && timeout 20 git -C "$d" -c credential.helper= fetch --quiet --no-tags --depth 1 https://github.com/popcre/ai-devops.git refs/runner-status/edge-dev3 && git -C "$d" show FETCH_HEAD:edge-dev3.tsv > "$RUNNER_TEMP/edge-dev3.tsv"`.
+  First call: with the job token. Add `NOTE_TOKEN: ${{ github.token }}` to the
+  step's `env` and hand it to git through the environment only
+  (`GIT_CONFIG_COUNT=1`, `GIT_CONFIG_KEY_0=http.https://github.com/.extraheader`,
+  `GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$NOTE_TOKEN" | base64 -w0)"`)
+  — never on a command line and never echoed. Second call, only if the first
+  failed: the same without those three variables (no login). If both fail,
+  `rm -f "$RUNNER_TEMP/edge-dev3.tsv"`. The whole block ends in an explicit
+  `|| true` and runs with `GIT_TERMINAL_PROMPT=0`; it can never fail the step.
+  Pass `HEARTBEAT_FILE: ${{ runner.temp }}/edge-dev3.tsv` in the step's `env`
+  (the script reads it from the environment like its other inputs). The job
+  token belongs to the calling repository and has its own allowance; it is
+  used only because unlogged fetches from GitHub's shared machines may be
+  throttled by address. If the token attempt turns out never to work for a
+  calling repository in step 6, that is acceptable — the no-login attempt
+  covers it; record what was seen. Update the header comment to describe the
+  shared note; keep the caller pattern text unchanged (L8).
 
 Gate: `bash tests/test-ci-edge-dev3-route.sh` prints
 `PASS test-ci-edge-dev3-route` with the new cases of §10; all 14 old cases
@@ -297,20 +348,28 @@ whether a job may run on Albert's own machine):
 | note file | absent | falls back to `HEARTBEAT` input | `no shared note uses repository variable` |
 | note file | larger than 65,536 bytes | ignored, falls back | `oversized shared note is ignored` |
 | note file | no line for this repository | falls back | `shared note without this repository falls back` |
-| note file | two lines for this repository | ignored, falls back | `duplicate repository lines are ignored` |
+| note file | two lines for this repository (accident or injected) | ignored, falls back | `duplicate repository lines are ignored` |
+| note file | empty lines between entries | skipped; the one real line is used | `empty lines in shared note are skipped` |
 | note file | repository differs only by letter case | not matched | `repository match is case-sensitive` |
 | note file | prefix repository (`o/r` vs `o/r2`) | not matched | `repository prefix does not match` |
-| note line | value malformed (`online,idle,abc`, extra fields, spaces) | hosted | `malformed shared note line stays hosted` |
-| note line | stale (older than 330 s) | hosted, even if `HEARTBEAT` input is fresh | `stale shared note stays hosted` |
+| note line | value malformed (`online,idle,abc`, extra fields, spaces) | treated as a damaged note: falls back to `HEARTBEAT` input | `malformed shared note line falls back` |
+| note line | malformed, while the `HEARTBEAT` input is fresh and idle | routes to edge-dev3 by the variable | `corrupt shared note with fresh variable uses variable` |
+| note line | malformed, while the `HEARTBEAT` input is stale | hosted | `corrupt shared note with stale variable stays hosted` |
+| note line | well-formed but stale (older than 330 s), also the case of an old time pinned by someone with write access | hosted, even if `HEARTBEAT` input is fresh | `stale shared note stays hosted` |
 | note line | timestamp more than 60 s in the future | hosted | `future shared note stays hosted` |
 | note line | trailing carriage return | parsed correctly | `CRLF shared note is accepted` |
 | note line | `offline` or `busy` | hosted | `busy shared note stays hosted` |
 | event | fork pull request with a perfect note | hosted | `fork pull request ignores shared note` |
 | event | `pull_request_target` with a perfect note | hosted | `pull_request_target ignores shared note` |
+| event | same-repository (non-fork) pull request with a perfect note | same result as a perfect `HEARTBEAT` input gives today — the note adds no new path to the desktop | `same-repository pull request routes the same by note or variable` |
 
-Note the deliberate rule in the "stale" row: once a usable line for the
-repository exists, it is authoritative — the router does not fall back to the
-old variable to rescue a stale or bad line.
+The deliberate rule (L6): a **well-formed** line for the repository is
+authoritative — the router does not fall back to the old variable to rescue a
+stale, busy or offline line. A **damaged** note (missing, oversized, duplicate,
+malformed) is not trusted at all and the old variable is used. Reason: a
+damaged note says nothing about the runner, while a well-formed stale line is
+the real signal that the desktop stopped reporting. One case the router
+cannot catch is disclosed in §13: a false but well-formed "idle".
 
 ### Step 2 — heartbeat publishes one note — `lead-only`
 
@@ -326,7 +385,14 @@ Rewrite `tools/ci/edge-dev3-heartbeat.sh`:
   `EDGE_DEV3_STATUS_REF` (default `$REF`), `EDGE_DEV3_GIT` (default `git`,
   for tests).
 - Build the note in memory: one line per listed repository, `repo<TAB>state,work,now`.
-  Build a "signature": the same lines without the timestamp.
+  Build a "signature": the same lines without the timestamp, hashed with
+  `sha256sum` (present on the host; no other hashing tool).
+- Every git command in the script is run as `"$EDGE_DEV3_GIT" <arguments>`
+  — one executable path, no embedded arguments — so the test wrapper can
+  log each call's arguments to a file and then run the real git.
+- Overlap: systemd never starts a `Type=oneshot` service while its previous
+  run is still active, so two runs cannot publish at once; do not add a lock
+  file. Say so in the header comment.
 - Decide: read `$STATE_DIR/published` (`<unix-seconds> <signature hash>`) and
   `$STATE_DIR/backoff` (`<failures> <not-before unix-seconds>`). Exit 0
   without publishing when `now < not-before`; or when the signature hash is
@@ -337,11 +403,14 @@ Rewrite `tools/ci/edge-dev3-heartbeat.sh`:
   `timeout 40 git push --force --quiet "$REMOTE" "<commit>:$REF"` with
   `GIT_TERMINAL_PROMPT=0`. Commit author/committer come from the host's global
   git identity; do not set them in the script.
-- On success: write `published`, remove `backoff`, and prune the local
-  repository when it holds more than 500 loose objects
-  (`git -C repo.git gc --prune=now --quiet`). On failure: write `backoff` with
-  failures+1 and `now + min(60·2^(failures−1), 900)`, print one line to stderr,
-  exit 1.
+- On success, in this order: write `published`, remove `backoff`, and only
+  then prune the local repository if it holds more than 500 loose objects
+  (`git -C repo.git gc --prune=now --quiet`; a failed prune is ignored). On
+  failure: write `backoff` with failures+1 and
+  `now + min(60·2^(failures−1), 900)`, print one line to stderr, exit 1.
+- `published` and `backoff` are each written to a temporary name in
+  `$STATE_DIR` and then renamed (`mv`), so a killed run never leaves half a
+  file. An unreadable or malformed state file is treated as absent.
 - No `gh` anywhere in the file. Rewrite the header comment (`:1-12`) to match.
 
 Gate: `bash tests/test-ci-edge-dev3-heartbeat.sh` prints
@@ -409,6 +478,13 @@ timestamp is under 180 s old, twice, five minutes apart.
    confirm step 5's gate again.
 3. Trace `gh` processes on edge-dev3 for ten minutes: zero belong to the
    heartbeat. Record the hourly allowance use before and after.
+   Also record the size of `popcre/ai-devops` (`gh api repos/popcre/ai-devops --jq .size`)
+   at switch-on and again 24 hours later (leave a `- [ ] 24-hour size check`
+   item on #2346 if the session ends first). About 720 small unreachable
+   commits a day are expected to be cleaned up by GitHub on its own. Only if
+   the size keeps growing by more than 5 MB a day, bring the owner the choice
+   of halving the cadence; do not change it yourself and do not contact
+   GitHub Support.
 4. Post the evidence (counts and conclusions only) on #2346, signed; confirm
    it closed with the merge. Delete the `.pre-shared-note` file. Update STATUS,
    mark this plan `status: done`, and update the handoff file's successor note.
@@ -419,8 +495,8 @@ open a second issue.
 
 ## 10. Tests required
 
-- **Extend `tests/test-ci-edge-dev3-route.sh`** with the 13 named cases in the
-  step 1 table plus `fresh shared note routes to edge-dev3` and
+- **Extend `tests/test-ci-edge-dev3-route.sh`** with every test named in the
+  step 1 table (17 distinct names) plus `fresh shared note routes to edge-dev3` and
   `shared note wins over a stale repository variable`. Use temp files for
   `HEARTBEAT_FILE` and the existing fixed `NOW=1800000000`.
 - **New `tests/test-ci-edge-dev3-heartbeat.sh`** — no network: the remote is a
@@ -437,6 +513,8 @@ open a second issue.
   `back-off doubles and caps at 900 seconds`;
   `success clears back-off`;
   `published commit has no parent`;
+  `corrupt state file is treated as absent`;
+  `no temporary state file is left behind after a run`;
   `script contains no gh call` (static).
 - Must stay green: the repository's Verify workflow as a whole.
 
@@ -502,9 +580,24 @@ Risks and rollback:
 - *Router change breaks routing.* It can only produce "hosted" on any error;
   rollback is reverting the pull request (the router is read from `main` at run
   time, so the revert takes effect on the next job).
-- *Someone with write access pushes a false note.* They could already edit the
-  router itself; the note can only claim "idle" (a job queues on edge-dev3) or
-  cause hosted fallback. Accepted.
+- *Someone with write access pushes a false note.* Disclosed plainly, because
+  the first draft got this wrong: changing the router needs a pull request to
+  protected `main`; changing this note needs only push access, with no review,
+  and a ref outside `refs/heads/` cannot be covered by a ruleset. A token that
+  is blocked from `main` but has "contents: write" on `popcre/ai-devops` can
+  still push it. Who can write today: the owner's own account and his own
+  automation that holds that login; if anyone else is ever given write
+  access, revisit this. Reach: one false note covers all 28 repositories at
+  once, where before each repository's variable had to be changed separately.
+  What a false note can do: (a) say busy/old → jobs run on GitHub's machines
+  (paid minutes for private repositories); (b) say "idle" for a repository
+  whose runner is actually off → that repository's jobs wait in line for a
+  runner that is not there instead of falling back (stranded; while the timer
+  runs, the next honest heartbeat overwrites the note within 60–120 seconds).
+  What it cannot do: send a fork or `pull_request_target` job to the desktop
+  (checked before the note is read), or open any path to the desktop that the
+  old variable did not already allow. Accepted on that basis.
+- *Repository growth from many small pushes.* Measured in step 6 item 3.
 
 Open question for the owner: none. Uncertain facts and how they get settled:
 whether git pushes are free of the allowance and whether the custom ref works —
@@ -545,7 +638,27 @@ request yourself. Update the STATUS table as each step passes, citing proof.
 If any step conflicts with section 1, the goal wins: stop and flag it.
 ```
 
-## Self-audit (2026-11-18)
+## Second opinion (2026-11-18)
+
+An outside model (Muse) reviewed this plan in two rounds; verdict both times
+"revise". It is advice only. Session name for the record:
+`heartbeat-shared-note-debate`.
+
+Accepted and written in above: the 30-minute soak in step 0; fetching into a
+fresh directory; the job-token-then-no-login fetch with an explicit
+cannot-fail guard; the stricter check before the branch fallback (O1); the
+simpler L6 rule (damaged note → old variable; well-formed line →
+authoritative) with its new tests; atomic state files, `sha256sum`, the
+no-overlap statement, prune-after-state-write and the 24-hour size check in
+steps 2 and 6; exact wiring for the note file and the test git wrapper; the
+corrected and fuller disclosure in §13; and §6 finding 6 reworded as a
+hypothesis until step 0 proves it.
+
+Rejected: reading the note from `raw.githubusercontent.com` (five-minute
+cache; the reviewer withdrew it), and protecting the status ref with a
+ruleset (rulesets cover branches and tags only; replaced by disclosure).
+
+## Self-audit (2026-11-18, re-run after the second opinion)
 
 1. *Could a brand-new session execute this without asking anything?* Yes.
    §2 defines every file, host, unit and term; §5 gives the exact present
@@ -559,7 +672,9 @@ If any step conflicts with section 1, the goal wins: stop and flag it.
    §7 lists eight rejected approaches with reasons, including the superseded
    plan. Gap found and fixed during audit: the rule that a stale shared line
    does not fall back to the old variable was implicit; it is now stated under
-   the step 1 table and tested.
+   the step 1 table and tested. Gaps found by the second opinion and fixed:
+   the transport was stated as fact before being proven; the false-note risk
+   was understated; a damaged note could have overridden a healthy variable.
 3. *Is the goal clear enough for a judgment call?* Yes. §1 states the outcome
    in business terms, the "goal wins" instruction, and the one safety property
    (any doubt → GitHub machine) that every step's failure mode is measured
