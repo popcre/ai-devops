@@ -184,6 +184,12 @@ clone + `./install.sh` on Ubuntu).
    stalls and reads like a broken tool. To add a permission everywhere, add the
    line to `config/claude-permissions.allow` in the repo — never hand-edit one
    machine's settings file.
+4c. `bin/ai-claude-plugins` — install every Claude Code plugin in
+   `config/claude-plugins.tsv` that this machine is missing (user scope; never
+   removes or updates one). Per-machine like 4b, so run it here too. Say its
+   verdict out loud (`OK all N required Claude plugin(s) already present`,
+   `ADDED N`, or `SKIP` when there is no `claude` command); a `FAIL` line is
+   rerun once, then reported `Blocked —` with the line.
 5. `bin/ai-gcloud-dflow` — set the dflow gcloud project/region (skips if gcloud
    absent).
 5b. `bin/ai-git-identity` — pin the Git commit identity. Idempotent; prints

@@ -317,7 +317,14 @@ without stopping to ask. The entries the toolkit requires live in
 `config/claude-permissions.allow` and are merged in by `bin/ai-claude-permissions`
 (run by `install.sh` and by every `sync my dotfiles`). That script is additive
 only — it never removes an entry and never touches the rest of the file, so
-per-machine hand additions survive. Everything else in the file stays
+per-machine hand additions survive.
+
+Claude Code plugins (third-party skill bundles such as ScaleDown's `slm-agent`,
+which provides `/slm-agent:evaluate`) are a separate per-machine install owned
+by the plugin manager under `~/.claude/plugins/`. The toolkit's list is
+`config/claude-plugins.tsv`; `bin/ai-claude-plugins` (run by `install.sh` and
+by every `sync my dotfiles`) installs the missing ones at user scope and never
+removes one. Everything else in the file stays
 machine-local; only the required-permissions list is synced.
 
 ### 5. `~/.codex/config.toml`

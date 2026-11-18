@@ -1,0 +1,130 @@
+#!/usr/bin/env bash
+# ai-claude-plugins — make sure every Claude Code plugin the toolkit expects is
+# installed for this user.
+#
+# WHY THIS EXISTS
+# ---------------
+# Plugin skills (`/slm-agent:evaluate`, ...) are installed per machine by the
+# Claude Code plugin manager; nothing else in the toolkit carries them, so a
+# skill used on one computer was simply absent on the next (2026-11-18). The
+# plugins live in ONE place, `config/claude-plugins.tsv`, and this script
+# installs the missing ones at USER scope so they cover every project.
+#
+# Additive and idempotent:
+#   - a plugin already recorded in ~/.claude/plugins/installed_plugins.json is
+#     left alone (no network call),
+#   - a marketplace the machine already knows is not added again,
+#   - never uninstalls, disables, or updates anything,
+#   - a machine without the `claude` command is reported SKIP and exits 0.
+#
+# Usage:
+#   ai-claude-plugins              # install what is missing (default)
+#   ai-claude-plugins --check      # report only; exit 1 if anything is missing
+#   ai-claude-plugins --dry-run    # same as --check
+#
+# Exit: 0 all present (or skipped), 1 something missing or an install failed,
+# 2 usage or malformed list.
+set -euo pipefail
+
+MODE="apply"
+case "${1:-}" in
+  --check|--dry-run) MODE="check" ;;
+  -h|--help) sed -n '2,26p' "$0"; exit 0 ;;
+  "")        ;;
+  *) echo "ai-claude-plugins: unknown argument '$1'" >&2; exit 2 ;;
+esac
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+LIST_FILE="${AI_DEVOPS_CLAUDE_PLUGINS_FILE:-$REPO_ROOT/config/claude-plugins.tsv}"
+
+if [[ ! -f "$LIST_FILE" ]]; then
+  echo "ai-claude-plugins: missing $LIST_FILE" >&2
+  exit 1
+fi
+
+# WINDOWS HOME-DRIVE TRAP (same rule as bin/ai-claude-permissions): Claude Code
+# always uses the Windows profile, never a roaming $HOME.
+if [[ -n "${USERPROFILE:-}" ]]; then
+  if command -v cygpath >/dev/null 2>&1; then
+    BASE_HOME="$(cygpath -u "$USERPROFILE")"
+  else
+    BASE_HOME="/$(printf '%s' "$USERPROFILE" | sed -e 's#\\#/#g' -e 's#^\([A-Za-z]\):#\L\1#')"
+  fi
+else
+  BASE_HOME="$HOME"
+fi
+CLAUDE_HOME="${CLAUDE_HOME:-$BASE_HOME/.claude}"
+INSTALLED="$CLAUDE_HOME/plugins/installed_plugins.json"
+MARKETPLACES="$CLAUDE_HOME/plugins/known_marketplaces.json"
+CLAUDE_BIN="${AI_DEVOPS_CLAUDE_BIN:-claude}"
+
+# Read-only presence test: the JSON key is a quoted literal, so a fixed-string
+# match is exact. These files are never edited here; the plugin manager owns
+# them.
+has_key() { [[ -f "$1" ]] && grep -Fq "\"$2\"" "$1"; }
+
+missing=0 added=0 failed=0 present=0 have_cli=""
+
+while IFS=$'\t' read -r plugin marketplace source extra || [[ -n "${plugin:-}" ]]; do
+  plugin="${plugin%$'\r'}"; marketplace="${marketplace:-}"; source="${source:-}"
+  marketplace="${marketplace%$'\r'}"; source="${source%$'\r'}"
+  [[ -z "$plugin" || "$plugin" == \#* ]] && continue
+  if [[ -z "$marketplace" || -z "$source" || -n "${extra:-}" ]]; then
+    echo "ai-claude-plugins: malformed line for '$plugin' in $LIST_FILE (want plugin<TAB>marketplace<TAB>source)" >&2
+    exit 2
+  fi
+  id="$plugin@$marketplace"
+
+  if has_key "$INSTALLED" "$id"; then
+    present=$((present + 1))
+    continue
+  fi
+
+  if [[ "$MODE" == "check" ]]; then
+    echo "MISSING $id"
+    missing=$((missing + 1))
+    continue
+  fi
+
+  if [[ -z "$have_cli" ]]; then
+    if command -v "$CLAUDE_BIN" >/dev/null 2>&1; then have_cli=yes; else have_cli=no; fi
+  fi
+  if [[ "$have_cli" == "no" ]]; then
+    echo "SKIP $id ('$CLAUDE_BIN' command not found on this machine)"
+    continue
+  fi
+
+  if ! has_key "$MARKETPLACES" "$marketplace"; then
+    if ! "$CLAUDE_BIN" plugin marketplace add "$source" </dev/null; then
+      echo "FAIL $id (could not add marketplace '$marketplace' from $source)"
+      failed=$((failed + 1))
+      continue
+    fi
+  fi
+  if "$CLAUDE_BIN" plugin install "$id" --scope user </dev/null; then
+    echo "ADDED $id"
+    added=$((added + 1))
+  else
+    echo "FAIL $id (plugin install failed)"
+    failed=$((failed + 1))
+  fi
+done < "$LIST_FILE"
+
+if [[ "$MODE" == "check" ]]; then
+  if [[ "$missing" -gt 0 ]]; then
+    echo "MISSING $missing Claude plugin(s); run ai-claude-plugins to install"
+    exit 1
+  fi
+  echo "OK all $present required Claude plugin(s) already present"
+  exit 0
+fi
+
+if [[ "$failed" -gt 0 ]]; then
+  echo "FAILED $failed, ADDED $added, already present $present"
+  exit 1
+fi
+if [[ "$added" -eq 0 ]]; then
+  echo "OK all $present required Claude plugin(s) already present"
+else
+  echo "ADDED $added, already present $present (new sessions pick them up)"
+fi

@@ -1,0 +1,23 @@
+# Claude Code plugins that must be installed on EVERY toolkit machine.
+#
+# One plugin per line, three TAB-separated fields:
+#   plugin<TAB>marketplace<TAB>marketplace_source
+# Blank lines and `#` comments are ignored. `bin/ai-claude-plugins` adds the
+# marketplace (when the machine does not know it yet) and installs
+# `plugin@marketplace` at USER scope, so its skills appear in every project as
+# `/<plugin>:<skill>`.
+#
+# Additive only: deleting a line stops the install on new machines; machines
+# that already have the plugin keep it (`claude plugin uninstall` removes it).
+#
+# Cost to weigh before adding a line: a plugin that ships an MCP server starts
+# that server in EVERY Claude Code session on the machine (see
+# plan_tool-and-skill-scoping.md, #707). Third-party plugins track their
+# publisher's default branch; read the source before adding one here.
+#
+# ScaleDown SLM Agent (owner request 2026-11-18): `/slm-agent:evaluate` scans a
+# codebase for LLM calls that a cheaper task-specific ScaleDown model can
+# replace, `/slm-agent:optimize` tunes the replacement prompt. Ships one local
+# stdio MCP server (`npx -y @scaledown/migration-agent`); source read at commit
+# ec2df3cfe1bf: it makes no network calls and only writes scaledown-report.md.
+slm-agent	scaledown	scaledown-team/SLM_Agent
