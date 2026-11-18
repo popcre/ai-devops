@@ -18,6 +18,6 @@
 # ScaleDown SLM Agent (owner request 2026-11-18): `/slm-agent:evaluate` scans a
 # codebase for LLM calls that a cheaper task-specific ScaleDown model can
 # replace, `/slm-agent:optimize` tunes the replacement prompt. Ships one local
-# stdio MCP server (`npx -y @scaledown/migration-agent`); source read at commit
-# ec2df3cfe1bf: it makes no network calls and only writes scaledown-report.md.
+# stdio MCP server (`npx -y @scaledown/migration-agent`). The marketplace and
+# the npm package are both unpinned.
 slm-agent	scaledown	scaledown-team/SLM_Agent
