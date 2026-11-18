@@ -226,11 +226,12 @@ def is_credit_error(text):
 
 
 def read_events(stdout):
-    """Split OpenCode JSON events into (all text, final message, error text).
+    """Return OpenCode text, final message, errors and an explicit stop failure.
 
     The final message is the text after the reviewer's last step or tool
     call: its report, without the narration that came before it."""
     texts, errors, current, final = [], [], [], []
+    stop_failure = None
     for line in (stdout or "").splitlines():
         line = line.strip()
         if not line.startswith("{"):
@@ -243,15 +244,23 @@ def read_events(stdout):
             continue
         if ev.get("type") == "text":
             part = ev.get("part") or {}
-            if isinstance(part, dict) and part.get("text"):
-                texts.append(part["text"])
-                current.append(part["text"])
+            value = part.get("text") if isinstance(part, dict) else None
+            if isinstance(value, str) and value:
+                texts.append(value)
+                current.append(value)
                 final = current
         elif ev.get("type") == "error":
             errors.append(json.dumps(ev.get("error", ev))[:2000])
+        elif ev.get("type") == "step_finish":
+            part = ev.get("part")
+            reason = part.get("reason") if isinstance(part, dict) else None
+            if reason == "stop" and current:
+                stop_failure = None
+            elif reason in ("length", "content-filter", "error"):
+                stop_failure = reason
         elif ev.get("type") in ("step_start", "tool_use"):
             current = []
-    return "\n".join(texts), "\n".join(final), "\n".join(errors)
+    return "\n".join(texts), "\n".join(final), "\n".join(errors), stop_failure
 
 
 def cache_receipts(stdout):
@@ -464,7 +473,11 @@ def run_once(provider, prompt, work, home, tmp, key, timeout, spec=None, observe
         if observe:
             observe(out, "timeout")
         return None, "", f"timeout after {timeout}s", None
-    full, final, ev_err = read_events(out)
+    full, final, ev_err, stop_failure = read_events(out)
+    if stop_failure:
+        if observe:
+            observe(out, "failed")
+        return None, "", f"incomplete reviewer output: {stop_failure}", cache_receipts(out)
     text = final_report(final, full)
     verdict = parse_verdict(final) or parse_verdict(full)
     if observe:
@@ -498,11 +511,15 @@ def read_harness_events(stdout):
         elif ev.get("type") == "final":
             reason = (ev.get("reason") or {})
             if isinstance(reason, dict) and reason.get("kind") == "completed":
-                final = ev.get("text") or ""
+                text = ev.get("text")
+                if isinstance(text, str) and text.strip() and not final:
+                    final = text
+                else:
+                    errors.append("invalid or duplicate final response")
             else:
                 detail = reason.get("error") if isinstance(reason, dict) else reason
                 errors.append(json.dumps(detail or reason or "final without completion")[:2000])
-    return final, "\n".join(errors)
+    return final if not errors else "", "\n".join(errors)
 
 
 def run_harness_once(spec, prompt, work, tmp, key, timeout, observe=None):

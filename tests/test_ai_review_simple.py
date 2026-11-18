@@ -36,6 +36,9 @@ FAKE = textwrap.dedent("""\
         print(json.dumps({"type": "text", "part": {"text": t}}))
     if mode == "approve":
         text("Findings: none.\\nVERDICT: APPROVE")
+    elif mode == "truncated":
+        text("Unfinished findings.\\nVERDICT: APPROVE")
+        print(json.dumps({"type": "step_finish", "part": {"reason": "length"}}))
     elif mode == "credit":
         print(json.dumps({"type": "error", "error": {"message": "HTTP 402 Insufficient Balance"}}))
         sys.exit(1)
@@ -89,7 +92,7 @@ class ParseTests(unittest.TestCase):
         out = "\n".join([ev("text", part={"text": "Let me look around."}),
                           ev("tool_use", part={}), ev("step_start"),
                           ev("text", part={"text": "Findings: x\nVERDICT: REJECT"})])
-        full, final, _ = ars.read_events(out)
+        full, final, _, _ = ars.read_events(out)
         self.assertEqual(final, "Findings: x\nVERDICT: REJECT")
         self.assertIn("Let me look around.", full)
         self.assertEqual(ars.final_report(final, full), "Findings: x")
@@ -100,6 +103,17 @@ class ParseTests(unittest.TestCase):
         self.assertTrue(ars.is_credit_error('{"status": 402, "message": "Insufficient Balance"}'))
         self.assertTrue(ars.is_credit_error("HTTP 429 code 1113 allowance exhausted"))
         self.assertFalse(ars.is_credit_error("connection reset by peer"))
+
+    def test_empty_later_step_does_not_rehabilitate_truncated_text(self):
+        output = [
+            {"type": "text", "part": {"text": "VERDICT: APPROVE"}},
+            {"type": "step_finish", "part": {"reason": "length"}},
+            {"type": "step_start"},
+            {"type": "text", "part": {"text": 7}},
+            {"type": "step_finish", "part": {"reason": "stop"}},
+        ]
+        _, _, _, failure = ars.read_events("\n".join(map(json.dumps, output)))
+        self.assertEqual(failure, "length")
 
 
 class ReviewTests(unittest.TestCase):
@@ -167,6 +181,11 @@ class ReviewTests(unittest.TestCase):
     def test_credit_error_is_unavailable_without_retry(self):
         rc, res, calls = self.run_review("credit")
         self.assertEqual((rc, res["verdict"], res["error"], calls), (3, None, "out-of-credit", 1))
+
+    def test_truncated_verdict_is_never_published(self):
+        rc, res, calls = self.run_review("truncated")
+        self.assertEqual((rc, res["verdict"], res["findings"], calls), (3, None, "", 2))
+        self.assertIn("incomplete reviewer output: length", res["error"])
 
     def test_head_mismatch_is_refused(self):
         rc, res, calls = self.run_review("approve", head=self.base)

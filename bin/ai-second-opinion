@@ -486,8 +486,14 @@ def _run_opencode_turn(provider, sdir, meta, prompt, spec, effective, auto, new_
         meta.update(state="failed", updated=time.time())
         save_meta(sdir, meta)
         die(f"{provider}: no answer within {timeout}s.", 3)
+    full, final, ev_err, stop_failure = ars.read_events(out)
+    if stop_failure:
+        record_usage(sdir, effective, spec, out, "failed", started, meta.get("billing_id"))
+        meta.update(state="failed", updated=time.time())
+        meta.pop("pid", None)
+        save_meta(sdir, meta)
+        die(f"{provider}: incomplete answer: {stop_failure}.", 3)
     meta["session"] = meta.get("session") or session_id(out)
-    full, final, ev_err = ars.read_events(out)
     answer = ars.redact((final or full or "").strip(), key)
     record_usage(sdir, effective, spec, out, "answer" if answer else "failed", started,
                  meta.get("billing_id"))
