@@ -519,6 +519,8 @@ class SecondOpinionRouteTests(Base):
         self.assertEqual(m["route"], "muse-openrouter")
         self.assertEqual(m["turns"], 2)
         self.assertEqual(len(m["visible"]), 2)
+        self.assertEqual([turn["q"] for turn in m["visible"]],
+                         ["question one", "second question"])
         transcript = open(os.path.join(self.so_dir("muse", "fa"), "transcript.md")).read()
         self.assertIn("route failover: muse-meta -> muse-openrouter", transcript)
         calls = self.oc_calls()
@@ -842,6 +844,14 @@ class CacheReceiptTests(unittest.TestCase):
 class CacheQualificationTests(SecondOpinionRouteTests):
     """Phase C (#2551): opt-in cache identifiers, prompt order and receipts."""
 
+    @classmethod
+    def setUpClass(cls):
+        import importlib.machinery, importlib.util
+        loader = importlib.machinery.SourceFileLoader("ars_qualification", SCRIPT)
+        spec = importlib.util.spec_from_loader(loader.name, loader)
+        cls.ars = importlib.util.module_from_spec(spec)
+        loader.exec_module(cls.ars)
+
     def openrouter_options(self, call):
         provider = call["config"]["provider"]["openrouter-muse"]
         return provider["models"]["meta/muse-spark-1.3-contributor"].get("options", {})
@@ -943,13 +953,66 @@ class CacheQualificationTests(SecondOpinionRouteTests):
         for field in ("prompt_cache_key", "session_id", "x-session-id"):
             self.assertNotIn(field, patch)
 
+    def test_openrouter_billing_session_supports_hy4_and_deepseek(self):
+        identifier = "bill-" + "c" * 32
+        self.env.update(AI_REVIEW_USAGE="1", AI_REVIEW_BILLING_ID=identifier)
+        self.mode("cachefinish")
+        proc, result = self.run_review(route="hy4-openrouter")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        model = self.oc_calls()[0]["config"]["provider"]["openrouter-hy4"]["models"]["tencent/hy4"]
+        self.assertEqual(model["options"], {"session_id": identifier})
+        self.assertNotIn(identifier, json.dumps(result))
+
+        self.mode("approve")
+        proc, result = self.run_review(route="deepseek-openrouter")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn(f'x-session-id: "{identifier}"', self.dsh_calls()[0]["patch"])
+        self.assertNotIn(identifier, json.dumps(result))
+
+    def test_hy4_billing_session_survives_restart(self):
+        identifier = "bill-" + "d" * 32
+        self.env.update(AI_REVIEW_USAGE="1", AI_REVIEW_BILLING_ID=identifier)
+        first = self.run_so("hy4-openrouter", "new", "usage-hy4", "remember this")
+        self.assertEqual(first.returncode, 0, first.stderr)
+        del self.env["AI_REVIEW_BILLING_ID"]
+        second = self.run_so("hy4-openrouter", "ask", "usage-hy4", "recall it")
+        self.assertEqual(second.returncode, 0, second.stderr)
+        for call in self.oc_calls():
+            model = call["config"]["provider"]["openrouter-hy4"]["models"]["tencent/hy4"]
+            self.assertEqual(model["options"], {"session_id": identifier})
+        self.env["AI_REVIEW_BILLING_ID"] = "bill-" + "e" * 32
+        changed = self.run_so("hy4-openrouter", "ask", "usage-hy4", "recall it")
+        self.assertEqual(changed.returncode, 2)
+        self.assertEqual(len(self.oc_calls()), 2)
+
+    def test_lean_prompt_preserves_review_contract(self):
+        prompt = self.ars.build_prompt(self.repo, self.base, self.head, "lean")
+        self.assertIn("+two", prompt)
+        for required in (self.base, self.head, "read-only", "file, line, and impact",
+                         "VERDICT: APPROVE", "VERDICT: REJECT", "VERDICT: REVISE"):
+            self.assertIn(required, prompt)
+
+    def test_context_expansion_keeps_required_evidence(self):
+        ars = self.ars
+        work = os.path.join(self.tmp.name, "review-work")
+        os.mkdir(work)
+        prompt = ars.build_prompt(self.repo, self.base, self.head, "file-map", work)
+        self.assertIn("a.txt", prompt)
+        self.assertNotIn("+two", prompt)
+        evidence, = pathlib.Path(work).glob(".review-evidence-*/full.patch")
+        self.assertIn(evidence.parent.name + "/full.patch", prompt)
+        self.assertEqual(evidence.read_text(encoding="utf-8"),
+                         ars.git(self.repo, "diff", f"{self.base}...{self.head}"))
+
+    def test_concise_report_preserves_findings_and_verdict(self):
+        original = self.ars.build_prompt(self.repo, self.base, self.head)
+        concise = self.ars.build_prompt(self.repo, self.base, self.head, "concise")
+        self.assertTrue(concise.endswith(original))
+        self.assertIn("Include every material finding", concise)
+        self.assertIn("file and line, defect, and impact", concise)
+
     def test_cache_prefix_puts_fixed_instructions_before_variable_ids(self):
-        import importlib.machinery, importlib.util
-        loader = importlib.machinery.SourceFileLoader("ars_c", SCRIPT)
-        spec = importlib.util.spec_from_loader("ars_c", loader)
-        ars = importlib.util.module_from_spec(spec)
-        loader.exec_module(ars)
-        prompt = ars.build_prompt(self.repo, self.base, self.head)
+        prompt = self.ars.build_prompt(self.repo, self.base, self.head)
         fixed = prompt.index("Do not report style preferences.")
         head_at = prompt.index(self.head)
         base_at = prompt.index(self.base)

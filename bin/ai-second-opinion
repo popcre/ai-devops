@@ -207,7 +207,7 @@ def copy_repo(repo, work, writable):
     return top
 
 
-def write_config(sdir, provider, agent_name, agent_text, spec=None, cache=None):
+def write_config(sdir, provider, agent_name, agent_text, spec=None, cache=None, billing_id=None):
     cfg_dir = os.path.join(sdir, "xdg", "config", "opencode")
     os.makedirs(os.path.join(cfg_dir, "agent"), exist_ok=True)
     spec = spec or ars.PROVIDERS[provider]
@@ -215,9 +215,9 @@ def write_config(sdir, provider, agent_name, agent_text, spec=None, cache=None):
            "share": "disabled", "autoupdate": False}
     if spec["provider"]:
         cfg["provider"] = spec["provider"]
-        if cache and spec.get("route"):
+        if (cache or billing_id) and spec.get("route"):
             cfg["provider"] = RR.opencode_provider_block(RR.route(spec["route"]),
-                                                         cache=cache)
+                                                         cache=cache, billing_id=billing_id)
     with open(os.path.join(cfg_dir, "opencode.json"), "w") as fh:
         json.dump(cfg, fh, indent=1)
     with open(os.path.join(cfg_dir, "agent", agent_name + ".md"), "w") as fh:
@@ -307,12 +307,12 @@ def harness_session_id(stdout):
     return None
 
 
-def write_harness_profile(sdir, spec):
+def write_harness_profile(sdir, spec, billing_id=None):
     """A private, persistent DeepSeek Harness home per named session."""
     profiles = os.path.join(sdir, "dsh-home", "profiles", "headless")
     os.makedirs(profiles, exist_ok=True)
     with open(os.path.join(profiles, "cordis.patch.yml"), "w", encoding="utf-8") as fh:
-        fh.write(RR.harness_patch_yaml(spec))
+        fh.write(RR.harness_patch_yaml(spec, billing_id))
 
 
 def run_harness_turn(provider, sdir, meta, prompt, spec, route):
@@ -323,7 +323,7 @@ def run_harness_turn(provider, sdir, meta, prompt, spec, route):
     dsh = RR.resolve_deepseek_harness()
     if not dsh:
         die("deepseek harness binary not found; run bin/setup-deepseek-harness.sh.", 3)
-    write_harness_profile(sdir, spec)
+    write_harness_profile(sdir, spec, meta.get("billing_id"))
     env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": os.path.join(sdir, "home"),
            "DSH_HOME": os.path.join(sdir, "dsh-home"), "PYTHONDONTWRITEBYTECODE": "1",
            spec["key_env"]: key}
@@ -439,7 +439,8 @@ def run_opencode(provider, sdir, meta, prompt, route=None):
         return _run_opencode_turn(provider, sdir, meta, prompt, spec, effective, auto)
 
 
-def _run_opencode_turn(provider, sdir, meta, prompt, spec, effective, auto, new_session=False):
+def _run_opencode_turn(provider, sdir, meta, prompt, spec, effective, auto, new_session=False,
+                       resume_context=""):
     key = ars.read_key(spec)
     if not key:
         die(f"{provider}: no API key (secret file {spec['key_file']}).", 3)
@@ -473,7 +474,7 @@ def _run_opencode_turn(provider, sdir, meta, prompt, spec, effective, auto, new_
                             encoding="utf-8", errors="replace",
                             start_new_session=hasattr(os, "killpg"))
     try:
-        out, err = proc.communicate(prompt, timeout=timeout)
+        out, err = proc.communicate(resume_context + prompt, timeout=timeout)
     except subprocess.TimeoutExpired as exc:
         kill_process_tree(proc)
         partial = exc.stdout or b""
@@ -519,15 +520,16 @@ def _muse_failover(provider, sdir, meta, prompt, first_error):
     # The session's on-disk OpenCode profile still names the direct provider;
     # rewrite it for the alternate connection before the continuation runs.
     write_config(sdir, provider, meta["agent"], READ_AGENT, spec=spec,
-                 cache=RR.cache_fields("muse-openrouter", meta.get("repo"), meta.get("name")))
-    replay = sanitized_replay(meta) + f"New request: {prompt}"
+                 cache=RR.cache_fields("muse-openrouter", meta.get("repo"), meta.get("name")),
+                 billing_id=meta.get("billing_id"))
+    resume_context = sanitized_replay(meta) + "New request: "
     meta.update(state="failing-over", updated=time.time())
     save_meta(sdir, meta)
     previous_session = meta.get("session")
     meta["session"] = None
     try:
-        answer = _run_opencode_turn(provider, sdir, meta, replay, spec, "muse-openrouter",
-                                    False, new_session=True)
+        answer = _run_opencode_turn(provider, sdir, meta, prompt, spec, "muse-openrouter",
+                                    False, new_session=True, resume_context=resume_context)
     except SystemExit as exc:
         meta["session"] = previous_session
         meta.update(state="failed", updated=time.time())
@@ -552,7 +554,7 @@ def read_prompt(args):
     return text
 
 
-def start(provider, name, repo, writable, base=None, route=None):
+def start(provider, name, repo, writable, base=None, route=None, billing_id=None):
     if name is None:
         name = f"oneshot-{time.strftime('%Y%m%d-%H%M%S')}-{os.getpid()}"
     sdir = session_dir(provider, name)
@@ -573,12 +575,14 @@ def start(provider, name, repo, writable, base=None, route=None):
             else ars.PROVIDERS[provider])
     cache = RR.cache_fields(route, top, name) if route else None
     write_config(sdir, provider, agent, WRITE_AGENT if writable else READ_AGENT, spec=spec,
-                 cache=cache)
+                 cache=cache, billing_id=billing_id)
     meta = {"name": name, "provider": provider, "repo": top, "work": work, "agent": agent,
             "mode": "implement" if writable else "read-only", "base": base,
             "created": time.time(), "turns": 0, "state": "idle"}
     if route and route in RR.routes():
         meta["route"] = route
+    if billing_id:
+        meta["billing_id"] = billing_id
     save_meta(sdir, meta)
     return sdir, meta
 
@@ -609,6 +613,12 @@ def main(argv):
     args = parse(argv)
     p, cmd = args.provider, args.command
     route = getattr(args, "route", None)
+    billing_id = None
+    if route or ars.PROVIDERS[p].get("route"):
+        try:
+            billing_id = RR.billing_session_id()
+        except RR.RouteError as error:
+            die(str(error), 2)
     if route:
         known = RR.routes()
         if route not in known and route != "auto":
@@ -642,9 +652,12 @@ def main(argv):
                 die(f"session {name} is bound to route {bound}; explicit selection is sticky.", 2)
             sdir = os.path.join(STATE, p, name)
             meta = load_meta(sdir)
+            if billing_id and billing_id != meta.get("billing_id"):
+                die("the billing probe is bound to its original session identifier", 2)
         else:
             sdir, meta = start(p, name, args.repo, cmd == "implement", args.base,
-                               route=route if route in RR.routes() else None)
+                               route=route if route in RR.routes() else None,
+                               billing_id=billing_id)
         print(run_opencode(p, sdir, meta, prompt, route=route))
         if meta["mode"] == "implement":
             git(meta["work"], "add", "-A", check=False)
@@ -666,7 +679,8 @@ def main(argv):
         brief = read_prompt(args) if (args.prompt_file or args.text) else "Review this change."
         prompt = brief + REVIEW_SUFFIX.format(base=base, fence=fence, diff=diff)
         sdir, meta = start(p, None, repo, False, base,
-                           route=route if route in RR.routes() else None)
+                           route=route if route in RR.routes() else None,
+                           billing_id=billing_id)
         print(run_opencode(p, sdir, meta, prompt, route=route))
         return 0
 

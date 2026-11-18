@@ -101,7 +101,7 @@ def candidate_plan(rotation_order):
     return plan
 
 
-def opencode_provider_block(spec, cache=None):
+def opencode_provider_block(spec, cache=None, billing_id=None):
     """The OpenCode provider block for an opencode-engine route (plan section 5
     shapes, custom OpenAI-compatible connection for OpenRouter).
 
@@ -114,7 +114,7 @@ def opencode_provider_block(spec, cache=None):
     provider_id = spec["model"].split("/", 1)[0]
     model_id = spec["model"].split("/", 1)[1]
     key = (cache or {}).get("prompt_cache_key")
-    session = (cache or {}).get("session_id")
+    session = billing_id or (cache or {}).get("session_id")
     if provider_id == "meta-model-api":  # the direct Muse connection (existing spec)
         model = {"name": "Muse Spark 1.3 Contributor",
                  "limit": {"context": 1048576, "output": 65536}}
@@ -192,11 +192,22 @@ def opencode_spec(route_id):
     return out
 
 
-def harness_patch_yaml(spec):
+def billing_session_id():
+    """Accept an explicit opaque ID for a scoped OpenRouter billing probe."""
+    value = os.environ.get("AI_REVIEW_BILLING_ID")
+    if value is None:
+        return None
+    if os.environ.get("AI_REVIEW_USAGE") != "1" or not re.fullmatch(r"bill-[0-9a-f]{32}", value):
+        raise RouteError("billing probes require usage receipts and an opaque bill- ID")
+    return value
+
+
+def harness_patch_yaml(spec, billing_id=None):
     """cordis.patch.yml for a deepseek-harness route's private profile
     (validated live 2026-11-16: llm-pi-ai registers the custom adapter)."""
     if spec.get("base_url") and not spec["base_url"].startswith("https://"):
         raise RouteError("route base_url must be https")
+    headers = f"        headers:\n          x-session-id: {json.dumps(billing_id)}\n" if billing_id else ""
     return (
         "- id: llm-pi-ai\n"
         "  config:\n"
@@ -205,6 +216,7 @@ def harness_patch_yaml(spec):
         f"        apiKeyEnv: {spec['key_env']}\n"
         "        api: openai-completions\n"
         f"        baseURL: {spec['base_url']}\n"
+        f"{headers}"
         "        models:\n"
         f"          - id: {json.dumps(spec['model'])}\n"
         "- id: agent-default-model\n"
