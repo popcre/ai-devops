@@ -60,21 +60,23 @@ action_taxonomy_detail() {
       printf 'killed-interrupt\n'; return 0 ;;
   esac
 
-  # Account billing lock (plan_ci-process-repair.md step 3.3): an outside stop
-  # on the account, never a code result. Matched on the failure summary only,
-  # like every capacity phrase — a check named "billing" whose test really
-  # failed stays `result`. "quota exceeded" and "rate limit" belong to the
-  # rate-limit family above and never reach this case.
+  # Account billing lock (plan_ci-process-repair.md step 3.3) needs evidence
+  # of Actions billing or an account-level stop. A payment assertion or an
+  # HTTP 402 from the application under test is an ordinary test result.
   case "$summary_blob" in
-    *spending\ limit*|*spending-limit*|*spending.limit*)
+    *job\ was\ not\ started\ because\ recent\ account\ payments\ have\ failed*)
       printf 'billing-lock\n'; return 0 ;;
-    *payment\ required*|*payment-required*|*payment\ failed*|*payment-failed*|*http\ 402*|*status\ 402*)
-      printf 'billing-lock\n'; return 0 ;;
-  esac
-  case "$summary_blob" in
-    *billing*)
+    *account\ spending[\ -]limit*|*spending[\ -]limit\ for\ this\ account*|\
+    *billing\ limit\ for\ this\ account*|*job\ was\ not\ started*spending[\ -]limit*)
       case "$summary_blob" in
-        *limit*|*exceed*|*lock*|*locked*|*disabled*|*disab*|*hold*|*overdue*)
+        *exceeded*|*reached*|*needs\ to\ be\ increased*)
+          printf 'billing-lock\n'; return 0 ;;
+      esac
+      ;;
+    *github\ actions*)
+      case "$summary_blob" in
+        *billing\ hold*|*billing\ lock*|*billing\ disabled*|*payment[\ -]required*|\
+        *payment[\ -]failed*|*payments\ have\ failed*)
           printf 'billing-lock\n'; return 0 ;;
       esac
       ;;

@@ -745,7 +745,7 @@ if [ "$count" -gt 2 ]; then
   exit 0
 fi
 oid="h$((count))"
-jq -nc --arg oid "$oid" --arg name "advisory lint $oid" '{data:{repository:{pullRequest:{state:"OPEN",headRefOid:$oid,isInMergeQueue:false,mergeCommit:null,commits:{nodes:[{commit:{oid:$oid,statusCheckRollup:{state:"FAILURE",contexts:{totalCount:1,pageInfo:{hasPreviousPage:false},nodes:[{name:$name,conclusion:"FAILURE",isRequired:false}]}}}}]}}}}}'
+jq -nc --arg oid "$oid" --arg name "advisory lint $oid" '{data:{repository:{pullRequest:{state:"OPEN",headRefOid:$oid,isInMergeQueue:false,mergeCommit:null,commits:{nodes:[{commit:{oid:$oid,statusCheckRollup:{state:"FAILURE",contexts:{totalCount:1,pageInfo:{hasPreviousPage:false},nodes:[{name:$name,conclusion:"FAILURE",isRequired:false,title:"Lint found style violations"}]}}}}]}}}}}'
 EOF
 chmod +x "$TMP/bin/gh"
 rm -f "$TMP/rehead-called"
@@ -754,7 +754,7 @@ printf 'rehead fixture diagnostics: rc=%s h1-reported=%s h2-reported=%s\n' "$RC"
   "$(printf '%s' "$OUT" | grep -c 'advisory lint h1')" \
   "$(printf '%s' "$OUT" | grep -c 'advisory lint h2')" >&2
 check "a new head re-reports its advisory failure after dedupe" \
-  "test '$RC' -eq 0 && printf '%s' \"$OUT\" | grep -q 'advisory lint h1' && printf '%s' \"$OUT\" | grep -q 'advisory lint h2' && printf '%s' \"$OUT\" | grep -q MERGED"
+  "test '$RC' -eq 0 && printf '%s' \"$OUT\" | grep -Fq 'advisory lint h1 (FAILURE)  required=false' && printf '%s' \"$OUT\" | grep -Fq 'advisory lint h2 (FAILURE)  required=false' && printf '%s' \"$OUT\" | grep -q MERGED"
 
 # Step 5.1 fixtures: one per named reason the waiter itself reports.
 
@@ -768,13 +768,16 @@ case "$*" in
   'api --include rate_limit '*) printf 'core\t4999\t5000\t1730000000\ngraphql\t4999\t5000\t1730000000\n'; exit 0 ;;
 esac
 [[ "$*" == *'isRequired(pullRequestNumber:1)'* && "$*" == *'commit{oid '* ]] || exit 9
-jq -nc '{data:{repository:{pullRequest:{state:"OPEN",headRefOid:"h1",isInMergeQueue:false,mergeCommit:null,commits:{nodes:[{commit:{oid:"h1",statusCheckRollup:{state:"FAILURE",contexts:{totalCount:1,pageInfo:{hasPreviousPage:false},nodes:[{name:"deploy",conclusion:"FAILURE",isRequired:true,title:"The spending limit for this account was exceeded"}]}}}}]}}}}}'
+jq -nc --arg title "${AI_PR_WAIT_TEST_BILLING_TITLE:-The spending limit for this account was exceeded}" '{data:{repository:{pullRequest:{state:"OPEN",headRefOid:"h1",isInMergeQueue:false,mergeCommit:null,commits:{nodes:[{commit:{oid:"h1",statusCheckRollup:{state:"FAILURE",contexts:{totalCount:1,pageInfo:{hasPreviousPage:false},nodes:[{name:"deploy",conclusion:"FAILURE",isRequired:true,title:$title}]}}}}]}}}}}'
 EOF
 chmod +x "$TMP/bin/gh"
 rm -f "$TMP/billing-called"
 OUT="$(AI_PR_WAIT_TEST_CONTEXT_KEY='' AI_GH_STATE_DIR="$TMP/billing-throttle" AI_PR_WAIT_TEST_MARKER="$TMP/billing-called" PATH="$TMP/bin:$PATH" bash "$CMD" 1 --repo o/r --timeout-minutes 1 --interval 1 2>&1)"; RC=$?
 check "a billing-lock failure names the outside stop and the owner-only fix" \
   "test '$RC' -eq 1 && printf '%s' \"$OUT\" | grep -q 'billing lock:' && printf '%s' \"$OUT\" | grep -q 'spending limit' && printf '%s' \"$OUT\" | grep -q 'only the account owner can fix'"
+OUT="$(AI_PR_WAIT_TEST_CONTEXT_KEY='' AI_GH_STATE_DIR="$TMP/payment-test-throttle" AI_PR_WAIT_TEST_BILLING_TITLE='Assertion failed: payment failed for order 37' PATH="$TMP/bin:$PATH" bash "$CMD" 1 --repo o/r --timeout-minutes 1 --interval 1 2>&1)"; RC=$?
+check "an application payment failure remains a real test outcome" \
+  "test '$RC' -eq 1 && printf '%s' \"$OUT\" | grep -q 'action=result  detail=test-failure' && ! printf '%s' \"$OUT\" | grep -q 'billing lock:'"
 
 # queued too long: a clock that advances three seconds per call and a tiny warn
 # window surface the named queue-stall reason while the wait continues.

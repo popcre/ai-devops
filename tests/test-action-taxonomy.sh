@@ -55,14 +55,22 @@ check "billing limit message is billing-lock" \
   "test \"$(det FAILURE some-check 'Error: the billing limit for this account has been exceeded')\" = 'billing-lock'"
 check "billing hold on Actions is billing-lock" \
   "test \"$(det FAILURE some-check 'GitHub Actions disabled for this repository due to a billing hold')\" = 'billing-lock'"
-check "payment-required message is billing-lock" \
-  "test \"$(det FAILURE x 'HTTP 402 payment required')\" = 'billing-lock'"
+check "GitHub Actions payment-required message is billing-lock" \
+  "test \"$(det FAILURE x 'GitHub Actions: payment required')\" = 'billing-lock'"
+check "account payment prevented the job from starting" \
+  "test \"$(det FAILURE x 'The job was not started because recent account payments have failed or your spending limit needs to be increased.')\" = 'billing-lock'"
 check "billing-lock is capacity/infra, never result" \
   "test \"$(act FAILURE some-check 'account spending limit exceeded')\" = 'capacity/infra'"
 check "billing-lock review failure is capacity/infra" \
   "test \"$(rev billing-lock)\" = 'capacity/infra'"
 check "a failing billing test without a lock phrase stays result" \
   "test \"$(act FAILURE test-billing 'assertion failed: invoice mismatch')\" = 'result'"
+check "an application payment failure stays result" \
+  "test \"$(act FAILURE checkout-test 'assertion failed: payment failed for order 37')\" = 'result'"
+check "an application HTTP 402 stays result" \
+  "test \"$(act FAILURE checkout-test 'assertion failed: unexpected HTTP 402 payment required')\" = 'result'"
+check "an application spending-limit failure stays result" \
+  "test \"$(act FAILURE billing-test 'assertion failed: spending-limit field was missing')\" = 'result'"
 check "billing in the check name alone is not a lock" \
   "test \"$(act FAILURE billing 'suite failed')\" = 'result'"
 check "rate limit stays rate-limit-capacity, not billing-lock" \
