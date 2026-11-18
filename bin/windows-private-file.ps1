@@ -8,15 +8,28 @@ function Invoke-AiDevOpsIcacls {
   if ($LASTEXITCODE -ne 0) { throw "icacls failed for $Path with exit code $LASTEXITCODE." }
 }
 
+function Get-AiDevOpsPrivatePathAccessRules {
+  param([Parameter(Mandatory)][string]$Path)
+  # Windows PowerShell can fail to autoload Microsoft.PowerShell.Security.
+  # Read the same filesystem access rules directly in both PowerShell editions.
+  $item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+  $sections = [Security.AccessControl.AccessControlSections]::Access
+  $acl = if ($PSVersionTable.PSEdition -eq 'Core') {
+    [IO.FileSystemAclExtensions]::GetAccessControl($item, $sections)
+  } else {
+    $item.GetAccessControl($sections)
+  }
+  $acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier])
+}
+
 function Assert-AiDevOpsPrivateAcl {
   param([Parameter(Mandatory)][string]$Path)
   $userSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
   $allowed = @($userSid, 'S-1-5-18')
   $seenUser = $false
-  $acl = Get-Acl -LiteralPath $Path
-  foreach ($rule in $acl.Access) {
+  foreach ($rule in (Get-AiDevOpsPrivatePathAccessRules -Path $Path)) {
     if ($rule.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow) { continue }
-    $sid = $rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value
+    $sid = $rule.IdentityReference.Value
     if ($allowed -notcontains $sid) { throw "Private path grants access to unexpected identity $sid." }
     if ($sid -eq $userSid) { $seenUser = $true }
   }
@@ -34,9 +47,9 @@ function Protect-AiDevOpsPrivatePath {
   # retain other explicit grants after inheritance is removed. Remove each such
   # grant by SID; this avoids Set-Acl's unnecessary audit-privilege requirement.
   $userSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
-  foreach ($rule in (Get-Acl -LiteralPath $Path).Access) {
+  foreach ($rule in (Get-AiDevOpsPrivatePathAccessRules -Path $Path)) {
     if ($rule.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow) { continue }
-    $sid = $rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value
+    $sid = $rule.IdentityReference.Value
     if ($sid -notin @($userSid, 'S-1-5-18')) {
       Invoke-AiDevOpsIcacls -Path $Path -Arguments @('/remove:g', "*$sid")
     }
