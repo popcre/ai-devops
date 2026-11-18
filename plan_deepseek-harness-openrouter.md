@@ -137,6 +137,9 @@ include the recovery and deployment scope. The separately merged
 [#2580](https://github.com/popcre/ai-devops/pull/2580) default change is absent
 from these installed pins.
 
+Further quality-preserving savings and independent fleet pilots are tracked in
+[the reviewer cost and quality plan](plan_reviewer-quality-cost.md) under #2619.
+
 **Token-efficiency amendment, 2026-11-17.** This amendment fixes reporting and
 specifies future experiments; it does not implement prompt trimming, compaction,
 retention, deduplication, model changes or activation. Fresh sessions read
