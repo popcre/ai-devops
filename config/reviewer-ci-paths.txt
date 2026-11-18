@@ -115,6 +115,8 @@ bin/ai-oracle-native-alternate-v2
 bin/ai-gh
 tools/github-requests/**
 tools/application_source_release.py
+tools/supabase_capacity_stage_profile.py
+config/supabase-capacity-stage-profile.json
 tools/public_cbp_mapping.py
 tests/test_public_cbp_mapping.py
 

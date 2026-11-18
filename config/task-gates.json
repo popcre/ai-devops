@@ -503,6 +503,14 @@
           "class": "code"
         },
         {
+          "glob": "tools/supabase_capacity_stage_profile.py",
+          "class": "code"
+        },
+        {
+          "glob": "config/supabase-capacity-stage-profile.json",
+          "class": "code"
+        },
+        {
           "glob": "tools/application_workflow_target.py",
           "class": "code"
         },
