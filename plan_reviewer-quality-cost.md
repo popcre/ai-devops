@@ -58,6 +58,8 @@ Earlier lean trials lost usable reviews or left disagreement, and the file-map t
 
 **Locked, November 18, 2026.** Albert said “i am ok with Contributor’s data-use terms. don't ask again.” Record this as acceptance for Contributor on this work. Use public fixtures for repeatable trials, retain private evidence only in its approved location, and preserve normal secret handling. Hold fleet and GitHub defaults steady. Any later activation needs its own rollout decision after passing the gates below. Use the same reviewer model for both arms, with no helper processing of review content.
 
+**Repeat reviews, November 18, 2026.** Albert said in chat, “go ahead and use Muse OpenRouter caching as an opt-in for repeat reviews. keep all defaults unchanged and leave DeepSeek and Hy4 alone.” For an explicitly opted-in series, use `ai-review-simple --route muse-openrouter` with `AI_REVIEW_CACHE=1` on those invocations. Reuse an `AI_REVIEW_CACHE_NAMESPACE` within that series and keep unrelated reviews in separate scopes. Continue ordinary reviews with the existing settings.
+
 **Open.** Pick the actual safe gaps after inspecting current main, whether candidate changes qualify, and any provider-specific trials that supported controls permit. Skip redundant code. Proposed pilot gates below are planning choices, not previous promises.
 
 ## 9. Execution
