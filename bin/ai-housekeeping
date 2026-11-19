@@ -276,10 +276,14 @@ gh_call() {
   # transport is not reliably exec-able directly under Git Bash.
   local -a cmd=("$GH")
   [[ -n "$BASH_BIN" ]] && cmd=("$BASH_BIN" "$GH")
+  # A report must never sleep through a rate-limit back-off or budget gap
+  # (that froze runs for 10+ minutes with no output): defer with exit 75 at
+  # once. Lock admission may still wait up to the call bound.
+  local -a envs=(env AI_GH_NO_WAIT=1 "AI_GH_NO_WAIT_LOCK_SECONDS=$GH_CALL_TIMEOUT")
   if command -v timeout >/dev/null 2>&1; then
-    timeout "$GH_CALL_TIMEOUT" "${cmd[@]}" "$@"
+    timeout "$GH_CALL_TIMEOUT" "${envs[@]}" "${cmd[@]}" "$@"
   else
-    "${cmd[@]}" "$@"
+    "${envs[@]}" "${cmd[@]}" "$@"
   fi
 }
 

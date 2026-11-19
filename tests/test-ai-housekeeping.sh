@@ -554,5 +554,23 @@ else
   bad "invalid PR response reported GitHub available"
 fi
 
+# A report must defer, never sleep, through a GitHub back-off (it once sat
+# silent for 10+ minutes): every GitHub call carries AI_GH_NO_WAIT=1.
+stub_nowait="$TMP/gh-nowait"
+cat > "$stub_nowait" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "${AI_GH_NO_WAIT:-unset}" >> "$STUB_ENV_LOG"
+exit 75
+STUB
+chmod +x "$stub_nowait"
+( cd "$case13" && STUB_ENV_LOG="$TMP/nowait-env.log" \
+    AI_HOUSEKEEPING_GH="$stub_nowait" bash "$TOOL" ) > "$TMP/nowait.out" 2>&1
+if [[ "$(sort -u "$TMP/nowait-env.log")" == "1" ]] && \
+   grep -q 'GitHub probe deferred' "$TMP/nowait.out"; then
+  ok "GitHub calls never wait through a throttle back-off"
+else
+  bad "GitHub calls may sleep through a throttle back-off"
+fi
+
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
