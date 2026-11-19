@@ -11,6 +11,8 @@ Index of active plan pointers, moved from [`AGENTS.md`](../AGENTS.md) (#1881 pha
 
 ## Issue implementation plans
 
+For CodeGraph fit and comparative evidence, read [the trial STATUS](../plan_codegraph-evaluation.md) first.
+
 These plans record issue-specific assessments; read each verdict or STATUS before
 acting. Some call only for live proof or closure, rather than implementation.
 

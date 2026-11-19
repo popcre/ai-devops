@@ -172,6 +172,8 @@ with [`docs/ghost-run-escape.md`](docs/ghost-run-escape.md) (drain, bump `LANE_E
 
 ## Specialized task router
 
+CodeGraph evaluation: read [the trial STATUS](plan_codegraph-evaluation.md) first.
+
 Selective EGM-inspired fresh-reader checks for complex plans or handoffs: read
 [`plan_selective-fresh-reader.md`](plan_selective-fresh-reader.md) STATUS first;
 opt-in pilot only, no new review gate or full EGM rollout.
