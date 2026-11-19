@@ -9,6 +9,18 @@ read-when: Working on GitHub API quota protection or request reduction
 
 ## STATUS — read first
 
+November 19, 2026 closeout update for the scoped Windows installation wait.
+The no-wait admission repair landed in [#2667](https://github.com/popcre/ai-devops/pull/2667)
+at `66c37eccb93ab783d845000b61b5f8c2a9f45969` and was installed through the
+supported Ubuntu and Windows procedures. Its deadline includes real process,
+filesystem and FIFO-scan time. All 282 guard assertions and both native Windows
+deadline probes passed while preserving foreign locks and tickets. The
+[signed #2531 acceptance](https://github.com/popcre/ai-devops/issues/2531#issuecomment-6992016160)
+records installation and live operation. This repair is complete. Use the
+existing #658 record below for account-wide quota and fleet-acceptance work.
+
+The following is the earlier coordinator reconciliation and its retained evidence.
+
 November 1, 2026, 4:40 PM EST — current coordinator reconciliation.
 Owner: Codex chat `01a194df-87e5-7531-974d-19472397132a` on edge-dev3.
 
