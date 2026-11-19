@@ -274,7 +274,7 @@ GH_CALL_TIMEOUT="${AI_HOUSEKEEPING_GH_TIMEOUT_SECONDS:-300}"
 # (two calls x 300s left the report silent for 10+ minutes — #2691). Once the
 # budget is spent the run degrades to UNKNOWN instead of waiting again.
 GH_BUDGET="${AI_HOUSEKEEPING_GH_BUDGET_SECONDS:-60}"
-[[ "$GH_BUDGET" =~ ^[1-9][0-9]*$ ]] || GH_BUDGET=60
+[[ "$GH_BUDGET" =~ ^(0|[1-9][0-9]*)$ ]] || GH_BUDGET=60
 GH_DEADLINE=$(( $(date +%s) + GH_BUDGET ))
 
 gh_call() {
@@ -304,7 +304,7 @@ GH_PROBE_RC=0
 # Use the PR inventory itself as the availability probe. An extra auth
 # request can time out on Windows even when the repository query works.
 PR_DATA=""
-if [[ -n "$GH" ]] && { [[ -x "$GH" ]] || command -v "$GH" >/dev/null 2>&1; }; then
+if [[ "$GH_BUDGET" != 0 && -n "$GH" ]] && { [[ -x "$GH" ]] || command -v "$GH" >/dev/null 2>&1; }; then
   PR_DATA="$(gh_call pr list --state all --limit 200 \
     --json state,headRefName,headRefOid,mergedAt,url 2>/dev/null)" || GH_PROBE_RC=$?
   if [[ "$GH_PROBE_RC" -eq 0 ]] &&
@@ -375,7 +375,7 @@ issue_states_load() {
   ISSUE_STATES_LOADED=1
   [[ "$GH_OK" -eq 1 ]] || return 0
   local raw n st
-  raw="$(gh_call issue list --state all --limit 5000 --json number,state 2>/dev/null || true)"
+  raw="$(gh_call issue list --state all --limit 5000 --json number,state 2>/dev/null)" || return 0
   [[ -n "$raw" ]] || return 0
   while IFS=$'\t' read -r n st; do
     # A native Windows jq (the winget build) emits CRLF on stdout; without
@@ -488,7 +488,7 @@ done
 
 # --- collect: D. Handoff files (GIT-SHARED) --------------------------------
 HO_ROWS=()          # file|class|issue|owner
-HO_SUCCESSOR=0; HO_OPEN=0; HO_UNPROVABLE=0; HO_UNATTRIBUTED=0
+HO_SUCCESSOR=0; HO_OPEN=0; HO_UNKNOWN=0; HO_UNPROVABLE=0; HO_UNATTRIBUTED=0
 if [[ -d "$REPO_ROOT/HANDOFF.d" ]]; then
   # Fetch the issue map once, in this shell (issue_state itself runs inside
   # $(...) subshells, so loading there would re-fetch per handoff).
@@ -545,9 +545,12 @@ if [[ -d "$REPO_ROOT/HANDOFF.d" ]]; then
       if [[ "$ist" == "CLOSED" ]]; then
         class="SUCCESSOR REVIEW"
         HO_SUCCESSOR=$((HO_SUCCESSOR + 1))
-      else
+      elif [[ "$ist" == "OPEN" ]]; then
         class="OPEN"
         HO_OPEN=$((HO_OPEN + 1))
+      else
+        class="UNKNOWN"
+        HO_UNKNOWN=$((HO_UNKNOWN + 1))
       fi
     else
       class="UNPROVABLE"
@@ -612,6 +615,8 @@ REVIEW_CANDIDATES=$((WT_MERGED + BR_MERGED + HO_SUCCESSOR + HO_UNATTRIBUTED + HO
 # --- H. Footer / summary --------------------------------------------------
 if [[ "$GH_OK" -eq 1 ]]; then
   GH_LINE="available"
+elif [[ "$GH_BUDGET" == 0 ]]; then
+  GH_LINE="UNKNOWN (GitHub lookups disabled by zero budget)"
 elif [[ "$GH_PROBE_RC" -eq 124 ]]; then
   GH_LINE="UNKNOWN (GitHub probe timed out)"
 elif [[ "$GH_PROBE_RC" -eq 75 ]]; then
@@ -624,18 +629,22 @@ emit "Housekeeping summary — $REPO_ROOT"
 emit "GitHub: $GH_LINE"
 emit "Worktrees (machine-local): $WT_LIVE LIVE, $WT_MERGED MERGED CANDIDATE, $WT_UNKNOWN UNKNOWN"
 emit "Branches (machine-local): $BR_LIVE LIVE, $BR_MERGED MERGED CANDIDATE, $BR_UNKNOWN UNKNOWN, $BR_IDENTICAL identical-SHA, $BR_NOWT no-worktree"
-emit "Handoffs (git-shared): $HO_OPEN OPEN, $HO_SUCCESSOR SUCCESSOR REVIEW, $HO_UNPROVABLE UNPROVABLE, $HO_UNATTRIBUTED UNATTRIBUTED"
+emit "Handoffs (git-shared): $HO_OPEN OPEN, $HO_SUCCESSOR SUCCESSOR REVIEW, $HO_UNKNOWN UNKNOWN, $HO_UNPROVABLE UNPROVABLE, $HO_UNATTRIBUTED UNATTRIBUTED"
 emit "Plans (git-shared): $PL_ACTIVE active, $PL_DONE retained record"
 emit "Agent job records (machine-local): ${JOB_LINES[*]}"
 emit "Odd refs (clone-local): $ODD_REFS unowned"
 if [[ "$GH_OK" -ne 1 ]]; then
-  if [[ "$GH_PROBE_RC" -eq 124 ]]; then
+  if [[ "$GH_BUDGET" == 0 ]]; then
+    emit_warn "GitHub lookups disabled by zero budget — PR and issue states are UNKNOWN."
+  elif [[ "$GH_PROBE_RC" -eq 124 ]]; then
     emit_warn "GitHub probe timed out — merged-ness is UNKNOWN for every worktree and branch above. The shared call throttle is busy on this machine; re-run when it is quieter. Never trust an ancestry fallback."
   elif [[ "$GH_PROBE_RC" -eq 75 ]]; then
     emit_warn "GitHub probe deferred by the shared throttle — merged-ness is UNKNOWN. Re-run when the throttle admits requests. Never trust an ancestry fallback."
   else
     emit_warn "GitHub unavailable — merged-ness is UNKNOWN for every worktree and branch above. Install and authenticate gh, then re-run. Never trust an ancestry fallback."
   fi
+elif [[ "$HO_UNKNOWN" -gt 0 ]]; then
+  emit_warn "GitHub issue states could not be verified for $HO_UNKNOWN handoff(s). The issue list may be incomplete or the lookup may have failed, timed out, or run out of budget."
 fi
 emit "Log: $LOG"
 emit "Nothing was changed."
@@ -733,7 +742,7 @@ if [[ "$LOGGING" -eq 1 ]]; then
   mkdir -p "$(dirname "$LOG")" 2>/dev/null || true
   {
     printf '===== %s ai-housekeeping =====\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
-    if [[ "$QUIET" -eq 1 && "$REVIEW_CANDIDATES" -eq 0 && "$GH_OK" -eq 1 ]]; then
+    if [[ "$QUIET" -eq 1 && "$REVIEW_CANDIDATES" -eq 0 && "$GH_OK" -eq 1 && "$HO_UNKNOWN" -eq 0 ]]; then
       # O4: a scheduled no-findings run writes one line to the log, nothing else.
       printf '%s [%s] no review candidates\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$HOST"
     else
