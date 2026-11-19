@@ -60,8 +60,11 @@ git-shared item is a commit in a repository several sessions write to.
 Merged-ness comes from one GitHub lookup pass (PR list plus a batched issue
 list) through the governed `ai-gh` transport. The probe waits its turn in the
 machine-wide call queue and is bounded at 300 seconds per call
-(`AI_HOUSEKEEPING_GH_TIMEOUT_SECONDS`); when the bound is hit the report says
-so and marks refs UNKNOWN instead of guessing.
+(`AI_HOUSEKEEPING_GH_TIMEOUT_SECONDS`), and every call in one run draws on a
+shared 60-second run budget (`AI_HOUSEKEEPING_GH_BUDGET_SECONDS`) so a
+congested queue cannot spend the full bound on each call (#2691). When a bound
+or the budget is hit the report says so and marks refs UNKNOWN instead of
+guessing.
 
 ## What the labels mean
 
