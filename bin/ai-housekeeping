@@ -269,6 +269,13 @@ fi
 BASH_BIN="$(readlink -f "$(command -v bash 2>/dev/null)")"
 GH_CALL_TIMEOUT="${AI_HOUSEKEEPING_GH_TIMEOUT_SECONDS:-300}"
 [[ "$GH_CALL_TIMEOUT" =~ ^[1-9][0-9]*$ ]] || GH_CALL_TIMEOUT=300
+# One shared deadline covers every GitHub call in a run. Lock admission on a
+# congested throttle used to consume the whole call bound on each call
+# (two calls x 300s left the report silent for 10+ minutes — #2691). Once the
+# budget is spent the run degrades to UNKNOWN instead of waiting again.
+GH_BUDGET="${AI_HOUSEKEEPING_GH_BUDGET_SECONDS:-60}"
+[[ "$GH_BUDGET" =~ ^[1-9][0-9]*$ ]] || GH_BUDGET=60
+GH_DEADLINE=$(( $(date +%s) + GH_BUDGET ))
 
 gh_call() {
   # Bounded GitHub invocation. Returns non-zero on timeout or failure.
@@ -276,12 +283,17 @@ gh_call() {
   # transport is not reliably exec-able directly under Git Bash.
   local -a cmd=("$GH")
   [[ -n "$BASH_BIN" ]] && cmd=("$BASH_BIN" "$GH")
+  local bound
+  bound=$(( GH_DEADLINE - $(date +%s) ))
+  (( bound > 0 )) || return 75
+  (( bound > GH_CALL_TIMEOUT )) && bound=$GH_CALL_TIMEOUT
   # A report must never sleep through a rate-limit back-off or budget gap
   # (that froze runs for 10+ minutes with no output): defer with exit 75 at
-  # once. Lock admission may still wait up to the call bound.
-  local -a envs=(env AI_GH_NO_WAIT=1 "AI_GH_NO_WAIT_LOCK_SECONDS=$GH_CALL_TIMEOUT")
+  # once. Lock admission waits at most the remaining shared budget, never the
+  # full call bound per call (#2691).
+  local -a envs=(env AI_GH_NO_WAIT=1 "AI_GH_NO_WAIT_LOCK_SECONDS=$bound")
   if command -v timeout >/dev/null 2>&1; then
-    timeout "$GH_CALL_TIMEOUT" "${envs[@]}" "${cmd[@]}" "$@"
+    timeout "$bound" "${envs[@]}" "${cmd[@]}" "$@"
   else
     "${envs[@]}" "${cmd[@]}" "$@"
   fi

@@ -11,6 +11,10 @@ PASS=0; FAIL=0
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 TOOL="$ROOT/bin/ai-housekeeping"
+# Keep the run out of the real agent-job state directory: its inventory scan
+# of thousands of files dominated wall time on Windows and coupled the suite
+# to whatever a developer machine had lying around. No case asserts counts.
+export AI_HOUSEKEEPING_STATE_DIR="$TMP/agent-state"
 
 # --- fixture helpers -------------------------------------------------------
 new_repo() {
@@ -570,6 +574,71 @@ if [[ "$(sort -u "$TMP/nowait-env.log")" == "1" ]] && \
   ok "GitHub calls never wait through a throttle back-off"
 else
   bad "GitHub calls may sleep through a throttle back-off"
+fi
+
+# The shared run budget bounds every call, so a jammed throttle cannot spend
+# the call bound on the probe and freeze the report (#2691: 580s silent).
+case19="$TMP/budget-cap"
+new_repo "$case19"
+stub19="$TMP/gh19"
+cat > "$stub19" <<'STUB'
+#!/usr/bin/env bash
+sleep 30
+exit 0
+STUB
+chmod +x "$stub19"
+start19=$SECONDS
+set +e
+( cd "$case19" && AI_HOUSEKEEPING_GH="$stub19" \
+    AI_HOUSEKEEPING_STATE_DIR="$TMP/state19" \
+    AI_HOUSEKEEPING_GH_TIMEOUT_SECONDS=30 AI_HOUSEKEEPING_GH_BUDGET_SECONDS=2 \
+    bash "$TOOL" ) > "$TMP/c19.out" 2>&1
+c19=$?
+set -e
+elapsed19=$(( SECONDS - start19 ))
+if [[ "$c19" -eq 0 ]] && [[ "$elapsed19" -lt 15 ]] && \
+   grep -q 'Housekeeping summary' "$TMP/c19.out" && grep -q 'timed out' "$TMP/c19.out"; then
+  ok "shared GitHub budget caps a stuck call and the summary still prints"
+else
+  bad "report stalled past its GitHub budget (exit=$c19 elapsed=${elapsed19}s) | $(tr '\n' ';' < "$TMP/c19.out" | cut -c1-200)"
+fi
+
+# The budget is shared across calls: after a quick probe, a slow second call
+# gets only what is left of the run budget, not a fresh call bound.
+case20="$TMP/budget-shared"
+new_repo "$case20"
+mkdir -p "$case20/HANDOFF.d"
+cat > "$case20/HANDOFF.d/2026-01-05T0000Z-test-agent-a.md" <<'EOF'
+---
+issue: 4242
+status: OPEN
+owner: test/shared-a
+---
+EOF
+stub20="$TMP/gh20"
+cat > "$stub20" <<'STUB'
+#!/usr/bin/env bash
+case "${1:-}" in
+  issue) sleep 30; exit 0 ;;
+  pr) printf '[]\n'; exit 0 ;;
+esac
+exit 0
+STUB
+chmod +x "$stub20"
+start20=$SECONDS
+set +e
+( cd "$case20" && AI_HOUSEKEEPING_GH="$stub20" \
+    AI_HOUSEKEEPING_STATE_DIR="$TMP/state20" \
+    AI_HOUSEKEEPING_GH_TIMEOUT_SECONDS=30 AI_HOUSEKEEPING_GH_BUDGET_SECONDS=3 \
+    bash "$TOOL" ) > "$TMP/c20.out" 2>&1
+c20=$?
+set -e
+elapsed20=$(( SECONDS - start20 ))
+if [[ "$c20" -eq 0 ]] && [[ "$elapsed20" -lt 15 ]] && \
+   grep -q 'Housekeeping summary' "$TMP/c20.out"; then
+  ok "second GitHub call spends only the remaining shared budget"
+else
+  bad "second call waited out a fresh call bound (exit=$c20 elapsed=${elapsed20}s) | $(tr '\n' ';' < "$TMP/c20.out" | cut -c1-200)"
 fi
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
