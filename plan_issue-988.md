@@ -7,19 +7,19 @@ read-when: Fixing the scheduled full verification failure (issue 988)
 
 # Implementation plan — popcre/ai-devops#988: scheduled full verification failing
 
-Written 2026-11-04 3:54 PM EST by a read-only planning session (Claude). Handoff link: none yet — the implementing session must create its own `HANDOFF.d/<UTC>-<machine>-<agent>-988-scheduled-verify.md` linking to this plan (per `implementation-plan-writer` mechanics); this plan was written to a scratch location because the planning session was read-only.
+Written 2026-11-04 3:54 PM EST. [Current handoff](https://github.com/popcre/ai-devops/blob/main/HANDOFF.d/2026-11-19T1555Z-edge-dev3-codex-weekly-verify-proof.md).
 
-## STATUS
+## STATUS (2026-11-19)
 
 | Step | State | Evidence |
 |---|---|---|
-| 1 Confirm the new runner lane passes the complete matrix | ⬜ open | — |
-| 2 Watch the next scheduled run (Mon 2026-11-09 1:17 AM EST) | ⬜ open | — |
-| 3 Fix any test that fails deterministically on GitHub-hosted Windows | ⬜ open (may be N/A) | — |
-| 4 Harden the one known timing-flaky admission fixture only if it recurs | ⬜ open (conditional) | — |
-| 5 Close #988 with run evidence | ⬜ open | — |
+| 1 Confirm the hosted runner lane passes the complete matrix | Done | [Full manual run](https://github.com/popcre/ai-devops/actions/runs/44409696550) passed four Linux and five Windows sections and both aggregates. |
+| 2 Verify a complete weekly scheduled run on the fixed source | Open | The regular schedule is restored. Two temporary schedule attempts produced no observed run. [Schedule receipt](https://github.com/popcre/ai-devops/issues/988#issuecomment-6995135865) |
+| 3 Repair reproduced failures | Done for the observed failures | Repairs landed and were verified together in the full manual run. Runtime changes were verified on the affected installed hosts. [Verification receipt](https://github.com/popcre/ai-devops/issues/988#issuecomment-6995374136) |
+| 4 Harden the old timing-flaky admission fixture if it recurs | Conditional | Native Windows admission checks passed in this workstream. Revisit only if the same failure recurs. |
+| 5 Close #988 with run evidence | Open | GitHub must deliver a passing scheduled run on a default-branch commit containing the fixes. |
 
-**Start at step 1.**
+**Start at step 2.** The standalone weekly maintenance task checks the real scheduled run. Use [#988](https://github.com/popcre/ai-devops/issues/988) for proof and any newly reproduced failure. Steps 1 and 3 need no repeat for the source already verified. The numbered plan below preserves the original investigation.
 
 ## 1. Ultimate goal
 
@@ -38,7 +38,7 @@ Issue #988 accumulates an auto-comment for every failed scheduled run. Scheduled
 In: making the scheduled complete matrix green; fixing a specific test proven to fail on the current runner; closing #988.
 NOT in this plan: changing required checks or rulesets; changing the runner pool/router (#2339/#2345/#2347 own that); rewriting `report-scheduled-failure.sh`; touching `pull_request`/`merge_group` lanes; broad "deflake Windows" sweeps; the separate merge-queue failure 41908084621 (2026-11-04) unless it is the same test.
 
-## 5. Current state
+## 5. Original state at planning time
 
 - Every failing scheduled run ran Windows jobs on **Blacksmith** runners (log line `Runner name: 'blacksmith-4vcpu-windows-2025-…'`, machine `BLACKSMITH-WIN`) even though the YAML says `windows-2025`.
 - PR #2339 "ci: take Blacksmith out of the runner pool" (merged this week), then #2345 (edge-dev3-first router) and #2347 (user namespaces on GitHub-hosted Linux). No scheduled run has happened since; the next is Mon 2026-11-09 1:17 AM EST.
@@ -67,7 +67,7 @@ Open (implementer judgment): whether step 4 is needed (only if the same admissio
 ## 9. Steps
 
 1. **Prove the new lane now.** Dispatch `verify` on `main` with the complete/expensive option (read `manual-preflight` job inputs in `verify.yml` for the exact input name; run `gh workflow run verify.yml -R popcre/ai-devops --ref main -f <input>=…`). Wait with `bin/ai-pr-wait`-style bounded waiting (background), not a sleep loop. Confirm in the job log `Runner name:` is a GitHub-hosted image (not `blacksmith-`). *Gate:* all `windows-offline-complete (1..5)` = success on GitHub-hosted runners.
-2. **Watch the scheduled run** of 2026-11-09 1:17 AM EST (`gh run list -w verify --event schedule --limit 1`). Independent of step 1. *Gate:* conclusion success and no new #988 comment.
+2. **Verify the next genuine scheduled run.** Use the repository's governed GitHub wrapper and bounded waiter to read its event, source, job results, and overall conclusion. *Gate:* the run is a default-branch `schedule` event containing the fixes, all four Linux and five Windows sections ran and passed, both aggregates passed, and the overall conclusion is success.
 3. **If either run fails:** save `gh run view <id> --log-failed` to `$TMPDIR`, grep `FAIL`. If a test fails on GitHub-hosted Windows and reproduces on a second run, fix that test or the code under test in its own file (e.g. a POSIX-mode assertion needs a Windows-appropriate check, as other suites do). One PR per failing area, branch from `main`, never push to `main`. *Gate:* a fresh dispatch is green.
 4. **Conditional: admission fixture.** Only if `test_pr_waiter_keeps_ticket_past_old_short_default` / `test_generic_waiter_…` fail again: in `tests/test-ai-gh-admission.py` `wait_for`, replace the hard-coded `8` with an env-overridable budget (e.g. `AI_TEST_ADMISSION_WAIT_SECONDS`, default 30). *Gate:* `python tests/test-ai-gh-admission.py` passes locally and in the next complete run.
 5. **Close #988** with a signed comment (`$AI_GH_SIGNATURE`) citing the green scheduled run id (and dispatch run id). If step 2 was green, step 5 needs no code at all. *Gate:* issue closed; the following Monday the reporter re-opens/comments only on a real failure.
