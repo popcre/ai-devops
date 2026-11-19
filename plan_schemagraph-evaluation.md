@@ -1,7 +1,7 @@
 ---
 summary: Controlled trial of SchemaGraph for PostgreSQL change-impact questions on shared-db.
 kind: plan
-status: open
+status: done
 read-when: Running or interpreting the shared-db SchemaGraph trial
 ---
 
@@ -11,17 +11,44 @@ read-when: Running or interpreting the shared-db SchemaGraph trial
 
 ## STATUS
 
-Start at §9 step 1. Each row is open as of November 19, 2026.
+Trial completed on November 19, 2026. The measured outcome is no demonstrated benefit.
 
 | Step | Status | Expected evidence |
 |---|---|---|
-| 1 Claim and pin | Open | Private manifest |
-| 2 Build candidate | Open | Binary identity and smoke result |
-| 3 Prepare database | Open | Schema fingerprint and isolation check |
-| 4 Freeze answer keys | Open | Six independent keys and hashes |
-| 5 Capture graph | Open | Scan receipt and fixture results |
-| 6 Compare investigations | Open | Twelve timed answers |
-| 7 Score and publish | Open | Blinded scores and decision |
+| 1 Claim and pin | Complete | Private manifest |
+| 2 Build candidate | Complete | Binary identity and smoke result |
+| 3 Prepare database | Complete | Schema fingerprint and isolation check |
+| 4 Freeze answer keys | Complete | Six independent keys and hashes |
+| 5 Capture graph | Complete | Scan receipt and fixture results |
+| 6 Compare investigations | Complete | Twelve timed answers |
+| 7 Score and publish | Complete | Blinded scores and decision |
+
+## Measured results
+
+**No demonstrated benefit.** Six matched questions on the pinned shared-db CI restore produced 6/6 fully correct standard answers and 6/6 fully correct SchemaGraph-assisted answers. Median paired savings were 1.1% and 1.15 seconds. A simple break-even estimate is 206 comparable investigations at the measured median saving.
+
+The saved graph exposed direct and two-hop view paths and a trigger-to-routine-to-table write path. It missed the tested routine's search-table read and both audit destinations that depend on trigger context. The graph marked those routine analyses partial. The current view's 12 direct relation dependencies were recoverable from its column-level evidence. The earlier removed edge required source-history evidence. PostgreSQL definitions and trigger bindings supplied the missing routine and destination links.
+
+Cold candidate setup was 236.4 seconds, including 216.9 seconds for the isolated build worker and its smoke check and 19.5 seconds for the first scan. The locked build commands themselves took 38.2 seconds. The disposable database restore was shared between methods and is excluded. This estimate excludes future refreshes and cannot establish fit across the whole database or outside callers.
+
+| Anonymized question | Standard seconds | Assisted seconds | Standard complete | Assisted complete |
+|---|---:|---:|---|---|
+| Direct table-to-view impact | 66.36 | 71.40 | Yes | Yes |
+| Two-hop view impact | 106.28 | 104.36 | Yes | Yes |
+| Trigger, routine and table write | 66.89 | 78.41 | Yes | Yes |
+| Routine table read without a foreign key | 64.49 | 55.22 | Yes | Yes |
+| Runtime-selected audit destinations | 79.56 | 79.17 | Yes | Yes |
+| Current and superseded view dependencies | 104.73 | 98.90 | Yes | Yes |
+
+Standard answers missed 0 expected edges, invented 0 edges and had 0 critical misses. Assisted answers missed 0 expected edges, invented 0 edges and had 0 critical misses. Both methods checked the runtime audit destinations against the enabled bindings and independently identified what the routine definition could establish. Individual misses and source evidence are retained privately.
+
+Both methods used the same source pin, read-only catalog, model, reasoning setting, question text and ten-minute limit. Four pairs were re-run one worker at a time after observed host contention. The two earlier pairs finished before the observed disruption. No accepted run timed out. Scoring used frozen keys and anonymized responses, with independently recomputed timing arithmetic.
+
+The restored schema matched the pinned CI migration failure lists, and all 370 ordinary database checks passed. The graph and the PostgreSQL catalog agreed on the identities of 1,575 relations, including sequences. All seven synthetic controls were exercised. Removing permission to read routine definitions made the scan stop with an explicit error. The saved graph returned identical results when queried twice. The trial used an isolated local database built from tracked schema definitions and fixture seeds.
+
+Available worker usage recorded 1,182,635 input tokens for the standard method and 1,227,570 for the assisted method, including cached input. The subscription route supplied no per-run charge.
+
+[Aggregate evidence on issue #2705](https://github.com/popcre/ai-devops/issues/2705#issuecomment-7017538566)
 
 ## 1. Ultimate goal
 
