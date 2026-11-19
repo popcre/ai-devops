@@ -57,11 +57,14 @@ git-shared item is a commit in a repository several sessions write to.
 | Agent job records | machine-local | Provider job state under `~/.local/state/ai-devops/{glm,kimi,qwen}`. |
 | Odd refs | clone-local | `refs/codex/turn-diffs/checkpoints/*` leftovers. Nobody currently owns them and no remedy is known. |
 
-Merged-ness comes from one GitHub lookup pass (PR list plus a batched issue
-list) through the governed `ai-gh` transport. The probe waits its turn in the
-machine-wide call queue and is bounded at 300 seconds per call
-(`AI_HOUSEKEEPING_GH_TIMEOUT_SECONDS`); when the bound is hit the report says
-so and marks refs UNKNOWN instead of guessing.
+Housekeeping uses a PR list and, when needed, a batched issue list through
+`ai-gh`. Each call is limited by the remaining run budget and the per-call
+cap (`AI_HOUSEKEEPING_GH_TIMEOUT_SECONDS`, default 300 seconds).
+`AI_HOUSEKEEPING_GH_BUDGET_SECONDS` sets the shared wall-clock budget in
+seconds from the start of the PR lookup phase, including local work between
+calls. It defaults to 60 seconds when unset or invalid. Set it to 0 to skip
+GitHub lookups. The report, including scheduled quiet logs, flags handoffs
+whose issue state could not be verified as UNKNOWN.
 
 ## What the labels mean
 

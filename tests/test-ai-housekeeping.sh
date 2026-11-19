@@ -629,16 +629,30 @@ start20=$SECONDS
 set +e
 ( cd "$case20" && AI_HOUSEKEEPING_GH="$stub20" \
     AI_HOUSEKEEPING_STATE_DIR="$TMP/state20" \
+    AI_HOUSEKEEPING_LOG="$TMP/c20.log" \
     AI_HOUSEKEEPING_GH_TIMEOUT_SECONDS=30 AI_HOUSEKEEPING_GH_BUDGET_SECONDS=3 \
-    bash "$TOOL" ) > "$TMP/c20.out" 2>&1
+    bash "$TOOL" --quiet --log --details ) > "$TMP/c20.out" 2>&1
 c20=$?
 set -e
 elapsed20=$(( SECONDS - start20 ))
 if [[ "$c20" -eq 0 ]] && [[ "$elapsed20" -lt 15 ]] && \
-   grep -q 'Housekeeping summary' "$TMP/c20.out"; then
-  ok "second GitHub call spends only the remaining shared budget"
+   grep -q 'GitHub: available' "$TMP/c20.log" && \
+   grep -q 'UNKNOWN  2026-01-05T0000Z-test-agent-a.md' "$TMP/c20.log" && \
+   grep -q 'GitHub issue states could not be verified' "$TMP/c20.log"; then
+  ok "the shared budget bounds the second call and quiet logs record unverified handoffs"
 else
   bad "second call waited out a fresh call bound (exit=$c20 elapsed=${elapsed20}s) | $(tr '\n' ';' < "$TMP/c20.out" | cut -c1-200)"
+fi
+
+( cd "$case15" && STUB_CALL_LOG="$TMP/zero-calls.log" \
+    AI_HOUSEKEEPING_GH="$stub15" AI_HOUSEKEEPING_GH_BUDGET_SECONDS=0 \
+    bash "$TOOL" ) > "$TMP/zero.out" 2>&1
+if [[ ! -e "$TMP/zero-calls.log" ]] && \
+   grep -q 'GitHub: UNKNOWN (GitHub lookups disabled by zero budget)' "$TMP/zero.out" && \
+   grep -q 'Handoffs (git-shared): 0 OPEN, 0 SUCCESSOR REVIEW, 2 UNKNOWN' "$TMP/zero.out"; then
+  ok "zero budget skips GitHub and leaves issue states unknown"
+else
+  bad "zero budget did not skip GitHub or report unknown issue states"
 fi
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
