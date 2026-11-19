@@ -15,6 +15,10 @@ The paired trial is complete. CodeGraph found useful caller leads in all
 three repositories. All three fell short of the evidence needed for a
 larger pilot.
 
+Ordinary source search is the default for DesignFlow, PopDAM, and shared-db.
+Keep CodeGraph out of the standard setup. Start at §8 for the conditions
+that would justify a focused retest.
+
 | Step | 2026-11-19 | Evidence to attach |
 |---|---|---|
 | 1 Prepare answer keys | Done | Nine questions and checked keys frozen before their first run |
@@ -101,7 +105,11 @@ Three source questions per repository, two search methods per question. Include 
 
 ## 5. Current state
 
-The comparison has never been run by this session. No installation, integration or measured savings resulted from planning. Reference snapshots are DesignFlow 6fea83c, PopDAM f5c941a, shared-db 2712220 and colbymchenry/codegraph 67178d8. Resolve each in its own repository. Pin these inputs for reproduction. Case anchors below are paths relative to their respective roots.
+The completed comparison and tested executable are recorded in STATUS.
+The planning reference snapshots were DesignFlow 6fea83c, PopDAM f5c941a,
+shared-db 2712220 and colbymchenry/codegraph 67178d8. Resolve each in its own
+repository when reproducing the original work. Case anchors below are
+relative to their respective repository roots.
 
 ## 6. Evidence and expected fit
 
@@ -113,7 +121,30 @@ Stars and upstream benchmarks cannot tell us whether the tool finds our dependen
 
 ## 8. Decisions
 
-Locked for this trial on November 19, 2026: fixed source snapshots, independent answers, ordinary search available in both arms, separate scores, private detailed evidence, no global setup. Open to the implementing lead: choose symbols within the anchors using the rules below and record the exact names before running either arm. A later version or wider rollout needs separate evidence.
+Decision on November 19, 2026. Use ordinary source search by default across
+all three repositories. Revisit CodeGraph for a specific repository when
+one of these conditions is met.
+
+- **DesignFlow.** Tracing production callers becomes a recurring bottleneck.
+  Retest that task with representative TypeScript call chains.
+- **PopDAM.** A release demonstrates better coverage of the worker dispatch
+  and database call paths that required source reads in this trial. Retest
+  those paths, including where the result is stored.
+- **Shared-db.** CodeGraph demonstrates cross-file PostgreSQL migration
+  tracing with source citations for objects created, replaced, or used by
+  later migrations. Until then, read the SQL and migration history directly.
+  The [SchemaGraph evaluation](plan_schemagraph-evaluation.md) separately
+  tests dependencies in a restored schema. Comparing graphs before and after
+  selected migrations could show when dependencies changed. Mapping those
+  changes to the original migration files still requires source verification.
+
+A retest keeps ordinary search available in both methods and uses matched
+questions, independent answers, checked evidence, and a separate verdict
+for each repository. A larger pilot requires at least 20% median paired
+time savings attributable to CodeGraph, a directly useful graph finding,
+and no correctness regression or invented critical dependency. Credit
+ordinary-search-only answers with zero graph contribution. Include setup
+time in the decision.
 
 ## 9. Execution
 
@@ -153,6 +184,9 @@ Finish when all paired results, fixture checks, raw private receipts and public 
 3. Can the lead resolve a conflict correctly? Sections 1 and 13 put reliable impact assessment first. Sections 8–9 specify what may vary and how each recommendation is earned.
 
 ### Lead launch prompt
+
+The prompt below is preserved from the completed trial. Use §8 to decide
+whether new evidence warrants a retest.
 
 Coordinator mode requested November 19, 2026. Delegate evidence collection for lead-owned steps while retaining the gates and final judgment. Setup may overlap key research because the snapshots are pinned. Timed workers still require frozen keys.
 
