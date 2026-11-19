@@ -91,6 +91,14 @@ Finish when all paired results, fixture checks, raw private receipts and public 
 
 ### Lead launch prompt
 
+Coordinator mode requested November 19, 2026. Delegate evidence collection for lead-owned steps while retaining the gates and final judgment. Setup may overlap key research because the snapshots are pinned. Timed workers still require frozen keys.
+
 ```text
-Read plan_codegraph-evaluation.md STATUS in popcre/ai-devops, then #2699. Own steps 1, 3 and 4 and verify all gates yourself. Delegate step 2 after freezing the questions. Your helper is your own tool's smaller model — Haiku (high effort) for Claude Opus, Luna (high) for Sol, GLM Flash for GLM MAX, Mimo Flash for Mimo Pro. Never a full-strength model. See https://github.com/popcre/ai-devops/blob/main/templates/system/model-tier-delegation.md. Accept finished setup or an evidenced blocker. The helper makes no design decisions, merges or posts and returns to you at the step's stop trigger. Take back work after 30 minutes stuck. Check isolation, all nine keys, all 18 records and separate verdicts yourself. Read the remaining phases again at any session boundary.
+Coordinate the CodeGraph trial through completion. Read https://github.com/popcre/ai-devops/blob/main/plan_codegraph-evaluation.md and https://github.com/popcre/ai-devops/issues/2699. Claim execution. Delegate every work packet to isolated smaller-model subagents. Parallelize setup and answer-key research across DesignFlow, PopDAM and shared-db. As each repository is ready, dispatch fresh matched baseline and candidate workers without keys or prior answers. Counterbalance order and avoid resource contention. Delegate blinded scoring and arithmetic; retain ownership of key approval, safety, verification, final decisions and publication. Follow the plan's controls and thresholds. Refill slots, resolve blockers and verify all 18 answers. Tell me whether CodeGraph actually helped each repository, what it missed, and whether savings justify setup.
+```
+
+The following role and verification rules also apply.
+
+```text
+Read plan_codegraph-evaluation.md STATUS in popcre/ai-devops, then #2699. Own steps 1, 3 and 4 and verify all gates yourself. Dispatch step 2 alongside independent key research. Your helper is your own tool's smaller model — Haiku (high effort) for Claude Opus, Luna (high) for Sol, GLM Flash for GLM MAX, Mimo Flash for Mimo Pro. Never a full-strength model. See https://github.com/popcre/ai-devops/blob/main/templates/system/model-tier-delegation.md. Accept finished setup or an evidenced blocker. The helper makes no design decisions, merges or posts and returns to you at the step's stop trigger. Take back work after 30 minutes stuck. Check isolation, all nine keys, all 18 records and separate verdicts yourself. Read the remaining phases again at any session boundary.
 ```

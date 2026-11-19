@@ -172,6 +172,8 @@ with [`docs/ghost-run-escape.md`](docs/ghost-run-escape.md) (drain, bump `LANE_E
 
 ## Specialized task router
 
+SchemaGraph on shared-db: read [the trial STATUS](plan_schemagraph-evaluation.md) first.
+
 CodeGraph evaluation: read [the trial STATUS](plan_codegraph-evaluation.md) first.
 
 Selective EGM-inspired fresh-reader checks for complex plans or handoffs: read

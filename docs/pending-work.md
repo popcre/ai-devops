@@ -11,6 +11,8 @@ Index of active plan pointers, moved from [`AGENTS.md`](../AGENTS.md) (#1881 pha
 
 ## Issue implementation plans
 
+For PostgreSQL impact analysis, read [the SchemaGraph trial STATUS](../plan_schemagraph-evaluation.md) first.
+
 For CodeGraph fit and comparative evidence, read [the trial STATUS](../plan_codegraph-evaluation.md) first.
 
 These plans record issue-specific assessments; read each verdict or STATUS before
