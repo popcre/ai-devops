@@ -21,18 +21,30 @@ Never hand-rename a single group — that can split a group two workflows share.
 
 ## Procedure
 
-1. **Check whether anything is blocked.** A ghost on a merged or deleted branch blocks
-   nothing. Leave it for GitHub Support and stop here.
-2. **Drain.** Confirm no real (non-ghost) run is queued or in progress in the affected
+1. **Confirm a live blockage.** Match the ghost to the concurrency group of a
+   run or expected check that is still needed. A queued record with zero jobs
+   alone is insufficient evidence. Leave unrelated ghosts for GitHub Support.
+2. **Drain before renaming a held group.** The setting affects every workflow
+   using it. Confirm no legitimate run is queued or in progress in those
    workflows (`gh run list -R popcre/ai-devops --status in_progress` and
-   `--status queued`; ghosts are the ones with zero jobs). A bump while a real run is
-   active lets the next run start beside it instead of after it.
-3. **Bump.** Read the current value (`gh variable get LANE_EPOCH -R popcre/ai-devops`;
+   `--status queued`). A bump while legitimate work is active can let runs
+   overlap. Keep the change manual and leave the group names alone when the
+   fresh run already uses a free group.
+3. **Bump if the fresh run would reuse the held group.** Read the current value
+   (`gh variable get LANE_EPOCH -R popcre/ai-devops`;
    unset means 0) and run
    `gh variable set LANE_EPOCH -R popcre/ai-devops --body <current+1>`.
-4. **Prove it.** Re-run the blocked workflow and confirm it starts and completes.
-5. **Record.** File a GitHub Support purge for the ghost run ids, and note the bump,
-   the ghost ids and the proving run id on popcre/ai-devops#2367.
+4. **Trigger a fresh run and verify the expected checks.** Use the original
+   event type. For a pull request, push a fresh commit to the same PR after any
+   required bump. Verify groups PR runs by PR number, so a push alone can
+   reuse a held group. For a merge-queue check, let the queue create a fresh
+   entry through normal queue handling. For a scheduled check, observe the
+   next scheduled run. A manual dispatch verifies only the manual event.
+   Confirm the new run ID, its event and target, and the expected check results.
+5. **Record.** Note the ghost IDs, any bump, and the proving run ID and check
+   results on [popcre/ai-devops#2367](https://github.com/popcre/ai-devops/issues/2367).
+   Request a purge from GitHub Support separately. This procedure restores
+   blocked checks while GitHub handles the underlying records.
 
 The sweeper stays red until Support purges the ghost; that alarm is intended. Do not
 suppress it.
