@@ -1,24 +1,87 @@
 ---
 summary: Paired source-navigation trial for CodeGraph on DesignFlow, PopDAM and shared-db.
 kind: plan
-status: open
+status: done
 read-when: Evaluating CodeGraph or comparing code navigation tools
 ---
 
 # Test whether CodeGraph helps our AI sessions
 
-[Tracking issue](https://github.com/popcre/ai-devops/issues/2699) · [Handoff](HANDOFF.d/2026-11-19T1617Z-edge-dev3-codex-codegraph.md)
+[Tracking issue](https://github.com/popcre/ai-devops/issues/2699) · [Original handoff](https://github.com/popcre/ai-devops/blob/3be36754f66476be324153d150ccdda84d8c5c0e/HANDOFF.d/2026-11-19T1617Z-edge-dev3-codex-codegraph.md)
 
 ## STATUS
 
-Start at step 1. The planning session inspected source trees only.
+The paired trial is complete. CodeGraph found useful caller leads in all
+three repositories. All three fell short of the evidence needed for a
+larger pilot.
 
 | Step | 2026-11-19 | Evidence to attach |
 |---|---|---|
-| 1 Prepare answer keys | ⬜ open | Private frozen questions and keys |
-| 2 Prepare isolated tool | ⬜ open | Version, source, indexing measurements |
-| 3 Run paired searches | ⬜ open | 18 independent answer records |
-| 4 Score and decide | ⬜ open | Reproducible aggregate on #2699 |
+| 1 Prepare answer keys | Done | Nine questions and checked keys frozen before their first run |
+| 2 Prepare isolated tool | Done | Signed release verified, three indexes and matching source manifests |
+| 3 Run paired searches | Done | 18 fresh answers, zero timeouts |
+| 4 Score and decide | Done | Measured results below and on #2699 |
+
+### Measured results
+
+- **DesignFlow frontend.** CodeGraph surfaced the exact production call site.
+  That search was 9.4 seconds faster. Ordinary search found the test and
+  traced the displayed grid binding. The median paired saving was 0.50 seconds
+  (2.4%). Indexing took 2.58 seconds for 919 files, with a 67.7 MB index.
+  Index time alone would require six searches at the observed median.
+- **PopDAM.** CodeGraph pointed to the embedding handler's dispatcher during
+  the persistence question. Source reads established what the missing-input
+  test covered and where the handler's result was stored. The candidate was
+  8.87 seconds slower at the median, a 24.4% slowdown. Indexing took 2.66
+  seconds for 892 files, with a 54.5 MB index. No break-even was observed.
+- **Shared-db.** CodeGraph surfaced a JavaScript helper's test import. That
+  pair was 3.70 seconds faster (5.7%). The two SQL answers came entirely from
+  ordinary search and file reads. The raw median paired saving was 13.17
+  seconds (21.9%). Both of the larger savings came from the SQL pairs, so the
+  raw median does not establish a CodeGraph speedup. The median graph
+  contribution is zero when the fallback-only pairs get zero credit.
+  Indexing took 3.84 seconds for 706 files, with an 82.5 MB index and zero
+  SQL files. The raw timing implies one search to recover index time, with
+  no demonstrated break-even attributable to CodeGraph.
+
+Fresh Codex Luna sessions at high reasoning answered the same questions with
+and without CodeGraph. The first method alternated by question. Times include
+session startup. Pair percentages use the baseline time for the denominator.
+Setup times above cover indexing. Release acquisition and verification were
+untimed, and per-use billing cost was unavailable. Each repository contributed
+three questions, so timing differences are directional.
+
+All three repositories scored 3/3 in both methods on the relationships the
+questions asked for. No requested links were missed or invented in the final
+answers. The initial blind pass also scored stricter key details, including
+explicit import citations and the migration backfill. It gave DesignFlow 1/3
+versus 0/3, PopDAM 3/3 versus 3/3, and shared-db 2/3 versus 2/3. A second
+blind check resolved the DesignFlow deductions. The final source check
+verified the shared-db answers against the relationships actually asked for.
+The private receipts preserve both blind passes and the final adjudication.
+The pilot decision holds under each scoring.
+
+| Repository | Seconds per pair, plain / graph available | Total calls, plain / graph | Total input tokens, plain / graph | Total output tokens, plain / graph |
+|---|---|---|---|---|
+| DesignFlow | 38.80 / 29.39, 20.35 / 19.86, 59.02 / 63.15 | 37 / 38 | 749,673 / 681,771 | 4,593 / 4,700 |
+| PopDAM | 28.42 / 40.20, 28.53 / 35.48, 60.30 / 69.16 | 46 / 57 | 671,493 / 941,416 | 4,850 / 6,330 |
+| Shared-db | 65.30 / 61.59, 60.25 / 47.07, 44.21 / 30.47 | 59 / 50 | 895,544 / 657,030 | 7,625 / 6,290 |
+
+The call totals include failed attempts. Ordinary file reads with CodeGraph
+available numbered 20 for DesignFlow, 27 for PopDAM, and 31 for shared-db.
+Input counts include cached tokens reported by the Codex sessions.
+
+Source revisions were the three pins in section 5. The trial used the signed
+[CodeGraph 1.6.3 release](https://github.com/colbymchenry/codegraph/releases/tag/v1.6.3),
+built from `44098dec2c014f94f04c07df2d257b58bda2bb5a`, a different revision
+from the planning snapshot. The release tag points to a changelog-only child
+of the attested build revision. The artifact and checksum manifest passed
+signature and digest verification. Both methods were confined to matching
+source manifests. The outside-file sentinel and source-comment instruction
+fixtures passed for both methods. The rename check returned the new symbol
+and dropped the old one. Source review confirmed the requested relationship
+directions. Detailed source evidence, blind scores, and replay inputs remain
+in separate restricted local receipt folders for the three repositories.
 
 ## 1. Ultimate goal
 
