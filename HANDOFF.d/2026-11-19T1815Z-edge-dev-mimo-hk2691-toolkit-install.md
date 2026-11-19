@@ -51,6 +51,7 @@ Still open (this handoff):
 3. **Took the original issue's suspect at face value first** ("stale worktree path warning seen from git in designflow-tracking"). Never reproduced it; `git worktree list` in the named repos is clean. It is not the block point — see §5. If that warning reappears, it deserves its own issue.
 4. **Suspected the slow local inventory as the hang.** Measured it: the local-only phase takes ~48 s in the designflow-data-syncing checkout, dominated by the agent-job-records section scanning a few thousand state files twice per provider. Slow, but it always finishes — not the hang. The suite isolation (§3) removed the biggest cost for tests; the tool's own scan is unchanged.
 5. **`ai-gh pr create` through the shell wrapper produced no output and created no PR** (argument mangling by the shell layer, backticks/quotes). Opened the PR with the plain `gh` CLI instead. If a future session needs `ai-gh` from a shell, write the body to a file and avoid inline special characters.
+6. **Wrote a negated closing reference in a PR body** ("this PR does not close #2709") and GitHub matched the `close #2709` keyword inside the negation — PR #2712 auto-closed issue #2709 the moment it merged. Reopened the same hour with an explanation (https://github.com/popcre/ai-devops/issues/2709#issuecomment-7019324840). Never write a negated closing reference in a PR or issue body; say "leaves #N open" instead.
 
 ## 5. Root causes and key findings
 
@@ -94,6 +95,7 @@ Still open (this handoff):
 - **Risk:** if the toolkit is left un-updated, every session that runs `ai-housekeeping` on this host can still hit the original multi-minute silence. The fix is proven but not live; treat install as the completion of #2691's outcome, not optional polish.
 - **Unexplained (2026-11-19):** the "stale worktree path" warning quoted in #2691's body was never reproduced and is not the root cause (§4.3). If it is seen again, file a separate issue — do not fold it into #2709.
 - **Environment noise (2026-11-19):** long-lived helper processes and a machine-wide `ai-shared-db-closeout-check` latch made some runs stall behind other sessions' work. The latch is OS-level and self-releases when its holder exits; waiters queue behind it by design.
+- **Security finding, deferred by the wrap-up scope freeze (2026-11-19):** `ai-shared-db-closeout-check` (https://github.com/popcre/ai-devops/blob/main/bin/ai-shared-db-closeout-check) prints the full process environment — provider API keys included — into its stdout/stderr capture when it runs (observed as a `declare -x` dump). That is a secret-spilling defect in the tool. Exposure this session was local-only (two scratch files in the system temp directory, deleted immediately; values not rotated per the standing machine-local rule). Whoever picks this up should make the tool never print environment values, and should sweep any scratch captures for `declare -x` dumps before sharing logs. Not fixed here — the freeze sends it forward in writing instead.
 
 ---
 
