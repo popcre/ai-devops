@@ -77,6 +77,22 @@ check 'a host outside watch_hosts cannot claim' "[ $rc -ne 0 ] && [ $rc -ne 3 ]"
 HOST_AS=not-in-pool run tick-all 2>/dev/null; rc=$?
 check 'tick-all on a non-pool host is a no-op success' "[ $rc -eq 0 ]"
 
+echo 'one account per host'
+mkdir -p "$TMP/spool"
+cp -a "$TMP/state" "$TMP/state.keep"; cp -a "$TMP/home" "$TMP/home.keep"
+spool_run(){ AI_LOCAL_WATCH_UID="$1" AI_LOCAL_WATCH_CRONTABS="$TMP/spool" run tick-all 2>&1; }
+echo '*/2 * * * * /x/bin/ai-local-watch tick-all' > "$TMP/spool/ai"
+: > "$TMP/state/calls"
+out="$(spool_run 0)"; rc=$?
+check 'root defers when another account schedules tick-all' "[ $rc -eq 0 ] && printf '%s' \"\$out\" | grep -q 'root defers' && [ ! -s '$TMP/state/calls' ]"
+out="$(spool_run 1000)"
+check 'a non-root account never defers' "! printf '%s' \"\$out\" | grep -q 'root defers'"
+echo '# */2 * * * * /x/bin/ai-local-watch tick-all' > "$TMP/spool/ai"
+out="$(spool_run 0)"
+check 'a commented-out entry does not make root defer' "! printf '%s' \"\$out\" | grep -q 'root defers'"
+rm -rf "$TMP/spool" "$TMP/state" "$TMP/home"
+mv "$TMP/state.keep" "$TMP/state"; mv "$TMP/home.keep" "$TMP/home"
+
 echo 'claim'
 rm -f "$TMP/state"/*
 run claim 2>/dev/null; rc=$?
