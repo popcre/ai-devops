@@ -32,6 +32,8 @@
 #   AI_LOCAL_WATCH_HOST     hostname override (tests)
 #   AI_LOCAL_WATCH_NOW      freeze "now" as UTC ISO (tests)
 #   AI_LOCAL_WATCH_REPO     repo override (tests)
+#   AI_LOCAL_WATCH_UID      effective uid override (tests)
+#   AI_LOCAL_WATCH_CRONTABS user crontab spool (default /var/spool/cron/crontabs)
 set -euo pipefail
 
 _self="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")"
@@ -191,10 +193,34 @@ cmd_status(){
     "$leader" "$lease" "$renewed" "$age" "$n" "$(this_host)"
 }
 
+# popcre/ai-devops#2685: the duty is per HOST, but the lease holder is the
+# hostname, so root and a service account that both schedule tick-all on one
+# host each "held" the lease and each ran every duty on Albert's allowance.
+# root defers when another account on this host schedules tick-all; that
+# account still runs every duty, so nothing is lost.
+other_account_schedules(){
+  [ "${AI_LOCAL_WATCH_UID:-$(id -u)}" = 0 ] || return 1
+  local spool="${AI_LOCAL_WATCH_CRONTABS:-/var/spool/cron/crontabs}" f
+  for f in "$spool"/*; do
+    [ -f "$f" ] && [ -r "$f" ] || continue
+    [ "$(basename "$f")" = root ] && continue
+    if grep -v '^[[:space:]]*#' "$f" | grep -q "ai-local-watch.*tick-all"; then
+      basename "$f"
+      return 0
+    fi
+  done
+  return 1
+}
+
 cmd_tick_all(){
   mkdir -p "$HOME_DIR"
   if ! in_pool; then
     note "$(this_host) is not in watch_hosts; nothing to do"
+    return 0
+  fi
+  local owner
+  if owner="$(other_account_schedules)"; then
+    note "account $owner runs tick-all on this host; root defers"
     return 0
   fi
   take_lock "$HOME_DIR/tick.lock" "$(cfg .lock_stale_minutes)"

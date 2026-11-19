@@ -53,6 +53,10 @@ normal branch + PR). Nicknames must match what BlockerWatch already uses
    `watch_hosts` order). The loser logs `skip: leader=…` and does not post.
 5. If **no** local claim is fresh, the free GitHub Action backup may run.
 6. Never recommend paid GitHub-hosted from these tools.
+7. One account per host runs duty. The leader is a hostname, so when root and
+   another account both schedule `tick-all` on one host (hetz installs as
+   both), root logs `root defers` and exits 0; the other account does the
+   work (#2685).
 
 Exit codes agents must understand:
 
