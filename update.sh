@@ -95,8 +95,11 @@ if [[ "$(uname -s)" = MINGW* || "$(uname -s)" = MSYS* || "$(uname -s)" = CYGWIN*
   [ -f "$windows_installer" ] || { warn 'bin/install-ai-devops-windows.ps1 is missing from the approved source'; exit 1; }
   windows_installer_arg="$(cygpath -w "$windows_installer")" || exit 1
   windows_repo_arg="$(cygpath -w "$REPO_ROOT")" || exit 1
-  ps_bin=powershell.exe
-  command -v powershell.exe >/dev/null 2>&1 || ps_bin=pwsh
+  # Prefer PowerShell 7: the installer is exercised under it, and Windows
+  # PowerShell 5.1 cannot autoload its core cmdlets (Get-FileHash and friends)
+  # from a PowerShell 7-shaped PSModulePath inherited through Git Bash.
+  ps_bin=pwsh
+  command -v pwsh >/dev/null 2>&1 || ps_bin=powershell.exe
   info "Windows route: advancing the installed checkout with bin/install-ai-devops-windows.ps1"
   if [ -n "$expected_head" ]; then
     exec "$ps_bin" -NoProfile -ExecutionPolicy Bypass -File "$windows_installer_arg" \

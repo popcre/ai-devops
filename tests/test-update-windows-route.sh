@@ -14,7 +14,8 @@ fail(){ printf '  FAIL %s\n' "$1" >&2; exit 1; }
 
 # The shims make the Windows branch deterministic on every OS: uname reports
 # MSYS, cygpath emulates -w and delegates the rest to the real cygpath (so
-# update.sh's own path identity still works), and powershell.exe records argv.
+# update.sh's own path identity still works), and the PowerShell stubs record
+# which shell the route preferred along with its argv.
 REAL_CYGPATH="$(command -v cygpath || true)"
 export REAL_CYGPATH
 shims="$TMP/shims"
@@ -30,10 +31,19 @@ esac
 if [ -n "${REAL_CYGPATH:-}" ] && [ -x "$REAL_CYGPATH" ]; then exec "$REAL_CYGPATH" "$@"; fi
 for arg in "$@"; do case "$arg" in -*) ;; *) printf '%s\n' "$arg";; esac; done
 EOF
-printf '%s\n' '#!/usr/bin/env bash' \
-  'printf "%s\n" "$@" > "${STUB_PS_LOG:?}"' \
-  'exit "${STUB_PS_RC:-0}"' > "$shims/powershell.exe"
-chmod +x "$shims/uname" "$shims/cygpath" "$shims/powershell.exe"
+cat > "$shims/pwsh" <<'EOF'
+#!/usr/bin/env bash
+printf 'stub=pwsh\n' > "${STUB_PS_LOG:?}"
+printf '%s\n' "$@" >> "${STUB_PS_LOG:?}"
+exit "${STUB_PS_RC:-0}"
+EOF
+cat > "$shims/powershell.exe" <<'EOF'
+#!/usr/bin/env bash
+printf 'stub=powershell.exe\n' > "${STUB_PS_LOG:?}"
+printf '%s\n' "$@" >> "${STUB_PS_LOG:?}"
+exit "${STUB_PS_RC:-0}"
+EOF
+chmod +x "$shims/uname" "$shims/cygpath" "$shims/pwsh" "$shims/powershell.exe"
 
 installed="$TMP/installed"
 mkdir -p "$installed/bin" "$installed/tools/lib"
@@ -67,6 +77,7 @@ rc=0
 (cd "$candidate" && run_update "$TMP/ps-full.log" \
   --installed-checkout "$installed_resolved" --expected-head "$target") || rc=$?
 [ "$rc" -eq 0 ] || fail "pinned route exits 0 (got $rc)"
+grep -Fxq -- 'stub=pwsh' "$TMP/ps-full.log" || fail 'route prefers PowerShell 7 when both shells exist'
 grep -Fxq -- '-File' "$TMP/ps-full.log" || fail 'route passes -File'
 grep -Fxq -- "WIN:$candidate_resolved/bin/install-ai-devops-windows.ps1" "$TMP/ps-full.log" \
   || fail 'route runs the approved candidate installer'
