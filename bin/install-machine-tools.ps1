@@ -5,6 +5,7 @@ param(
   [switch]$RecoverPendingTransactionOnly
 )
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot 'git-bash-candidates.ps1')
 # This is also a direct entry point. Hold the same machine-wide lock as the
 # full installer until the launcher receipt and pending authority are closed.
 $installMutex = [Threading.Mutex]::new($false, 'Global\AiDevOpsToolkitInstall')
@@ -55,10 +56,7 @@ if (-not $fixture -and [IO.Path]::GetFullPath($UserProfilePath).TrimEnd('\') -in
   throw 'Launcher installation requires the signed-in user profile.'
 }
 $target = if ($fixture) { Split-Path -Parent $env:AI_DEVOPS_TEST_LAUNCHER } else { Join-Path $UserProfilePath ".local\bin" }
-$gitBash = @(
-  (Join-Path $env:ProgramFiles "Git\bin\bash.exe"),
-  (Join-Path $env:LOCALAPPDATA "Programs\Git\bin\bash.exe")
-) | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -First 1
+$gitBash = Select-AiDevOpsGitBash
 if (-not $gitBash) { throw "Git Bash is required to install AI command launchers." }
 $catalogHash = (Get-FileHash -LiteralPath $canonicalCatalog -Algorithm SHA256).Hash.ToLowerInvariant()
 $homeBash = "/" + (($UserProfilePath -replace '\\','/' -replace '^([A-Za-z]):','$1'))

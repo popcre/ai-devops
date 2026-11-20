@@ -1,6 +1,7 @@
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $installer = Join-Path $root 'bin\install-ai-devops-windows.ps1'
+. (Join-Path $root 'bin\git-bash-candidates.ps1')
 $temp = Join-Path ([IO.Path]::GetTempPath()) ('ai-devops-source-gate-' + [guid]::NewGuid())
 New-Item -ItemType Directory -Path $temp | Out-Null
 
@@ -13,7 +14,8 @@ function Write-Receipt($Fixture) {
   $hash=(Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash.ToLowerInvariant()
   $sourceBash='/' + (($source -replace '\\','/' -replace '^([A-Za-z]):','$1'))
   $homeBash='/' + (($env:USERPROFILE -replace '\\','/' -replace '^([A-Za-z]):','$1'))
-  $gitBash=Join-Path $env:ProgramFiles 'Git\bin\bash.exe'
+  $gitBash=Select-AiDevOpsGitBash
+  if (-not $gitBash) { throw 'FAIL: Git Bash is required to write fixture launchers.' }
   @('#!/usr/bin/env bash','# Managed by ai-devops install-machine-tools.ps1.',"# source-sha=$sha","# source-hash=$hash",('export HOME="' + $homeBash + '"'),('exec "' + $sourceBash + '" "$@"')) | Set-Content -LiteralPath $Fixture.Launcher -Encoding ASCII
   @('@echo off','rem Managed by ai-devops install-machine-tools.ps1.',"rem source-sha=$sha","rem source-hash=$hash",('set "HOME=' + $env:USERPROFILE + '"'),('"' + $gitBash + '" "' + $sourceBash + '" %*')) | Set-Content -LiteralPath "$($Fixture.Launcher).cmd" -Encoding ASCII
 }
@@ -27,7 +29,8 @@ function Write-TestAuthorization($Fixture, [string]$Target, [string]$Base, [bool
   $reviewDir=Join-Path $reviewRoot '.ai\reviews'
   New-Item -ItemType Directory -Path $reviewDir -Force | Out-Null
   Add-Content -LiteralPath (Join-Path $Fixture.Repo '.git\info\exclude') -Value '.ai/reviews/'
-  $bash=Join-Path $env:ProgramFiles 'Git\bin\bash.exe'
+  $bash=Select-AiDevOpsGitBash
+  if (-not $bash) { throw 'FAIL: Git Bash is required to run fixture gates.' }
   $sourceDigest=(& $bash (Join-Path $root 'bin\ai-review-sandbox') digest $reviewRoot).Trim()
   $identity=((& $bash (Join-Path $root 'bin\ai-review-lifecycle') identity $reviewRoot) -join "`n") | ConvertFrom-Json
   Assert ($identity.source_digest -ceq $sourceDigest) 'fixture review source identity differs'
@@ -542,6 +545,7 @@ try {
   Copy-Item -LiteralPath $installer -Destination (Join-Path $stamp.Repo 'bin\install-ai-devops-windows.ps1')
   Copy-Item -LiteralPath (Join-Path $root 'bin\install-machine-tools.ps1') -Destination (Join-Path $stamp.Repo 'bin\install-machine-tools.ps1')
   Copy-Item -LiteralPath (Join-Path $root 'bin\repo-identity.ps1') -Destination (Join-Path $stamp.Repo 'bin\repo-identity.ps1')
+  Copy-Item -LiteralPath (Join-Path $root 'bin\git-bash-candidates.ps1') -Destination (Join-Path $stamp.Repo 'bin\git-bash-candidates.ps1')
   Copy-Item -LiteralPath (Join-Path $root 'bin\ai-review-lifecycle') -Destination (Join-Path $stamp.Repo 'bin\ai-review-lifecycle')
   Copy-Item -LiteralPath (Join-Path $root 'bin\ai-review-sandbox') -Destination (Join-Path $stamp.Repo 'bin\ai-review-sandbox')
   New-Item -ItemType Directory -Force -Path (Join-Path $stamp.Repo 'tools\lib') | Out-Null
