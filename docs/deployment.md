@@ -270,7 +270,8 @@ have its supported canonical path. Only after it passes may the
 canonical checkout fast-forward and the supported installer run. Verify the
 installed command hashes and routing afterward. On Windows, pass
 `-RepoPath <canonical checkout> -ExpectedHead <full target SHA>` to the
-reviewed target worktree's `bin/install-ai-devops-windows.ps1`. The old
+reviewed target worktree's `bin/install-ai-devops-windows.ps1`; running that
+worktree's `update.sh` on Windows routes to exactly this command (#2709). The old
 installed bootstrap and installer do not have this gate and cannot perform the
 first protected migration. The full target installer refreshes the managed
 command launchers and source receipts before consuming authorization.

@@ -41,6 +41,9 @@ done
 if [ "$activation_only" -eq 1 ] && [ "$(uname -s)" != Linux ]; then
   warn 'activation-only is a Linux formal-profile operation'; exit 2
 fi
+if [ "$activate_glm_formal" -eq 1 ] && [ "$(uname -s)" != Linux ]; then
+  warn '--activate-glm-formal is a Linux formal-profile operation'; exit 2
+fi
 if [ "$activation_only" -eq 1 ] && { [ "$activate_glm_formal" -ne 1 ] || [ -z "$expected_head" ] || [ -z "$owner_authorization" ]; }; then
   warn '--activation-only requires --activate-glm-formal, --expected-head and --owner-authorization'; exit 2
 fi
@@ -74,6 +77,35 @@ if [ -n "$installed_checkout" ]; then
 fi
 cd "$REPO_ROOT" || exit 1
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 || { warn 'not a Git checkout'; exit 1; }
+# #2709: the POSIX stages below (the ownership helper, install.sh, the
+# /usr/local/bin launcher gates) cannot run on Windows. The documented Windows
+# advance is the reviewed target worktree's bin/install-ai-devops-windows.ps1
+# against the installed checkout (docs/deployment.md), so route there before
+# any of the POSIX install machinery runs.
+if [[ "$(uname -s)" = MINGW* || "$(uname -s)" = MSYS* || "$(uname -s)" = CYGWIN* ]]; then
+  [ "${#install_args[@]}" -eq 0 ] || {
+    warn '--require-secrets/--skip-secrets configure Linux install.sh; the Windows installer manages its own setup'; exit 2;
+  }
+  if [ -n "$installed_checkout" ]; then
+    [ "$(git -C "$SOURCE_ROOT" rev-parse HEAD)" = "$expected_head" ] || {
+      warn 'candidate checkout is not the exact approved target'; exit 1;
+    }
+  fi
+  windows_installer="$SOURCE_ROOT/bin/install-ai-devops-windows.ps1"
+  [ -f "$windows_installer" ] || { warn 'bin/install-ai-devops-windows.ps1 is missing from the approved source'; exit 1; }
+  windows_installer_arg="$(cygpath -w "$windows_installer")" || exit 1
+  windows_repo_arg="$(cygpath -w "$REPO_ROOT")" || exit 1
+  ps_bin=powershell.exe
+  command -v powershell.exe >/dev/null 2>&1 || ps_bin=pwsh
+  info "Windows route: advancing the installed checkout with bin/install-ai-devops-windows.ps1"
+  if [ -n "$expected_head" ]; then
+    exec "$ps_bin" -NoProfile -ExecutionPolicy Bypass -File "$windows_installer_arg" \
+      -RepoPath "$windows_repo_arg" -ExpectedHead "$expected_head"
+  else
+    exec "$ps_bin" -NoProfile -ExecutionPolicy Bypass -File "$windows_installer_arg" \
+      -RepoPath "$windows_repo_arg"
+  fi
+fi
 # One lock spans fetch, candidate preflight, checkout advance, installation,
 # requalification, and finalization. The child installer checks this exact fd.
 install_lock_dir="$HOME/.local/state/ai-devops/task-gates"
