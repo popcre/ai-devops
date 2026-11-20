@@ -94,6 +94,8 @@ rulings, verbatim: `docs/owner-rulings.md`.
 - **Thirty minutes without progress is broken.** Any review, queue, or helper
   with no progress for 30 minutes is broken: reroute, redraw, or use the documented fallback; never report a second turn
   of "still waiting" on the same item.
+  Never design or build an automated hold, wait, retry delay or timeout
+  longer than 30 minutes; a closed or resolved item never holds anything.
 - **Keep canonical checkouts landing-only.** Every write-capable task uses its
   own current-upstream worktree before editing. Edit a shared checkout only for
   a serialized landing, installation, or recovery. Each child Git repository

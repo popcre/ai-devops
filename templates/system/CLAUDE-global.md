@@ -90,6 +90,8 @@ Historical receipts stay on #2022; do not reopen the trial.
 - **Thirty minutes without progress is broken.** Any review, queue, or helper
   with no progress for 30 minutes is broken: reroute, redraw, or use the documented fallback; never report a second turn
   of "still waiting" on the same item.
+  Never design or build an automated hold, wait, retry delay or timeout
+  longer than 30 minutes; a closed or resolved item never holds anything.
 - **Keep canonical checkouts landing-only.** Each write-capable task, and
   each child Git repository, uses its own worktree before editing.
 - AI performs every manual step itself and proves success observably.

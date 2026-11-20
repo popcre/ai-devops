@@ -23,7 +23,7 @@ MARKER = "review-fixer:v1"
 INVALID = "review-fixer-invalid:v1"
 DEFERRED = "fixer-deferred"
 REDISPATCHED = "fixer-redispatched"
-IDLE_LIMIT = timedelta(hours=48)
+IDLE_LIMIT = timedelta(minutes=30)
 FINDER_LABELS = frozenset({"review-finding", "ci-red"})
 
 
@@ -332,7 +332,7 @@ class State:
         """Return why a current fix PR can no longer land, or None if it may.
 
         A conflicted PR cannot merge as-is. An idle PR has seen no activity for
-        over 48 hours. Both are retired and the finding is re-dispatched once.
+        over 30 minutes. Both are retired and the finding is re-dispatched once.
         """
         detail = api(f"{self.prefix}/pulls/{pr['number']}")
         if detail.get("mergeable") is False:
