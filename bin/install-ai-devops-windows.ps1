@@ -66,6 +66,7 @@ function Write-Note {
 }
 
 . (Join-Path $PSScriptRoot 'repo-identity.ps1')
+. (Join-Path $PSScriptRoot 'git-bash-candidates.ps1')
 
 function Get-CanonicalRemote([string]$Url) { return (Get-AiDevOpsCanonicalRemote -Url $Url) }
 
@@ -134,17 +135,6 @@ function Get-ReviewerSafetyGlobs([string]$Path, [string]$Revision) {
     return $globs
 }
 
-function Get-GitBashCandidates {
-    # ProgramFiles (and LOCALAPPDATA) can be absent in service and task
-    # environments; Join-Path -Path $null aborts the install before Git Bash
-    # is even looked for. Build the candidate list from whichever roots the
-    # host actually has (#1713 found Git Bash the same way).
-    @(
-        if ($env:ProgramFiles) { Join-Path $env:ProgramFiles 'Git\bin\bash.exe' }
-        if ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA 'Programs\Git\bin\bash.exe' }
-    )
-}
-
 function Get-CommittedGateHash([string]$Path, [string]$Commit) {
     if ($Commit -cnotmatch '^[0-9a-f]{40}$') { throw 'Installed gate commit is malformed.' }
     $archive = Join-Path ([IO.Path]::GetTempPath()) ('ai-devops-receipt-' + [guid]::NewGuid() + '.zip')
@@ -208,7 +198,7 @@ function Get-InstalledSourceReceipt([string]$Path) {
     $sourceBash = '/' + (($source -replace '\\','/' -replace '^([A-Za-z]):','$1'))
     $homeBash = '/' + (($env:USERPROFILE -replace '\\','/' -replace '^([A-Za-z]):','$1'))
     $bashRoute = 'exec "' + $sourceBash + '" "$@"'
-    $gitBash = Get-GitBashCandidates
+    $gitBash = Get-AiDevOpsGitBashCandidates
     $validCmdRoutes = @($gitBash | ForEach-Object { '"' + $_ + '" "' + $sourceBash + '" %*' })
     if ($bash[0] -cne '#!/usr/bin/env bash' -or $bash[1] -cne '# Managed by ai-devops install-machine-tools.ps1.' -or
         $cmd[0] -cne '@echo off' -or $cmd[1] -cne 'rem Managed by ai-devops install-machine-tools.ps1.' -or
@@ -412,7 +402,7 @@ function Assert-InstallAuthorization([string]$Path, [string]$TargetHead, [string
         [IO.Path]::GetFullPath($installedCommon.Trim()) -ine [IO.Path]::GetFullPath($reviewCommon.Trim())) {
         throw 'Reviewed checkout does not share installed Git ownership.'
     }
-    $bash = Get-GitBashCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+    $bash = Select-AiDevOpsGitBash
     if (-not $bash) { throw 'Git Bash is required to verify reviewed source.' }
     $identity = Invoke-NativeProbe -Command $bash -Arguments @((Join-Path $PSScriptRoot 'ai-review-lifecycle'), 'identity', $reviewRoot)
     if ($identity.ExitCode -ne 0) { throw 'Could not independently verify review source identity.' }
