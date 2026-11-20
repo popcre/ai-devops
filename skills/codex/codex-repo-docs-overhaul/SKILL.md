@@ -8,6 +8,23 @@ description: Create or rebuild the full markdown documentation set for a new rep
 Use this for a new repo/application or a major change that makes the existing
 docs structurally stale. For routine session notes, use `codex-docs-update`.
 
+
+## Spruce-up mode (repo already has a router and doc health)
+
+Use this instead of the full procedure when the repo already has a thin
+`AGENTS.md` router, `.doc-health.json` and a generated index. Do only this:
+
+1. Run `ai-doc-health --repo .` and fix every fault (leftover rules in
+   `session-docs-update` closer 0).
+2. Build the decisions catalog: collect settled design decisions and owner rulings
+   from plans, handoffs, `docs/idiosyncrasies.md` and issues into one
+   `docs/decisions/<YYYY-MM-DD>-<slug>.md` each (`kind: decision`; format in
+   ai-devops `docs/doc-health.md` "Decisions catalog"). Leave the original text
+   where it is; link it from the decision file.
+3. Add one standing line to the router: before changing anything, search the
+   `decision` section of `docs/INDEX.md` for the topic and open only matching files.
+4. `ai-doc-health --repo . --fix-index`, then confirm it exits 0.
+
 ## Procedure
 
 Read `references/repo-docs-task-spec.md` and follow it. Key points:

@@ -58,14 +58,27 @@ within the first 2 KB. Other keys may sit beside these four.
 ```yaml
 ---
 summary: One sentence, at most 160 characters, saying what is in here.
-kind: living | ops | plan | spec | proof | archive
+kind: decision | living | ops | plan | spec | proof | archive
 status: current | open | done | stale
 read-when: Short phrase naming the task that needs this file.
 ---
 ```
 
 The index file is built from these headers: one section per kind, one row per
-document. Never edit the index by hand; edit the header and run `--fix-index`.
+document, with decisions first. Never edit the index by hand; edit the header and run `--fix-index`.
+
+## Decisions catalog
+
+A design decision or owner ruling that later sessions must not contradict gets
+its own small file, `docs/decisions/<YYYY-MM-DD>-<slug>.md`, with `kind: decision`
+and `status: current`. Its body says what was decided, by whom and when (quote an
+owner ruling verbatim), why, and what was rejected. The generated index lists
+every decision first, one line each, so the catalog is the `## decision` section of
+`docs/INDEX.md`; the router carries one standing line telling sessions to search
+that section for their topic before changing anything. When a decision is
+replaced, write the new one and move the old file to `docs/archive/decisions/`
+with `kind: archive`; the archive is excluded, so the catalog never grows with
+history. Never put a decision only in a handoff: handoffs are deleted.
 
 ## Checks
 

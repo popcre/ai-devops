@@ -1,6 +1,6 @@
 ---
 name: repo-docs-overhaul
-description: Full documentation-system rebuild for a repo — the "AI TASK SPEC Repository Documentation Maintenance" spec. Use for NEW applications, after BIG changes, or when the user says "do a full documentation overhaul", "make AGENTS.md the canonical operating guide", or pastes the AI TASK SPEC. For routine end-of-session updates use session-docs-update instead.
+description: Full documentation-system rebuild for a repo, or a lighter spruce-up (fix doc-health faults and build the decisions catalog) for a repo that already has a router — the "AI TASK SPEC Repository Documentation Maintenance" spec. Use for NEW applications, after BIG changes, or when the user says "do a full documentation overhaul", "make AGENTS.md the canonical operating guide", or pastes the AI TASK SPEC. For routine end-of-session updates use session-docs-update instead.
 disable-model-invocation: true
 ---
 
@@ -9,6 +9,23 @@ disable-model-invocation: true
 The heavyweight documentation pass. Rebuilds the repo's whole doc system per
 Albert's canonical spec — as opposed to `session-docs-update`, which only
 records what one session learned.
+
+
+## Spruce-up mode (repo already has a router and doc health)
+
+Use this instead of the full procedure when the repo already has a thin
+`AGENTS.md` router, `.doc-health.json` and a generated index. Do only this:
+
+1. Run `ai-doc-health --repo .` and fix every fault (leftover rules in
+   `session-docs-update` closer 0).
+2. Build the decisions catalog: collect settled design decisions and owner rulings
+   from plans, handoffs, `docs/idiosyncrasies.md` and issues into one
+   `docs/decisions/<YYYY-MM-DD>-<slug>.md` each (`kind: decision`; format in
+   ai-devops `docs/doc-health.md` "Decisions catalog"). Leave the original text
+   where it is; link it from the decision file.
+3. Add one standing line to the router: before changing anything, search the
+   `decision` section of `docs/INDEX.md` for the topic and open only matching files.
+4. `ai-doc-health --repo . --fix-index`, then confirm it exits 0.
 
 ## When THIS skill vs session-docs-update
 

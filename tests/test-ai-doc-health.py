@@ -124,6 +124,17 @@ class DocHealthTests(unittest.TestCase):
         self.assertEqual([line.split(" ")[:2] for line in lines], [["living-size", "docs/big-living.md"], ["living-size", "docs/big-ops.md"]])
         self.assertIn("over the 60000 byte budget", lines[0])
 
+    def test_decision_kind_valid_and_listed_first(self) -> None:
+        self.repo.write("docs/decisions/2026-11-20-x.md", header(kind="decision", summary="A settled choice.") + "# D\n")
+        self.repo.write("docs/ops.md", header(kind="ops") + "# O\n")
+        self.repo.commit()
+        self.repo.run("--fix-index")
+        index = (self.repo.path / "docs/INDEX.md").read_text(encoding="utf-8")
+        self.repo.commit()
+        self.assertEqual(self.faults(), [])
+        self.assertLess(index.index("## decision"), index.index("## ops"))
+        self.assertIn("A settled choice.", index)
+
     def test_missing_header_and_invalid_kind_reported(self) -> None:
         self.repo.write("docs/none.md", "# No header\n")
         self.repo.write("docs/bad-kind.md", header(kind="tutorial") + "# x\n")
