@@ -24,6 +24,12 @@ Do:
   four-line header (`summary`, `kind`, `status`, `read-when`) and the index is
   regenerated with `ai-doc-health --repo . --fix-index` in the same commit. Never
   hand-edit the generated index. Rules: `docs/doc-health.md` in ai-devops.
+  Also fix leftovers in repos you touched (stale index, bad header, unlinked or
+  over-budget document, old handoff under the `handoff-writer` successor rule);
+  leave only files another session changed in the last 24 hours, and report them.
+- Record each design decision or owner ruling in its own
+  `docs/decisions/<YYYY-MM-DD>-<slug>.md` (`kind: decision`), never only in a
+  handoff; a replaced decision moves to `docs/archive/decisions/`.
 - Put detail in the right topic doc instead of duplicating it everywhere.
 - Say explicitly when no docs need updating.
 

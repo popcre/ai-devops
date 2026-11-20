@@ -178,8 +178,14 @@ completeness gate above does not pass without it.
    Fix every fault your session introduced before you finish. A new document gets
    its four-line header (`summary`, `kind`, `status`, `read-when`) and the index is
    regenerated with `ai-doc-health --repo . --fix-index` in the same commit — never
-   edit the generated index by hand. Faults you did not cause (old handoffs, other
-   sessions' files) are reported, not fixed. Rules: `docs/doc-health.md` in ai-devops.
+   edit the generated index by hand. Then fix the leftovers too, in every repo you touched:
+   a stale index, a missing or invalid header, an unlinked document (link it from the
+   document that names it), a document over budget (move its oldest sections to
+   `docs/archive/` and repoint links), and an old handoff (retire it under the
+   `handoff-writer` successor rule after carrying its open items and decisions into
+   durable docs; keep it and say why if any check fails). Leave alone only a file
+   another session changed in the last 24 hours; report that one by path. Nobody
+   else owns leftovers, which is how 20 old handoffs piled up by 2026-11-20. Rules: `docs/doc-health.md` in ai-devops.
    In a repo with no `.doc-health.json`, fall back to `wc -c AGENTS.md HANDOFF.md`.
 
    `AGENTS.md` over the repo's `router_max_bytes` (or 60 KB where no config exists) →
@@ -190,6 +196,12 @@ completeness gate above does not pass without it.
    Both rules already existed and were silently ignored for months — five of six
    designflow repos had drifted by 2026-08-18. Reporting the two numbers is what
    makes the drift visible, so do not skip this step or report it from memory.
+
+   **Decisions.** Every design decision or owner ruling this session made or
+   learned goes into its own `docs/decisions/<YYYY-MM-DD>-<slug>.md` with
+   `kind: decision` (format: `docs/doc-health.md` "Decisions catalog" in ai-devops),
+   never only into a handoff. A decision that replaces one moves the old file to
+   `docs/archive/decisions/`.
 
 1. **Secrets sweep** — run the `secrets-to-1password` skill.
 2. **Handoff-safe state** — no repo may be left with mystery untracked files
