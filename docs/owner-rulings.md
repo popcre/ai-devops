@@ -171,6 +171,15 @@ Current rule:
 - An AI agent promotes merged shared-db changes to production automatically once the preview rehearsal and tests pass and the advisory review has no open real findings (any `review-finding` issue on that change is resolved).
 - This is the only point where a review result is checked. Merging still never waits.
 
+## 2026-11-20 — a closed review finding never holds production
+
+Verbatim, from Albert's chat: "nothing should be allowed to hold other work
+back for 20 hours."
+
+Current rule:
+- Only an open `review-finding` issue holds a change out of production. Closing it, for any reason, releases promotion at once.
+- The former 24-hour hold after a "not planned" close is removed (popcre/shared-db#6909). It had stopped every later migration behind one closed finding.
+
 ## 2026-10-29 (night) — freeze off; reviewers preferred, never required
 
 Verbatim, Albert's chat: "take off the freeze and make reviewers preferred but
