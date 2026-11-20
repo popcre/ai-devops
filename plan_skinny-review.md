@@ -279,14 +279,14 @@ The fixer runs **Codex** (`codex exec`) on edge-dev3, because Claude's CLI login
      - The fixer job runs with no reviewer provider keys: a separate job, with the opencode secrets directory and key env vars unset or unmounted.
      - It may not edit `.github/workflows/**`, `install.sh`, `update.sh`, `bin/install-ai-devops-windows.ps1`, `config/task-gates.json` or `bin/ai-task-gates`, enforced by a step in `review-fixer.yml` that runs after the agent and outside it: `git diff --name-only origin/main...HEAD` against the denylist, refusing to push or open the PR on any match. Run `codex exec` in its workspace-write sandbox with no secrets in its environment; only the workflow step that opens the PR holds `GH_TOKEN`.
      - Its PRs go through normal CI and the merge queue.
-     - Closing a finding as "not planned" requires a comment quoting evidence. Such an issue still blocks production promotion for 24 hours after closing.
+     - Closing a finding as "not planned" requires a comment quoting evidence. Closing releases production promotion at once (owner rule 2026-11-20; the former 24-hour hold is removed).
 6. **Production is promoted automatically by an AI agent** when all of these hold:
    - the change is merged;
    - the preview rehearsal passed and cannot be skipped;
    - the tests passed;
    - no blocking `review-finding` issue references the change.
 
-   "References" means an issue labelled `review-finding` whose body contains the PR URL; the workflow writes this. Blocking means open, or closed as not planned within the last 24 hours. The apply job runs this query live, immediately before the apply step, not at merge time.
+   "References" means an issue labelled `review-finding` whose body contains the PR URL; the workflow writes this. Blocking means open; any close releases it (owner rule 2026-11-20). The apply job runs this query live, immediately before the apply step, not at merge time.
 
    **Trigger:** the promotion workflow runs on `push` to main touching migration paths, and hourly on a schedule as a backstop. No session or person starts it.
 
@@ -373,7 +373,7 @@ The fixer runs **Codex** (`codex exec`) on edge-dev3, because Claude's CLI login
 - **A:** `tests/test_ai_review_rule.py` covers rotation (PR n mod 4), fall-through on exit 3, NO fall-through on exit 2 (a refusal), never-failure conclusion, and the docs-only classifier: `plan_x.md` is reviewed, `docs/a.md` is skipped, `HANDOFF.d/x.md` is skipped, and `.md` mixed with `.py` is reviewed. `tests/test_ai_review_simple.py` stays green.
 - **B:** `tests/test-ai-task-gates.sh`, `test-ai-task-gates-bulk.sh`, `test-ai-task-gates-linux-install.sh`, `test-linux-install-authorization.sh`, `test-task-gates-phase5-acceptance.sh`, `test-windows-source-gate.ps1` assert that no review approval is required, and that the secrets, privacy and worktree gates are still enforced.
 - **E/F:** `bash tests/test-all.sh --changed-since origin/main`, plus `tests/test-installer-parity.sh` and `test-workflow-policy.sh`.
-- **G:** a shared-db workflow test that promotion is refused while an open `review-finding` issue references the change, refused for 24 hours after a close-as-not-planned, and allowed after a fixed close.
+- **G:** a shared-db workflow test that promotion is refused while an open `review-finding` issue references the change, and allowed after any close.
 - **Always:** `verify.yml` green; `bin/ai-doc-safety .` for prose.
 
 ### 11. Constraints and gotchas

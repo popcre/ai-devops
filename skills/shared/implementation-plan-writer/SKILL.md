@@ -81,6 +81,9 @@ thin plan costs a whole session of rediscovery and a wrong build.
    - How it should behave when done (the intent, not just the edit), so a step
      that's slightly wrong can still be implemented correctly.
    - Dependencies: what must be done first; what can run in parallel.
+   - **No long holds:** no step may make work wait more than 30 minutes
+     (hold windows, cool-downs, retry delays, idle limits). A closed or
+     resolved item never holds anything (owner rule 2026-11-20).
    - **Verification gate: "you'll know it worked when ___"** — a command,
      an HTTP check, a test name, or a screenshot of a specific screen.
    - For trust-boundary work (parsers, pricing/money, files or data coming

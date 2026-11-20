@@ -1,0 +1,15 @@
+name: Hold limits (advisory)
+# Owner rule 2026-11-20: no automated hold, wait or timeout over 30 minutes.
+# Advisory per the lean-required-checks ruling (2026-10-30).
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  hold-limits:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 tools/ci/check-hold-limits.py tools/ci .github
