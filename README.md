@@ -85,7 +85,9 @@ installed the same way and, once signed in inside the app, is fully managed —
 skills, global instructions, MCP servers, hooks, and the `ai-zcode` headless
 wrapper (see [docs/model-setup.md](docs/model-setup.md)). Xiaomi MiMo Desktop
 (MiMoCode) is managed the same way — skills, global instructions, MCP servers,
-and the `ai-mimo` headless wrapper.
+and the `ai-mimo` headless wrapper. Google Antigravity (`agy`) is also managed
+on Windows — skills, global instructions, MCP servers, completion-check hook,
+and the `ai-agy` headless wrapper.
 
 ### Ubuntu server (hetz and others) — Claude Code
 

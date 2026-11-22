@@ -657,6 +657,7 @@ $ZCodeMcpNames = @("1password")
 # Claude Code and ZCode: 1password only, through the shared launcher.
 # Expanding later is a one-line membership change here.
 $MimoMcpNames = @("1password")
+$AntigravityMcpNames = @("1password")
 
 # Phase 3 (#705): single-project servers start only in sessions opened in the
 # owning repository. Keys are repository identities from
@@ -1040,6 +1041,20 @@ if (Test-Path -LiteralPath $MiMoAppExe) {
   Warn "  Install Xiaomi MiMo AI, then re-run this script."
 }
 
+# Google Antigravity CLI (agy). Presence-only policy: self-updating, never pinned.
+$AgyCliExe = Join-Path $env:LOCALAPPDATA "agy\bin\agy.exe"
+$AgyCliCmd = Get-Command agy -ErrorAction SilentlyContinue
+if ($AgyCliCmd) {
+  Ok "Google Antigravity CLI on PATH: $($AgyCliCmd.Source)"
+  Note "Verify the full integration when needed with: ai-agy doctor"
+} elseif (Test-Path -LiteralPath $AgyCliExe) {
+  Ok "Google Antigravity CLI found: $AgyCliExe"
+  Note "Verify the full integration when needed with: ai-agy doctor"
+} else {
+  Warn "Google Antigravity CLI 'agy' not found on PATH or at $AgyCliExe"
+  Warn "  Install Google Antigravity, then re-run this script."
+}
+
 # Raw `zcode` launcher on PATH (interactive TUI + direct CLI subcommands), giving
 # PATH parity with `claude`/`codex`. The governed HEADLESS driver is bin/ai-zcode;
 # this shim is for interactive use and for the wrapper's own convenience. The
@@ -1384,6 +1399,32 @@ if ($mimoPresent -and (Test-Path -LiteralPath $mimoMcpSetup)) {
   Note "MiMo Desktop not present - its MCP config stage was skipped."
 } else {
   Warn "Missing $mimoMcpSetup - MiMoCode MCP server set left as-is."
+}
+
+# --------------------------------------------------------------------------
+# 6f. Google Antigravity's OWN config (~/.gemini/config/mcp_config.json -> mcpServers).
+# Antigravity schema: stdio uses command (string) + args (array) + env (map).
+# --------------------------------------------------------------------------
+Step "Wiring the MCP server set into Google Antigravity"
+$agyMcpSetup = Join-Path $RepoPath "bin\configure-antigravity-mcps.ps1"
+$agyHome = Join-Path $HOME ".gemini\config"
+$agyCfg = Join-Path $agyHome "mcp_config.json"
+$agyPresent = (Test-Path -LiteralPath $agyHome) -or (Test-Path -LiteralPath (Join-Path $env:LOCALAPPDATA "agy\bin\agy.exe")) -or ($null -ne (Get-Command agy -ErrorAction SilentlyContinue))
+if ($agyPresent -and (Test-Path -LiteralPath $agyMcpSetup)) {
+  $AgyMcpServers = [ordered]@{}
+  foreach ($name in $AntigravityMcpNames) {
+    if (-not $McpServerCatalog.Contains($name)) { continue }
+    $src = $McpServerCatalog[$name]
+    $AgyMcpServers[$name] = [ordered]@{
+      command = [string]$src['command']
+      args    = @($src['args'] | ForEach-Object { [string]$_ })
+    }
+  }
+  & $agyMcpSetup -Servers $AgyMcpServers -ManagedNames @($ManagedMcpServerNames) -ConfigPath $agyCfg
+} elseif (-not $agyPresent) {
+  Note "Google Antigravity not present - its MCP config stage was skipped."
+} else {
+  Warn "Missing $agyMcpSetup - Antigravity MCP server set left as-is."
 }
 
 # --------------------------------------------------------------------------

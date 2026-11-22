@@ -464,6 +464,64 @@ cmd_doctor() {
     esac
   fi
 
+  c_head "Google Antigravity (agy)"
+  agy_home="$HOME/.gemini/config"
+  case "${OSTYPE:-}" in
+    msys*|cygwin*) if [ -n "${USERPROFILE:-}" ] && command -v cygpath >/dev/null 2>&1; then
+      ah="$(cygpath -u "$USERPROFILE")/.gemini/config"; [ -d "$ah" ] && agy_home="$ah"
+    fi ;;
+  esac
+  agy_cli=""
+  if command -v agy >/dev/null 2>&1; then
+    agy_cli="$(command -v agy)"
+  elif [ -n "${LOCALAPPDATA:-}" ] && command -v cygpath >/dev/null 2>&1; then
+    ac="$(cygpath -u "$LOCALAPPDATA")/agy/bin/agy.exe"; [ -x "$ac" ] && agy_cli="$ac"
+  fi
+  if [ -n "$agy_cli" ] || [ -d "$agy_home" ]; then
+    if [ -n "$agy_cli" ]; then
+      c_ok "Antigravity CLI present ($agy_cli)"
+    else
+      c_warn "Antigravity CLI 'agy' not on PATH — headless ai-agy ask unavailable"
+    fi
+    agy_cfg="$agy_home/mcp_config.json"
+    if [ -f "$agy_cfg" ]; then
+      if jq -e 'type=="object"' "$agy_cfg" >/dev/null 2>&1; then
+        c_ok "Antigravity MCP config parses ($agy_cfg)"
+        agy_mcp_count="$(jq '(.mcpServers // {}) | length' "$agy_cfg" 2>/dev/null || echo 0)"
+        c_ok "Antigravity MCP servers configured: $agy_mcp_count"
+      else
+        c_warn "Antigravity MCP config DOES NOT PARSE"
+      fi
+    else
+      c_warn "no mcp_config.json yet — re-run setup-machine.ps1 (Antigravity MCP stage)"
+    fi
+    if [ -d "$agy_home/skills" ]; then
+      agy_managed="$(find "$agy_home/skills" -maxdepth 2 -name .ai-devops-managed -type f 2>/dev/null | wc -l | tr -d ' ')"
+      c_ok "~/.gemini/config/skills managed (markers: $agy_managed)"
+    else
+      c_warn "no ~/.gemini/config/skills — re-run install-ai-devops-windows.ps1"
+    fi
+    if [ -f "$agy_home/AGENTS.md" ]; then
+      c_ok "Antigravity global instructions present"
+    else
+      c_warn "no ~/.gemini/config/AGENTS.md — re-run install-ai-devops-windows.ps1 or ai-adopt-globals"
+    fi
+    if [ -f "$agy_home/hooks.json" ]; then
+      if jq -e 'type=="object"' "$agy_home/hooks.json" >/dev/null 2>&1; then
+        c_ok "Antigravity hooks.json parses ($agy_home/hooks.json)"
+      else
+        c_warn "Antigravity hooks.json DOES NOT PARSE"
+      fi
+    else
+      c_warn "no ~/.gemini/config/hooks.json — run ai-install-completion-check-hook --client antigravity"
+    fi
+  else
+    case "${OSTYPE:-}" in
+      msys*|cygwin*) c_warn "Google Antigravity not found — install Google Antigravity" ;;
+      *) c_warn "Google Antigravity not present (Windows-only client; expected on this platform)" ;;
+    esac
+  fi
+
   c_head "Paths & config"
   check_file "$AI_DEVOPS_HOME/README.md" "toolkit repo" req
   if [ -d "$AI_DEVOPS_HOME" ]; then c_ok "repo dir exists ($AI_DEVOPS_HOME)"; else c_fail "repo dir missing ($AI_DEVOPS_HOME)"; FAILED=1; fi

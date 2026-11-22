@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 #
-# Render the ZCode and MiMo global instruction templates from the one Codex
+# Render the ZCode, MiMo, and Antigravity global instruction templates from the one Codex
 # body (#1881 phase 3.1).
 #
-#   ai-render-globals          # rewrite templates/system/AGENTS-global-{zcode,mimo}.md
+#   ai-render-globals          # rewrite templates/system/AGENTS-global-{zcode,mimo,antigravity}.md
 #   ai-render-globals --check  # exit 1 if a committed rendering differs (hand edit)
 #
 # Edit templates/system/AGENTS-global-codex.md, never the rendered files. The
@@ -34,7 +34,7 @@ render() {
 }
 
 status=0
-for engine in zcode mimo; do
+for engine in zcode mimo antigravity; do
   target="$sys/AGENTS-global-$engine.md"
   if [[ "$mode" == "check" ]]; then
     if ! diff -u <(tr -d '\r' < "$target") <(render "$engine") >/dev/null; then
@@ -47,5 +47,5 @@ for engine in zcode mimo; do
     echo "rendered $(basename "$target")"
   fi
 done
-[[ "$mode" == "check" && "$status" -eq 0 ]] && echo "CLEAN: ZCode and MiMo globals match the rendered Codex body"
+[[ "$mode" == "check" && "$status" -eq 0 ]] && echo "CLEAN: ZCode, MiMo, and Antigravity globals match the rendered Codex body"
 exit "$status"

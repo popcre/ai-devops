@@ -81,6 +81,7 @@ CLAUDE_HOME="${CLAUDE_HOME:-$BASE_HOME/.claude}"
 CODEX_HOME="${CODEX_HOME:-$BASE_HOME/.codex}"
 ZCODE_HOME="${ZCODE_HOME:-$BASE_HOME/.zcode}"
 MIMO_HOME="${MIMO_HOME:-$BASE_HOME/.config/mimocode}"
+ANTIGRAVITY_HOME="${ANTIGRAVITY_HOME:-$BASE_HOME/.gemini/config}"
 
 SHORT_HOST="$(hostname 2>/dev/null | cut -d. -f1 | tr '[:upper:]' '[:lower:]')"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
@@ -151,6 +152,7 @@ TARGETS=(
   "Codex|$CODEX_HOME/AGENTS.md|$REPO_ROOT/templates/system/AGENTS-global-codex.md|installer"
   "ZCode|$ZCODE_HOME/AGENTS.md|$REPO_ROOT/templates/system/AGENTS-global-zcode.md|self"
   "MiMo|$MIMO_HOME/AGENTS.md|$REPO_ROOT/templates/system/AGENTS-global-mimo.md|self"
+  "Antigravity|$ANTIGRAVITY_HOME/AGENTS.md|$REPO_ROOT/templates/system/AGENTS-global-antigravity.md|self"
 )
 
 # --check: read-only drift report (#1881). Each installed global, with its

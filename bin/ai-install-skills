@@ -85,6 +85,7 @@ CLAUDE_HOME="${CLAUDE_HOME:-$BASE_HOME/.claude}"
 CODEX_HOME="${CODEX_HOME:-$BASE_HOME/.codex}"
 ZCODE_HOME="${ZCODE_HOME:-$BASE_HOME/.zcode}"
 MIMO_HOME="${MIMO_HOME:-$BASE_HOME/.config/mimocode}"
+ANTIGRAVITY_HOME="${ANTIGRAVITY_HOME:-$BASE_HOME/.gemini/config}"
 DRY_RUN=false
 SHOW_LOG=false
 KEEP_ORPHANS=false
@@ -930,6 +931,13 @@ if [[ -d "$MIMO_HOME" ]]; then
                  "$MIMO_HOME/AGENTS.md" "MiMo global instructions"
 else
   echo "No $MIMO_HOME directory — skipping MiMo global instructions."
+fi
+
+if [[ -d "$ANTIGRAVITY_HOME" ]]; then
+  install_global "$REPO_ROOT/templates/system/AGENTS-global-antigravity.md" \
+                 "$ANTIGRAVITY_HOME/AGENTS.md" "Antigravity global instructions"
+else
+  echo "No $ANTIGRAVITY_HOME directory — skipping Antigravity global instructions."
 fi
 
 echo

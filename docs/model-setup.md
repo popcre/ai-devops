@@ -152,6 +152,23 @@ no config-file hook surface).
   (`~/.local/share/mimocode/mimocode.db`); back them up and mine them by SQL
   with the `mimo-transcript-backup` skill (private repo destination only).
 
+## Google Antigravity (Windows)
+
+Google Antigravity (`agy`) is an interactive client on Windows receiving full
+managed parity: managed skills (`~/.gemini/config/skills/` from `skills/shared`
+plus optional `skills/antigravity`), a seeded `~/.gemini/config/AGENTS.md`
+(`ai-adopt-globals` replaces it with machine-section preservation), MCP servers
+in `~/.gemini/config/mcp_config.json` via `bin/configure-antigravity-mcps.ps1`,
+and a Stop completion-check hook in `~/.gemini/config/hooks.json` via
+`ai-install-completion-check-hook --client antigravity`.
+
+- **Headless driving:** `ai-agy ask "<prompt>"` — the governed wrapper
+  (`bin/ai-agy`). Defaults to `--mode plan` (read-only) with a wall-clock
+  ceiling (`AI_AGY_ASK_TIMEOUT`, default 900s). Refuses `--yolo`,
+  `--dangerously-skip-permissions`, and `--never-ask`. Health:
+  `ai-agy doctor [--live]`.
+- **No Antigravity reviewer.** Interactive client only (ZCode/MiMo pattern).
+
 ## Important: the exact flags may differ on your machine
 
 The Claude/Codex CLIs evolve. The installed configuration is validated against

@@ -33,6 +33,7 @@ ai-transcript-envcheck	bin/ai-transcript-envcheck	bash+cmd	yes	none	install-mach
 ai-transcript-query	bin/ai-transcript-query	bash+cmd	yes	none	install-machine-tools.ps1
 ai-zcode	bin/ai-zcode	bash+cmd	none	zcode	install-machine-tools.ps1
 ai-mimo	bin/ai-mimo	bash+cmd	none	mimo	install-machine-tools.ps1
+ai-agy	bin/ai-agy	bash+cmd	none	antigravity	install-machine-tools.ps1
 ai-install-post-merge-hook	bin/ai-install-post-merge-hook	bash+cmd	yes	none	install-machine-tools.ps1
 ai-housekeeping	bin/ai-housekeeping	bash+cmd	yes	none	install-machine-tools.ps1
 az-mail	bin/az-mail	bash+cmd	yes	none	install-machine-tools.ps1
