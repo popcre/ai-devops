@@ -88,7 +88,7 @@ PROVIDERS = {
     },
     "antigravity": {
         "engine": "antigravity",
-        "model": os.environ.get("AI_ANTIGRAVITY_MODEL") or "gemini-4-neon-medium",
+        "model": "gemini-4-neon-medium",
         "key_file": None, "key_env": None, "override": None,
         "timeout": 1200, "provider": None,
     },
@@ -332,7 +332,9 @@ def resolve_antigravity():
     """The Google Antigravity CLI (`agy`): explicit override, PATH, then standard install paths."""
     override = os.environ.get("AI_REVIEW_SIMPLE_AGY") or os.environ.get("AI_AGY_CLI")
     if override:
-        return override if os.path.isfile(override) and os.access(override, os.X_OK) else None
+        if os.path.isfile(override) and (os.name == "nt" or os.access(override, os.X_OK)):
+            return override
+        return None
     found = shutil.which("agy")
     if found:
         return found
@@ -346,11 +348,15 @@ def resolve_antigravity():
     return None
 
 
+def antigravity_model(spec):
+    return os.environ.get("AI_ANTIGRAVITY_MODEL") or spec["model"]
+
+
 def read_antigravity_result(stdout):
     """Parse `agy --output-format json` stdout into (response, conversation_id, error).
 
-    Tolerates leading non-JSON warning lines before the final JSON payload.
-    Only status == 'SUCCESS' with a non-empty response counts as an answer."""
+    Tolerates leading non-JSON warning lines before a single- or multi-line JSON
+    payload. Only status == 'SUCCESS' with a non-empty response counts as an answer."""
     text = (stdout or "").strip()
     if not text:
         return "", None, "empty output"
@@ -358,14 +364,13 @@ def read_antigravity_result(stdout):
     try:
         data = json.loads(text)
     except ValueError:
-        for line in reversed(text.splitlines()):
-            line = line.strip()
-            if line.startswith("{"):
-                try:
-                    data = json.loads(line)
-                    break
-                except ValueError:
-                    continue
+        idx = text.find("{")
+        while idx != -1:
+            try:
+                data = json.loads(text[idx:])
+                break
+            except ValueError:
+                idx = text.find("{", idx + 1)
     if not isinstance(data, dict):
         return "", None, text[:500]
     cid = data.get("conversation_id") or None
@@ -646,7 +651,9 @@ def run_antigravity_once(spec, prompt, work, timeout, observe=None):
               "AI_REVIEW_SIMPLE_FAKE_STATE"):
         if os.environ.get(n):
             env[n] = os.environ[n]
-    cmd = [agy, "--mode", "plan", "--model", spec["model"], "--output-format", "json",
+    # Inherit user HOME/profile so `agy` can read its OAuth store (~/.gemini/antigravity/);
+    # read-only isolation is enforced by `--mode plan` plus chmod 440 on the private work copy.
+    cmd = [agy, "--mode", "plan", "--model", antigravity_model(spec), "--output-format", "json",
            "--print-timeout", f"{timeout}s"]
     proc = subprocess.Popen(cmd, cwd=work, env=env, stdin=subprocess.PIPE,
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE,

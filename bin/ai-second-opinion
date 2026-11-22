@@ -402,7 +402,9 @@ def run_antigravity_turn(provider, sdir, meta, prompt, spec):
             env[n] = os.environ[n]
     mode = "accept-edits" if meta.get("mode") == "implement" else "plan"
     timeout = int(os.environ.get("AI_SECOND_OPINION_TIMEOUT") or spec["timeout"])
-    cmd = [agy, "--mode", mode, "--model", spec["model"], "--output-format", "json",
+    # Inherit user HOME/profile so `agy` can read its OAuth store (~/.gemini/antigravity/);
+    # isolation is enforced by `--mode plan|accept-edits` plus the private remote-less repo copy.
+    cmd = [agy, "--mode", mode, "--model", ars.antigravity_model(spec), "--output-format", "json",
            "--print-timeout", f"{timeout}s"]
     resume = meta.get("session")
     if resume:
@@ -887,6 +889,7 @@ def main(argv):
             agy = ars.resolve_antigravity()
             print(f"agy: {agy or 'MISSING'}")
             ok &= bool(agy)
+            print(f"model: {ars.antigravity_model(ars.PROVIDERS[p])}")
         else:
             oc = ars.resolve_opencode()
             print(f"opencode: {oc or 'MISSING'}")
@@ -894,7 +897,7 @@ def main(argv):
             has_key = bool(ars.read_key(p))
             print(f"{p} key: {'present' if has_key else 'MISSING'}")
             ok &= has_key
-        print(f"model: {ars.PROVIDERS[p]['model']}")
+            print(f"model: {ars.PROVIDERS[p]['model']}")
         if ok and args.live:
             import tempfile
             diagnostic_path = doctor_diagnostics(p, STATE)

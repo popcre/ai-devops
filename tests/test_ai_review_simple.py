@@ -309,7 +309,8 @@ class AntigravityReviewTests(unittest.TestCase):
     def test_approve_and_revise_verdicts(self):
         rc, res = self.run_review("approve")
         self.assertEqual((rc, res["verdict"], res["provider"]), (0, "APPROVE", "antigravity"))
-        recorded = json.load(open(self.state + ".args"))
+        with open(self.state + ".args") as fh:
+            recorded = json.load(fh)
         self.assertIn("--mode", recorded["args"])
         self.assertEqual(recorded["args"][recorded["args"].index("--mode") + 1], "plan")
         self.assertNotEqual(os.path.realpath(recorded["cwd"]), os.path.realpath(self.repo))

@@ -24,8 +24,8 @@ roles, adapting CLI flags, and how the scripts use the commands.
   demands a review (owner 2026-10-13, popcre/ai-devops#1714).
 - **GLM-5.3** — rotation reviewer (restored 2026-09-30). Never reviews
   GLM-orchestrated (ZCode) work. Also usable as an explicitly requested second
-  opinion through `ai-glm`. The rotation pool is Muse, DeepSeek, GLM, and StepFun
-  (owner 2026-10-13, popcre/ai-devops#1714).
+  opinion through `ai-glm`. The advisory GitHub rotation pool is Muse, GLM,
+  DeepSeek, StepFun, and Antigravity (Gemini).
 - **Grok Build 4.6** — frozen 2026-10-13: installed and callable by name through
   `ai-grok-review` (read-only) and `ai-grok-implement`, but not maintained as a
   rotation reviewer. Advisory look-into-this work uses `ai-grok-implement
@@ -168,11 +168,13 @@ and a Stop completion-check hook in `~/.gemini/config/hooks.json` via
   `--dangerously-skip-permissions`, and `--never-ask`. Health:
   `ai-agy doctor [--live]`.
 - **Second opinions and GitHub reviews:** `ai-antigravity` (thin entry to
-  `bin/ai-second-opinion antigravity`, skill `ask-antigravity`) and the
-  `antigravity` slot in `bin/ai-review-simple` (`ROTATION`) drive `agy` with
-  Gemini (`gemini-4-neon-medium` by default; override `AI_ANTIGRAVITY_MODEL`)
-  in a read-only private repository copy. On hosts where `agy` is absent or not
-  signed in, calls exit 3 (unavailable) and CI review falls through cleanly.
+  `bin/ai-second-opinion antigravity`; see the
+  [`ask-antigravity` skill](../skills/shared/ask-antigravity/SKILL.md) for usage
+  and brief rules) and the `antigravity` slot in `bin/ai-review-simple`
+  (`ROTATION`) drive `agy` with Gemini (`gemini-4-neon-medium` by default;
+  override `AI_ANTIGRAVITY_MODEL`) in a read-only private repository copy. On
+  hosts where `agy` is absent or not signed in, calls exit 3 (unavailable) and
+  CI review falls through cleanly.
 
 ## Important: the exact flags may differ on your machine
 
