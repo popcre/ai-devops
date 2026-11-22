@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "enabled": true,
+  "repository": "popcre/shared-db",
+  "workflow": "apply-pgss-capacity-restart.yml",
+  "source_files": {
+    ".github/workflows/apply-pgss-capacity-restart.yml": "e0c90c319dba6ba1176d4362c529a6cfb38572d2ea2bcaa4fc40eb0a8ebe451a",
+    "scripts/apply_pgss_capacity_restart.py": "4628d80036606d8982d44010007b3f8e77f95ef3459dc7897a7b4a508a635b8c",
+    "scripts/pgss-restart-exclusive.mjs": "d9cce9e17c053fc88f036e011718f5337f070bda8b344bce56144ca861a90042",
+    "scripts/gh-read.mjs": "3ee3e81196951bf8e78abf603e08b88efc10a759b7f82b6f3e0160a633b99479",
+    "scripts/lib/claim-recovery-dependencies.mjs": "71be6c2a49e98fb8974d97f4eb52d2027db5dee861b42ad62d34fe6c2f7ecd60",
+    "config/pgss-capacity-restart.json": "d3835b5b57c02f1217a41c5762e1d34a05f0a31102090106ef70dc3528fcf94c",
+    "scripts/shared_db_live_proof.py": "132056f2df0c6be64370539eea88995defd8a0cc5fbcfecef5b96b44f4f5c203"
+  }
+}
