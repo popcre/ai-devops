@@ -108,7 +108,7 @@ for never_ask in \
   "$REPO_ROOT/skills/shared/designflow-human-qa/SKILL.md" \
   "$REPO_ROOT/docs/deployment.md" \
   "$REPO_ROOT/skills/shared/designflow-human-qa/references/safety-and-evidence.md" \
-  "$REPO_ROOT/skills/shared/codex-shared-db-change/SKILL.md" \
+  "$REPO_ROOT/skills/shared/shared-db-change/SKILL.md" \
   "$REPO_ROOT/skills/shared/secrets-to-1password/SKILL.md" \
   "$REPO_ROOT"/plan_muse-opencode-harness.md "$REPO_ROOT"/plan_kimi-windows-execution-reliability.md \
   "$REPO_ROOT"/plan_kimi-review-failure-recovery.md "$REPO_ROOT"/templates/repo-docs/AGENTS.addon.md \
@@ -117,7 +117,7 @@ for never_ask in \
   "$REPO_ROOT"/templates/repo-docs/docs-ai-branching.md "$REPO_ROOT"/plan_cross_repo_routing_and_gate_enforcement.md \
   "$REPO_ROOT"/docs/shared-db-structural-safety/references/operating-manual.md \
   "$REPO_ROOT"/skills/shared/handoff-writer/SKILL.md "$REPO_ROOT"/templates/system/handoff-standard.md \
-  "$REPO_ROOT"/skills/shared/codex-sync-dotfiles/SKILL.md "$REPO_ROOT"/docs/shared-db-structural-safety/README.md \
+  "$REPO_ROOT"/docs/shared-db-structural-safety/README.md \
   "$REPO_ROOT"/plan_ast-grep-multi-machine-management.md "$REPO_ROOT"/plan_shared-db-finish-first-delivery.md \
   "$REPO_ROOT"/plan_shared-db-complete-throughput-repair.md "$REPO_ROOT"/plan_ai-muse-native-engine-parity.md \
   "$CLAUDE_GLOBAL" "$CODEX_GLOBAL" "$ZCODE_GLOBAL" "$MIMO_GLOBAL" "$AGENTS_MD"; do
@@ -134,7 +134,7 @@ for client_file in "$CLAUDE_GLOBAL" "$CODEX_GLOBAL" "$ZCODE_GLOBAL" "$MIMO_GLOBA
     || fail "$(basename "$client_file") brought back a reviewer gate (owner ruling 2026-10-29)"
 done
 
-for sync_skill in "$REPO_ROOT/skills/shared/sync-dotfiles/SKILL.md" "$REPO_ROOT/skills/shared/codex-sync-dotfiles/SKILL.md"; do
+for sync_skill in "$REPO_ROOT/skills/shared/sync-dotfiles/SKILL.md"; do
   grep -qF "chmod 600" "$sync_skill" && grep -qF "Set-AiDevOpsPrivateFileAtomic" "$sync_skill" \
     || fail "$(basename "$(dirname "$sync_skill")") lost the private-file rule for the token file"
 done

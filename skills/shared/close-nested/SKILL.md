@@ -27,7 +27,7 @@ equivalent, and say which you used:
   preserve its branch from GitHub.
 
 This skill is a superset of `wrap-up` (Codex: `wrap-up` is shared; its docs
-step uses `codex-docs-update`). Load `wrap-up` and `handoff-writer` now;
+step uses `session-docs-update`). Load `wrap-up` and `handoff-writer` now;
 their rules (scope freeze, shared-db gate, secrets, ship & verify, workspace
 close, GitHub-URL-only paths, self-audit) apply unchanged to this session and
 to every child. This file adds only the tree-specific steps.

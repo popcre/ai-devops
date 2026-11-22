@@ -234,7 +234,7 @@ if ! $ADOPT_GLOBALS; then
     fi
   done <<EOF
 $REPO_ROOT/skills/shared/sync-dotfiles/SKILL.md|$CLAUDE_HOME/skills/sync-dotfiles/SKILL.md
-$REPO_ROOT/skills/shared/codex-sync-dotfiles/SKILL.md|$CODEX_HOME/skills/codex-sync-dotfiles/SKILL.md
+$REPO_ROOT/skills/shared/sync-dotfiles/SKILL.md|$CODEX_HOME/skills/sync-dotfiles/SKILL.md
 EOF
 fi
 

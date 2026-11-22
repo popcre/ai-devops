@@ -180,7 +180,7 @@ a specific missing checklist item — fix exactly that, re-grade, answer "Yes."
   closing note. Do **not** open a leftover-proof issue, an "unproven step"
   issue, or a second ticket for that gap.
 - **Executing part of a plan makes the rest of it lie.** Whoever does the work updates
-  the plan in the same session — the `session-docs-update` / `codex-docs-update` skills
+  the plan in the same session — the `session-docs-update` skill
   carry a mandatory plan-file gate: de-stale the "current state of the code" section,
   keep the reasoning as history (a session that loses the *why* undoes the fix), mark
   verification that already passed, and record what is open and blocked on whom.
