@@ -30,6 +30,7 @@ param(
     [string]$CodexHome = (Join-Path $HOME ".codex"),
     [string]$ZCodeHome = (Join-Path $HOME ".zcode"),
     [string]$MimoHome = (Join-Path $HOME ".config\mimocode"),
+    [string]$AntigravityHome = (Join-Path $HOME ".gemini\config"),
     [switch]$SkillsDryRun,
     # Replace an installed global that differs from the repo copy. Without this
     # switch a differing global is reported and left alone. The old file is
@@ -635,7 +636,7 @@ function Assert-NoSharedSkillCollisions {
     param([string]$Root)
 
     $sharedNames = @(Get-SkillNames (Join-Path $Root "skills\shared"))
-    foreach ($client in @("claude", "codex", "zcode", "mimo")) {
+    foreach ($client in @("claude", "codex", "zcode", "mimo", "antigravity")) {
         $clientRoot = Join-Path $Root "skills\$client"
         foreach ($name in $sharedNames) {
             if (Test-Path -LiteralPath (Join-Path $clientRoot "$name\SKILL.md")) {
@@ -1199,6 +1200,33 @@ if (Test-Path -LiteralPath $MimoHome) {
     Write-Note "MiMo home not present - MiMo skills stage was skipped."
 }
 
+Write-Step "Installing Antigravity skills"
+# Antigravity global skills root is ~/.gemini/config/skills. Install only where
+# Antigravity has already created its config home, so machines without it stay
+# untouched (same policy as MiMo).
+if (Test-Path -LiteralPath $AntigravityHome) {
+    $agySkillRoots = @((Join-Path $RepoPath "skills\shared"))
+    $agyClientSkills = Join-Path $RepoPath "skills\antigravity"
+    if (Test-Path -LiteralPath $agyClientSkills) {
+        $agyCount = Install-SkillFolder `
+            -SourceRoot $agyClientSkills `
+            -DestRoot (Join-Path $AntigravityHome "skills") `
+            -Label "Antigravity" `
+            -ClientHome $AntigravityHome
+        Write-Note "$agyCount Antigravity-specific skills installed."
+        $agySkillRoots = @($agyClientSkills, (Join-Path $RepoPath "skills\shared"))
+    }
+    $sharedAgyCount = Install-SkillFolder `
+        -SourceRoot (Join-Path $RepoPath "skills\shared") `
+        -DestRoot (Join-Path $AntigravityHome "skills") `
+        -Label "shared" `
+        -ClientHome $AntigravityHome
+    Write-Note "$sharedAgyCount shared skills installed for Antigravity."
+    Invoke-OrphanSkillPruning -ClientHome $AntigravityHome -Label "Antigravity" -Root $RepoPath -SourceRoots $agySkillRoots
+} else {
+    Write-Note "Antigravity home not present - Antigravity skills stage was skipped."
+}
+
 Write-Step "Installing global instruction files"
 Install-GlobalFile `
     -Source (Join-Path $RepoPath "templates\system\CLAUDE-global.md") `
@@ -1219,6 +1247,12 @@ if (Test-Path -LiteralPath $MimoHome) {
         -Source (Join-Path $RepoPath "templates\system\AGENTS-global-mimo.md") `
         -Dest (Join-Path $MimoHome "AGENTS.md") `
         -Label "Xiaomi MiMo global instructions"
+}
+if (Test-Path -LiteralPath $AntigravityHome) {
+    Install-GlobalFile `
+        -Source (Join-Path $RepoPath "templates\system\AGENTS-global-antigravity.md") `
+        -Dest (Join-Path $AntigravityHome "AGENTS.md") `
+        -Label "Google Antigravity global instructions"
 }
 
 # A dry run is a preview of everything, globals included, and stops before the

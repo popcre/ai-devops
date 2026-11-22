@@ -48,6 +48,21 @@ $checks.Add([pscustomobject]@{
   })
 })
 
+# Google Antigravity CLI (agy). Presence only -- self-updating, never pinned.
+$agyCmd = Get-Command agy -ErrorAction SilentlyContinue
+$agyExe = Join-Path $env:LOCALAPPDATA 'agy\bin\agy.exe'
+$agyPassed = ($null -ne $agyCmd) -or (Test-Path -LiteralPath $agyExe)
+$checks.Add([pscustomobject]@{
+  Check='cli:agy'; Passed=$agyPassed
+  Detail=$(if($agyCmd){
+    $agyCmd.Source
+  }elseif(Test-Path -LiteralPath $agyExe){
+    $agyExe
+  }else{
+    "not found on PATH or at $agyExe (install Google Antigravity)"
+  })
+})
+
 $config = Join-Path $RepoPath '.config\configuration.winget'
 $checks.Add([pscustomobject]@{ Check='configuration:file'; Passed=(Test-Path $config); Detail=$config })
 $setup = Join-Path $RepoPath 'bin\setup-machine.ps1'

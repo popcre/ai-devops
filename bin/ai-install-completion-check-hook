@@ -33,6 +33,7 @@ set -u
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 claude_home=""
 zcode_home=""
+antigravity_home=""
 client="claude"
 check_only=0
 
@@ -40,17 +41,18 @@ while (($#)); do
   case "$1" in
     --claude-home) claude_home="$2"; shift 2 ;;
     --zcode-home) zcode_home="$2"; shift 2 ;;
+    --antigravity-home) antigravity_home="$2"; shift 2 ;;
     --client) client="$2"; shift 2 ;;
     --repo-root) repo_root="$2"; shift 2 ;;
     --check) check_only=1; shift ;;
-    -h|--help) echo "usage: ai-install-completion-check-hook [--check] [--client claude|zcode] [--claude-home DIR] [--zcode-home DIR] [--repo-root DIR]"; exit 0 ;;
+    -h|--help) echo "usage: ai-install-completion-check-hook [--check] [--client claude|zcode|antigravity] [--claude-home DIR] [--zcode-home DIR] [--antigravity-home DIR] [--repo-root DIR]"; exit 0 ;;
     *) echo "Unknown option: $1" >&2; exit 2 ;;
   esac
 done
 
 case "$client" in
-  claude|zcode) ;;
-  *) echo "ERROR unknown --client: $client (accepted: claude, zcode)" >&2; exit 2 ;;
+  claude|zcode|antigravity) ;;
+  *) echo "ERROR unknown --client: $client (accepted: claude, zcode, antigravity)" >&2; exit 2 ;;
 esac
 
 if [[ -z "$claude_home" ]]; then
@@ -72,6 +74,16 @@ if [[ -z "$zcode_home" ]]; then
     *) zcode_home="$HOME/.zcode" ;;
   esac
 fi
+if [[ -z "$antigravity_home" ]]; then
+  case "${OSTYPE:-}" in
+    msys*|cygwin*)
+      profile="${USERPROFILE:-}"
+      [[ -n "$profile" ]] || { echo "ERROR USERPROFILE is unset" >&2; exit 1; }
+      command -v cygpath >/dev/null 2>&1 && profile="$(cygpath -u "$profile")"
+      antigravity_home="$profile/.gemini/config" ;;
+    *) antigravity_home="$HOME/.gemini/config" ;;
+  esac
+fi
 
 src="$repo_root/bin/ai-completion-check-hook"
 [[ -f "$src" ]] || { echo "ERROR not found: $src" >&2; exit 1; }
@@ -79,6 +91,64 @@ src="$repo_root/bin/ai-completion-check-hook"
 cfg_dir="$HOME/.config/ai-devops"
 dest="$cfg_dir/completion-check-hook"
 marker='completion-check-hook'
+
+if [[ "$client" == "antigravity" ]]; then
+  # -----------------------------------------------------------------------
+  # Antigravity: ~/.gemini/config/hooks.json, named hook with Stop event.
+  # -----------------------------------------------------------------------
+  hooks_file="$antigravity_home/hooks.json"
+  command -v jq >/dev/null 2>&1 || { echo "ERROR jq is required to edit the Antigravity hooks config safely" >&2; exit 1; }
+
+  hook_cmd="bash \"$(cygpath -m "$dest" 2>/dev/null || printf '%s' "$dest")\""
+
+  agy_registered() {
+    jq -e --arg m "$marker" '
+      .["ai-devops-completion-check"] as $h |
+      ($h | type == "object") and
+      (($h.enabled // true) == true) and
+      (($h.Stop // []) | map(.command // "") | any(contains($m)))' "$1" >/dev/null 2>&1
+  }
+
+  if (( check_only )); then
+    [[ -f "$dest" ]] || { echo "ERROR completion-check hook script not installed"; exit 1; }
+    [[ -f "$hooks_file" ]] || { echo "ERROR no $hooks_file"; exit 1; }
+    if agy_registered "$hooks_file"; then
+      echo "OK completion-check hook already registered for antigravity"; exit 0
+    fi
+    echo "ERROR completion-check hook not registered in $hooks_file"; exit 1
+  fi
+
+  mkdir -p "$cfg_dir" "$antigravity_home"
+  cp "$src" "$dest" || { echo "ERROR could not install $dest" >&2; exit 1; }
+  chmod +x "$dest" 2>/dev/null || true
+
+  [[ -f "$hooks_file" ]] || printf '{}\n' > "$hooks_file"
+  if ! jq -e 'type == "object"' "$hooks_file" >/dev/null 2>&1; then
+    echo "ERROR $hooks_file is not a valid JSON object - refusing to touch it" >&2
+    exit 1
+  fi
+
+  if agy_registered "$hooks_file"; then
+    echo "OK completion-check hook already registered for antigravity ($hooks_file)"
+    exit 0
+  fi
+
+  cp "$hooks_file" "$hooks_file.bak.$(date -u +%Y%m%dT%H%M%SZ)" 2>/dev/null || true
+  tmp_hooks="$(mktemp)"
+  jq --arg cmd "$hook_cmd" '
+    .["ai-devops-completion-check"] = {
+      "enabled": true,
+      "Stop": [
+        {
+          "type": "command",
+          "command": $cmd,
+          "timeout": 10
+        }
+      ]
+    }' "$hooks_file" > "$tmp_hooks" && mv "$tmp_hooks" "$hooks_file"
+  echo "OK installed completion-check hook for antigravity ($hooks_file)"
+  exit 0
+fi
 
 if [[ "$client" == "zcode" ]]; then
   # -----------------------------------------------------------------------

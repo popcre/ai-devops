@@ -1,0 +1,262 @@
+#!/usr/bin/env bash
+# ai-agy -- governed headless driver for the Google Antigravity CLI (`agy`).
+#
+# This is the ONLY supported way for another session to drive Google Antigravity
+# headlessly. This script owns the read-only default mode pin (`--mode plan`),
+# the wall-clock ceiling, the yolo/skip-permissions refusal, and the completion
+# honesty check.
+#
+#   ai-agy ask "<prompt>" [--mode plan|accept-edits|auto] [--model MODEL]
+#              [--effort low|medium|high|xhigh|max] [--cwd DIR] [--json-output]
+#   ai-agy doctor [--live]
+#   ai-agy version
+#
+# Deliberately NO session management and NO wrapper state directory: Antigravity
+# persists conversations in its own store (~/.gemini/antigravity/).
+#
+# ---------------------------------------------------------------------------
+# BASELINE QUALIFICATION -- 2026-11-21 on Windows.
+#   CLI: %LOCALAPPDATA%\agy\bin\agy.exe (or `agy` on PATH).
+#   Headless entry: `agy --print` (`-p`) with `--mode plan|accept-edits|auto`,
+#   `--output-format text|json|stream-json`, `--print-timeout`.
+#   Global config root: ~/.gemini/config/
+#     - MCP config: ~/.gemini/config/mcp_config.json (`mcpServers` map)
+#     - Skills root: ~/.gemini/config/skills/
+#     - Global rules: ~/.gemini/config/AGENTS.md
+#     - Hooks config: ~/.gemini/config/hooks.json
+# ---------------------------------------------------------------------------
+
+set -euo pipefail
+_ai_st="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../tools/lib/session-tmp.sh"; if [ -f "$_ai_st" ]; then . "$_ai_st"; ai_session_tmp_wrap agy "$(readlink -f "${BASH_SOURCE[0]}")" "$@"; fi; unset _ai_st  # own temp root, deleted on exit
+
+VERSION="1.0.0"
+
+AGY_HOME="${AI_AGY_HOME:-$HOME/.gemini/config}"
+AGY_CLI="${AI_AGY_CLI:-agy}"
+ASK_TIMEOUT="${AI_AGY_ASK_TIMEOUT:-900}"
+DEFAULT_MODE="${AI_AGY_MODE:-plan}"
+
+die()  { printf 'ai-agy: error: %s\n' "$*" >&2; exit 1; }
+warn() { printf 'ai-agy: warning: %s\n' "$*" >&2; }
+note() { printf '%s\n' "$*" >&2; }
+
+need() { command -v "$1" >/dev/null 2>&1 || die "$1 is required but not installed."; }
+need jq
+need timeout
+
+resolve_cli() {
+  if [ "$AGY_CLI" != "agy" ]; then
+    [ -x "$AGY_CLI" ] || die "local_dependency_unavailable: AI_AGY_CLI is not executable: $AGY_CLI"
+    printf '%s' "$AGY_CLI"; return 0
+  fi
+  if command -v agy >/dev/null 2>&1; then
+    command -v agy; return 0
+  fi
+  if [ -n "${LOCALAPPDATA:-}" ]; then
+    local win_cli
+    if command -v cygpath >/dev/null 2>&1; then
+      win_cli="$(cygpath -u "$LOCALAPPDATA")/agy/bin/agy.exe"
+    else
+      win_cli="$LOCALAPPDATA/agy/bin/agy.exe"
+    fi
+    if [ -x "$win_cli" ]; then
+      printf '%s' "$win_cli"; return 0
+    fi
+  fi
+  die "local_dependency_unavailable: Google Antigravity CLI 'agy' not found on PATH.
+This is not a model-provider fault. Install Google Antigravity CLI (or set AI_AGY_CLI
+to its absolute path), then re-run. Presence probe: ai-agy doctor"
+}
+
+# ---------------------------------------------------------------------------
+# ask -- one-shot headless prompt via `agy --print`.
+# ---------------------------------------------------------------------------
+cmd_ask() {
+  local prompt="" mode="$DEFAULT_MODE" model="" effort="" json_out=0 cwd="" arg
+  while [ $# -gt 0 ]; do
+    arg="$1"; shift
+    case "$arg" in
+      --mode)
+        [ $# -gt 0 ] || die "--mode requires a value"
+        mode="$1"; shift
+        ;;
+      --model)
+        [ $# -gt 0 ] || die "--model requires a value"
+        model="$1"; shift
+        ;;
+      --effort)
+        [ $# -gt 0 ] || die "--effort requires a value"
+        effort="$1"; shift
+        ;;
+      --json-output) json_out=1 ;;
+      --cwd)
+        [ $# -gt 0 ] || die "--cwd requires a value"
+        cwd="$1"; shift
+        ;;
+      --yolo|--dangerously-skip-permissions|--never-ask)
+        die "$arg is refused: this wrapper never auto-approves from caller input. Use --mode plan (default, read-only), accept-edits, or auto."
+        ;;
+      -*) die "unknown ask option: $arg (accepted: --mode, --model, --effort, --cwd, --json-output)" ;;
+      *)  [ -z "$prompt" ] || die "only one positional prompt is allowed"
+          prompt="$arg" ;;
+    esac
+  done
+  [ -n "$prompt" ] || die "no prompt given. Usage: ai-agy ask \"<prompt>\" [--mode plan|accept-edits|auto] [--model MODEL] [--effort low|medium|high|xhigh|max] [--cwd DIR] [--json-output]"
+
+  case "$mode" in
+    plan|accept-edits|auto) ;;
+    *) die "unknown --mode: $mode (accepted: plan, accept-edits, auto)" ;;
+  esac
+
+  if [ -n "$effort" ]; then
+    case "$effort" in
+      low|medium|high|xhigh|max) ;;
+      *) die "unknown --effort: $effort (accepted: low, medium, high, xhigh, max)" ;;
+    esac
+  fi
+
+  local cli rc
+  cli="$(resolve_cli)"
+  local -a argv=(--print --mode "$mode" --print-timeout "${ASK_TIMEOUT}s")
+  [ -n "$model" ] && argv+=(--model "$model")
+  [ -n "$effort" ] && argv+=(--effort "$effort")
+  if [ "$json_out" = 1 ]; then
+    argv+=(--output-format json)
+  else
+    argv+=(--output-format text)
+  fi
+  argv+=("$prompt")
+
+  out="$(mktemp)"; err="$(mktemp)"
+  trap 'rm -f "$out" "$err"' EXIT
+  rc=0
+  ( cd "${cwd:-$(pwd)}" && timeout "$ASK_TIMEOUT"s "$cli" "${argv[@]}" ) >"$out" 2>"$err" || rc=$?
+
+  if [ "$rc" -eq 124 ]; then
+    die "ask timed out after ${ASK_TIMEOUT}s (ceiling: AI_AGY_ASK_TIMEOUT). The provider may still be running; no answer was parsed."
+  fi
+  if [ "$rc" -ne 0 ]; then
+    cat "$err" >&2 || true
+    die "agy CLI exited $rc. First stderr lines above; full stderr was kept out of the answer stream."
+  fi
+
+  # Completion honesty: empty stdout is a failed run, not a silent success.
+  if ! [ -s "$out" ]; then
+    head -5 "$err" >&2 || true
+    die "agy produced an empty answer. Treat as incomplete."
+  fi
+
+  if [ "$json_out" = 1 ]; then
+    if jq -e 'type=="object"' "$out" >/dev/null 2>&1; then
+      cat "$out"
+    else
+      jq -n --rawfile r "$out" '{response:$r}'
+    fi
+  else
+    cat "$out"
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# doctor -- presence, config, managed state.
+# ---------------------------------------------------------------------------
+cmd_doctor() {
+  local live=0
+  [ "${1:-}" = "--live" ] && live=1
+  [ $# -eq 0 ] || [ "$live" = 1 ] || die "unknown doctor argument: $1 (accepted: --live)"
+
+  local fail=0
+  echo "ai-agy doctor"
+
+  local cli_path=""
+  if cli_path="$(resolve_cli 2>/dev/null)"; then
+    echo "  cli           : ok ($cli_path)"
+  else
+    echo "  cli           : absent (warning) -- install Google Antigravity CLI (agy)"
+  fi
+
+  local mcp_cfg="$AGY_HOME/mcp_config.json"
+  if [ -f "$mcp_cfg" ]; then
+    if jq -e 'type=="object"' "$mcp_cfg" >/dev/null 2>&1; then
+      echo "  mcp_config    : parses ok ($mcp_cfg)"
+      local mcp_count
+      mcp_count="$(jq '(.mcpServers // {}) | length' "$mcp_cfg")"
+      echo "    mcp servers  : $mcp_count ($(jq -r '(.mcpServers // {}) | keys | join(", ")' "$mcp_cfg"))"
+    else
+      echo "  mcp_config    : DOES NOT PARSE ($mcp_cfg) -- run bin/configure-antigravity-mcps.ps1"
+      fail=1
+    fi
+  else
+    echo "  mcp_config    : absent ($mcp_cfg) -- run bin/configure-antigravity-mcps.ps1"
+    fail=1
+  fi
+
+  local skills_dir="$AGY_HOME/skills" managed_count=""
+  if [ -d "$skills_dir" ]; then
+    managed_count="$(find "$skills_dir" -maxdepth 2 -name .ai-devops-managed -type f 2>/dev/null | wc -l | tr -d ' ')"
+    echo "  skills        : managed dir with $managed_count managed marker(s)"
+  else
+    echo "  skills        : no $skills_dir -- re-run install-ai-devops-windows.ps1"
+    fail=1
+  fi
+
+  if [ -f "$AGY_HOME/AGENTS.md" ]; then
+    echo "  globals       : $AGY_HOME/AGENTS.md present"
+  else
+    echo "  globals       : missing $AGY_HOME/AGENTS.md -- re-run install-ai-devops-windows.ps1 (or ai-adopt-globals)"
+    fail=1
+  fi
+
+  local hooks_cfg="$AGY_HOME/hooks.json"
+  if [ -f "$hooks_cfg" ]; then
+    if jq -e 'type=="object"' "$hooks_cfg" >/dev/null 2>&1; then
+      local hook_names
+      hook_names="$(jq -r 'keys | join(", ")' "$hooks_cfg")"
+      echo "  hooks         : parses ok (${hook_names:-none})"
+    else
+      echo "  hooks         : DOES NOT PARSE ($hooks_cfg)"
+      fail=1
+    fi
+  else
+    echo "  hooks         : absent (optional; run ai-install-completion-check-hook --client antigravity)"
+  fi
+
+  if [ "$live" = 1 ]; then
+    echo "  live probe    : running one bounded ask..."
+    if cmd_ask "Reply with the single word OK" >/dev/null; then
+      echo "  live probe    : ok (authenticated, model answered)"
+    else
+      echo "  live probe    : FAILED"
+      fail=1
+    fi
+  fi
+
+  [ "$fail" = 0 ] || { note "doctor: at least one check failed."; exit 1; }
+  echo "  all checks green"
+}
+
+cmd_version() {
+  local cli_v="unknown" cli_path=""
+  if cli_path="$(resolve_cli 2>/dev/null)"; then
+    cli_v="$("$cli_path" --version 2>/dev/null | head -1 || echo unknown)"
+  fi
+  printf 'ai-agy %s; cli: %s\n' "$VERSION" "$cli_v"
+}
+
+usage() {
+  sed -n '2,18p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+}
+
+main() {
+  local cmd="${1:-}"
+  [ $# -gt 0 ] && shift
+  case "$cmd" in
+    ask)    cmd_ask "$@" ;;
+    doctor) cmd_doctor "$@" ;;
+    version|--version|-V) cmd_version ;;
+    -h|--help|help|"") usage; [ -n "$cmd" ] || exit 2 ;;
+    *) die "unknown command: $cmd (accepted: ask, doctor, version)" ;;
+  esac
+}
+
+main "$@"
