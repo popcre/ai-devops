@@ -143,8 +143,9 @@ Historical receipts stay on #2022; do not reopen the trial.
 - Commit only as Albert's verified identity (`git var GIT_COMMITTER_IDENT`),
   staging only owned files (details).
 - **Never push directly to a protected `main`;** branch and PR. DesignFlow
-  goes from Albert's sandbox branch to `develop`, never self-merged.
-- **Albert does not merge — you do,** except DesignFlow or a PR he will
+  goes from Albert's sandbox branch to `develop` and `main` by PR; the AI merges
+  only after the repo's `GATEKEEPER.md` rules are met (owner ruling 2026-11-22).
+- **Albert does not merge — you do,** except a PR he will
   review first (merge steps in details).
 - **Wait on CI with the bounded, event-aware waiter.** Surface a
   failing check or queue ejection immediately, and do independent useful work

@@ -173,8 +173,10 @@ rulings, verbatim: `docs/owner-rulings.md`.
   `docs/deployment.md`.
 - **Never push directly to a protected `main`.** Branch, open a PR, and let
   checks and the merge queue decide (`config/repository-policy.json`).
-  DesignFlow goes from Albert's sandbox branch to `develop`, never self-merged.
-- **Albert does not merge — you do,** except DesignFlow or a PR he said he
+  DesignFlow
+  goes from Albert's sandbox branch to `develop` and `main` by PR; the AI merges
+  only after the repo's `GATEKEEPER.md` rules are met (owner ruling 2026-11-22).
+- **Albert does not merge — you do,** except a PR he said he
   will review first. A prose-only PR merges with plain `gh pr merge` (the
   queue lands it when green) once `bin/ai-doc-safety` passes on the exact
   head. Never `--admin` or `--squash` — the queue refuses them. This

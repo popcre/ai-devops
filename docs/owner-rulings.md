@@ -258,3 +258,14 @@ Same day, on implementation plans, Albert chose the lead-and-helper pairs:
 gpt-6.1 low + Luna high". Plans mark steps `lead-only` or `helper-ok` and
 never name a model; the pairs live in
 `templates/system/model-tier-delegation.md`.
+
+## 2026-11-22 — DesignFlow: AI merges once GATEKEEPER.md rules are met
+
+Albert, in chat: "we're no longer waiting for uma to merge. as long as you
+follow these rules ai can merge on its own." The rules are Uma's release
+checklist, kept verbatim-in-substance in `GATEKEEPER.md` at the root of each of
+the six `popcre/designflow-*` repos. The AI may merge `sandbox-albert` →
+`develop` and `develop` → `main` (PROD) only when every rule there is met and
+evidenced on the PR. Still binding: Uma's prior approval for any change in the
+`designflow` database area; PROD data changes rehearsed on DEV and agreed with
+a second AI reviewer. Supersedes the 2026-10-26 "develop PR simply stays open".
