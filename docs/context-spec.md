@@ -173,16 +173,20 @@ must supply the exact target flag on every deploy, including future releases
 after the declaration is upstream. Generic deploy cannot omit the closed proof;
 other actions and backend's original route remain unchanged.
 
-For a frontend refresh containing only the published `shared-db/` mirror,
-declare `deployment` with `--base HEAD` on the current published
+For a published Frontend or Data Syncing refresh, declare `deployment` with
+`--base HEAD` on the current published
 `sandbox-albert` head before merging. The explicit
 `check --before deploy --published-sandbox-refresh --acknowledge "<owner authorization>"`
 route verifies the exact canonical GitHub heads for `sandbox-albert` and
 `develop`. It requires a clean fast-forward or two-parent merge whose tree
-matches all of published `develop`, and requires the tree outside the mirror
-to match the published sandbox. It checks the committed frontend target,
-enabled Cloud Build sandbox trigger and a successful develop test and build
-with the same application tree. The Docker context excludes the mirror.
+matches all of published `develop`. Frontend requires a mirror-only change,
+the committed release target, and an application build that excludes the mirror.
+Data Syncing allows published application and documentation updates, including
+Markdown handoffs, and the published mirror. It requires unchanged build
+inputs, preserves sandbox changes, and verifies the existing sandbox database
+deployment contract and passing develop unit-test and image-build steps.
+Both routes verify the enabled Cloud Build sandbox trigger and match the
+successful develop build's application files outside the mirror.
 This is a source-only admission for the normal `sandbox-albert` push. The
 deployed revision still needs live proof. Where the maintained canonical
 GitHub ref verifier is unavailable, the admission refuses.
