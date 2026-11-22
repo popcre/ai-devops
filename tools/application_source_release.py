@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Supplemental, read-only proofs for three exact Linux sandbox source releases.
+"""Supplemental, read-only proofs for exact Linux sandbox source releases.
 
 This module cannot approve, deploy, or publish a receipt. Backend deliberately
 does not enter this supplemental path; its existing admission remains unchanged.
@@ -19,7 +19,12 @@ NEW_REPOSITORIES = {
     "popcre/designflow-tracking", "popcre/designflow-frontend",
     "popcre/designflow-item-master",
 }
-REFRESH_REPOSITORY = "popcre/designflow-frontend"
+FRONTEND = "popcre/designflow-frontend"
+DATA_SYNCING = "popcre/designflow-data-syncing"
+REFRESH_TARGETS = {
+    FRONTEND: ("pop-dflow-frontend", "popcre-albert-frontend-sandbox", "popcre-frontend-dev"),
+    DATA_SYNCING: ("pop-dflow-data-syncing", "popcre-albert-sync-sandbox", "popcre-sync-dev"),
+}
 REFRESH_BRANCHES = ("sandbox-albert", "develop")
 MANIFEST = ".ai-devops/application-release-target.json"
 GIT = "/usr/bin/git"
@@ -229,7 +234,7 @@ def remote_ref(root, repo, helper, env, branch="develop"):
 
 
 def refresh_context(root, repo, base, env):
-    require(repo == REFRESH_REPOSITORY and SHA.fullmatch(base), "refresh target or base refused")
+    require(repo in REFRESH_TARGETS and SHA.fullmatch(base), "refresh target or base refused")
     root = Path(root).resolve(strict=True)
     require(Path.cwd().resolve() == root
             and Path(git(root, env, "rev-parse", "--show-toplevel")).resolve() == root,
@@ -267,22 +272,50 @@ def refresh_context(root, repo, base, env):
         require(parents == [sandbox, develop], "refresh must merge only the two published heads")
     require(git(root, env, "rev-parse", f"{head}^{{tree}}") == git(root, env, "rev-parse", f"{develop}^{{tree}}"),
             "refresh tree differs from the exact published develop tree")
-    git(root, env, "diff", "--quiet", sandbox, head, "--", ".", ":(exclude)shared-db")
+    if repo == FRONTEND:
+        git(root, env, "diff", "--quiet", sandbox, head, "--", ".", ":(exclude)shared-db")
+        paths = {}
+    else:
+        paths = {"changed_paths": data_syncing_refresh_paths(root, sandbox, develop, env)}
     config = run([GIT, "-C", str(root), "config", "--null", "--list", "--show-origin"], root, env)
     return {"repository": repo, "head": head, "sandbox-albert": sandbox, "develop": develop,
-            "config_sha256": digest(config)}
+            "config_sha256": digest(config), **paths}
 
 
-def frontend_cloud_proof(root, develop, env):
+def data_syncing_refresh_paths(root, sandbox, develop, env):
+    # The shell policy classifies the full exact delta. Require simple regular
+    # paths here so Git quoting or a file type cannot obscure that classification.
+    raw = run([GIT, "-C", str(root), "diff", "--raw", "-z", "--no-renames",
+               "--ignore-submodules=none", sandbox, develop], root, env)
+    fields = raw.rstrip(b"\0").split(b"\0") if raw else []
+    require(len(fields) % 2 == 0, "malformed refresh path inventory")
+    for header, path in zip(fields[::2], fields[1::2]):
+        old_mode, new_mode, *_ = header[1:].split()
+        require(header.startswith(b":") and {old_mode, new_mode} <= {b"000000", b"100644", b"100755"}
+                and re.fullmatch(rb"[a-zA-Z0-9_./~+@=,\-]+", path),
+                "unclassifiable refresh path or file type")
+    # Even an exact develop tree must not overwrite sandbox-only work.
+    merge_base = git(root, env, "merge-base", "--all", sandbox, develop)
+    require(SHA.fullmatch(merge_base), "unique published merge base unavailable")
+    if merge_base != sandbox:
+        changed = run([GIT, "-C", str(root), "diff", "--name-only", "-z", "--no-renames",
+                       merge_base, sandbox], root, env)
+        if changed:
+            paths = [os.fsdecode(path) for path in changed.rstrip(b"\0").split(b"\0")]
+            git(root, env, "--literal-pathspecs", "diff", "--quiet", sandbox, develop, "--", *paths)
+    git(root, env, "diff", "--quiet", sandbox, develop, "--", "cloudbuild.yaml", "Dockerfile",
+        ".dockerignore", "package.json", "package-lock.json", "scripts/validate-db-deploy-contract.js")
+    return len(fields) // 2
+
+
+def cloud_refresh_proof(root, repo, develop, env):
     import grp
     import pwd  # The maintained exact GitHub ref verifier is Linux-only.
 
-    policy = Path(__file__).resolve().parents[1] / "config/task-gates.json"
-    target = parse(policy.read_bytes())["application_source_releases"][REFRESH_REPOSITORY]["target"]
-    project, region = target["project"], target["region"]
-    connection, source_repo = "popcre", "pop-dflow-frontend"
+    project, region, connection = "lithe-breaker-323913", "us-east4", "popcre"
+    source_repo, sandbox_service, develop_service = REFRESH_TARGETS[repo]
     cloud_repo = f"projects/{project}/locations/{region}/connections/{connection}/repositories/{source_repo}"
-    github = f"https://github.com/{REFRESH_REPOSITORY}.git"
+    github = f"https://github.com/{repo}.git"
     gcloud = public_binary("/usr/bin/gcloud")
     account = pwd.getpwuid(os.getuid())
     home = Path(account.pw_dir).resolve(strict=True)
@@ -305,34 +338,41 @@ def frontend_cloud_proof(root, develop, env):
     settings = parse(run([gcloud, "--quiet", "config", "list",
                           "--format=json(api_endpoint_overrides,core.custom_ca_certs_file,proxy)"], root, child))
     require(not settings, "alternate Cloud Build endpoint, proxy or certificate authority refused")
-    repo = cloud("builds", "repositories", "describe", source_repo, f"--connection={connection}",
-                 "--format=json(name,remoteUri)")
-    require(repo == {"name": cloud_repo, "remoteUri": github}, "Cloud Build source repository differs")
+    linked_repo = cloud("builds", "repositories", "describe", source_repo, f"--connection={connection}",
+                        "--format=json(name,remoteUri)")
+    require(linked_repo == {"name": cloud_repo, "remoteUri": github}, "Cloud Build source repository differs")
     triggers = cloud("builds", "triggers", "list",
                      "--format=json(id,name,disabled,filename,filter,ignoredFiles,includedFiles,repositoryEventConfig,"
-                     "substitutions._SERVICE_NAME,substitutions._APP_ENV,substitutions._REGION)")
+                     "substitutions._SERVICE_NAME,substitutions._APP_ENV,substitutions._REGION,"
+                     "substitutions._DB_PROVIDER,substitutions._DB_NETWORK_PATH,substitutions._DB_SCHEMA,"
+                     "substitutions._DB_EXPECTED_PORT,substitutions._DB_SSL)")
 
-    def trigger_id(branch, service, ignored):
+    def trigger_id(branch, service, ignored, extra=None):
+        substitutions = {"_SERVICE_NAME": service, "_APP_ENV": branch, "_REGION": region, **(extra or {})}
         matches = [entry["id"] for entry in triggers if not entry.get("disabled")
                    and entry.get("name") == service and entry.get("filename") == "cloudbuild.yaml"
                    and not entry.get("filter") and not entry.get("includedFiles")
                    and entry.get("ignoredFiles", []) == ignored
                    and entry.get("repositoryEventConfig") == {"repository": cloud_repo,
                        "repositoryType": "GITHUB", "push": {"branch": f"^{branch}$"}}
-                   and all(entry.get("substitutions", {}).get(key) == value for key, value in {
-                       "_SERVICE_NAME": service, "_APP_ENV": branch, "_REGION": region}.items())]
+                   and all(entry.get("substitutions", {}).get(key) == value for key, value in substitutions.items())]
         require(len(matches) == 1 and re.fullmatch(r"[a-f0-9-]{36}", matches[0]),
                 "exact enabled Cloud Build target is unavailable")
         return matches[0]
 
-    sandbox_trigger = trigger_id(target["branch"], target["service"], [])
-    develop_trigger = trigger_id("develop", "popcre-frontend-dev", ["shared-db/**"])
-    docker_ignore = git(root, env, "show", f"{develop}:.dockerignore").splitlines()
-    require(docker_ignore.count("shared-db") == 1 and not any(line.lstrip().startswith("!") for line in docker_ignore),
-            "frontend build does not exclude the mirrored tree")
-    dockerfile = git(root, env, "show", f"{develop}:Dockerfile").splitlines()
-    require("RUN yarn test" in dockerfile and "RUN yarn build:${NODE_ENV}" in dockerfile,
-            "frontend build lacks its pinned application checks")
+    sandbox_db = None
+    if repo == DATA_SYNCING:
+        sandbox_db = {"_DB_PROVIDER": "supabase", "_DB_NETWORK_PATH": "public-pooler",
+                      "_DB_SCHEMA": "dflow", "_DB_EXPECTED_PORT": "6543", "_DB_SSL": "true"}
+    sandbox_trigger = trigger_id("sandbox-albert", sandbox_service, [], sandbox_db)
+    develop_trigger = trigger_id("develop", develop_service, ["shared-db/**"])
+    if repo == FRONTEND:
+        docker_ignore = git(root, env, "show", f"{develop}:.dockerignore").splitlines()
+        require(docker_ignore.count("shared-db") == 1 and not any(line.lstrip().startswith("!") for line in docker_ignore),
+                "frontend build does not exclude the mirrored tree")
+        dockerfile = git(root, env, "show", f"{develop}:Dockerfile").splitlines()
+        require("RUN yarn test" in dockerfile and "RUN yarn build:${NODE_ENV}" in dockerfile,
+                "frontend build lacks its pinned application checks")
     builds = cloud("builds", "list", "--limit=10", f"--filter=buildTriggerId={develop_trigger} AND status=SUCCESS",
                    "--format=json(id,status,buildTriggerId,sourceProvenance.resolvedGitSource,substitutions.COMMIT_SHA)")
     for entry in builds:
@@ -352,13 +392,25 @@ def frontend_cloud_proof(root, develop, env):
         build = cloud("builds", "describe", build_id, "--format=json(id,status,buildTriggerId,steps)")
         require(build.get("id") == build_id and build.get("status") == "SUCCESS"
                 and build.get("buildTriggerId") == develop_trigger
-                and any(step.get("id") == "Build" and step.get("status") == "SUCCESS"
+                and any(step.get("id") == ("Build" if repo == FRONTEND else "Build the image")
+                        and step.get("status") == "SUCCESS"
                         and step.get("name") == "gcr.io/cloud-builders/docker"
                         and {"build", "."} <= set(step.get("args", [])) for step in build.get("steps", [])),
-                "successful frontend test-and-build step unavailable")
+                "successful application test-and-build step unavailable")
+        if repo == DATA_SYNCING:
+            steps = {step.get("id"): step for step in build.get("steps", [])}
+            checks = {
+                "Validate database deployment contract": ("node", ["scripts/validate-db-deploy-contract.js"]),
+                "Run unit tests": ("sh", ["-c", 'test "$(npm --version)" = "11.19.1" && npm ci --include=dev && npm test']),
+            }
+            for name, (entrypoint, args) in checks.items():
+                step = steps.get(name, {})
+                require(step.get("status") == "SUCCESS" and step.get("name") == "node:24-alpine"
+                        and step.get("entrypoint") == entrypoint and step.get("args") == args,
+                        "Data Syncing database contract or unit test step unavailable")
         return {"sandbox_trigger": sandbox_trigger, "tested_develop_build": build_id,
                 "tested_develop_source": revision}
-    raise ValueError("no successful Cloud Build with the exact frontend application tree")
+    raise ValueError("no successful Cloud Build with the exact application files outside the shared-db mirror")
 
 
 def prove_refresh(root, repo, base, env):
@@ -368,7 +420,7 @@ def prove_refresh(root, repo, base, env):
     for branch in REFRESH_BRANCHES:
         require(remote_ref(root, repo, helper, env, branch) == before[branch],
                 "local refresh parent differs from fresh canonical remote")
-    cloud = frontend_cloud_proof(root, before["develop"], env)
+    cloud = cloud_refresh_proof(root, repo, before["develop"], env)
     after = refresh_context(root, repo, base, env)
     _, closure_after = installed_helper(root, env)
     require(before == after and closure == closure_after, "refresh source or helper moved during proof")

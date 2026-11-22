@@ -128,7 +128,7 @@ class ReleaseProof(unittest.TestCase):
             return value() if callable(value) else value
         with patch.object(release, "installed_helper", return_value=(Path("/fixture/managed-ai-gh"), {"source": "fixed"})), \
                 patch.object(release, "remote_ref", side_effect=exact_ref), \
-                patch.object(release, "frontend_cloud_proof", return_value={"sandbox_trigger": "fixed"}):
+                patch.object(release, "cloud_refresh_proof", return_value={"sandbox_trigger": "fixed"}):
             yield seen
 
     def test_published_frontend_merge_uses_both_fresh_canonical_refs(self):
@@ -145,6 +145,57 @@ class ReleaseProof(unittest.TestCase):
         with self.refresh_api(refs):
             proof = release.prove_refresh(self.root, repo, refs["sandbox-albert"], self.env)
         self.assertEqual(proof["head"], refs["develop"])
+
+    def test_data_syncing_refresh_allows_only_unmodified_published_tree(self):
+        repo = release.DATA_SYNCING
+        refs = self.prepare_refresh(repo, fast_forward=True)
+        self.g("checkout", "-q", "develop")
+        (self.root / "app.js").write_text("// published application update\n")
+        (self.root / "HANDOFF.d").mkdir()
+        (self.root / "HANDOFF.d/published.md").write_text("# Published handoff\n")
+        self.g("add", ".")
+        self.g("commit", "-qm", "published Data Syncing source")
+        develop = self.g("rev-parse", "HEAD")
+        refs["develop"] = develop
+        self.g("update-ref", "refs/remotes/origin/develop", develop)
+        self.g("checkout", "-q", "--detach", develop)
+        with self.refresh_api(refs):
+            proof = release.prove_refresh(self.root, repo, refs["sandbox-albert"], self.env)
+        self.assertEqual(proof["head"], develop)
+        (self.root / "app.js").write_text("// local alteration\n")
+        self.g("add", "app.js")
+        self.g("commit", "-qm", "not a published refresh")
+        with self.assertRaisesRegex(ValueError, "merge only the two published heads"):
+            release.refresh_context(self.root, repo, refs["sandbox-albert"], self.env)
+
+    def test_data_syncing_refresh_refuses_to_drop_sandbox_changes(self):
+        repo = release.DATA_SYNCING
+        refs = self.prepare_refresh(repo)
+        self.g("checkout", "-q", "--detach", refs["sandbox-albert"])
+        (self.root / "sandbox-only.md").write_text("# Concurrent sandbox work\n")
+        self.g("add", ".")
+        self.g("commit", "-qm", "concurrent sandbox work")
+        sandbox = self.g("rev-parse", "HEAD")
+        self.g("update-ref", "refs/remotes/origin/sandbox-albert", sandbox)
+        develop = refs["develop"]
+        altered = self.g("commit-tree", f"{develop}^{{tree}}", "-p", sandbox, "-p", develop,
+                         "-m", "discarded sandbox work")
+        self.g("checkout", "-q", "--detach", altered)
+        with self.assertRaises(ValueError):
+            release.refresh_context(self.root, repo, sandbox, self.env)
+
+    def test_data_syncing_refresh_refuses_non_regular_files(self):
+        repo = release.DATA_SYNCING
+        refs = self.prepare_refresh(repo, fast_forward=True)
+        self.g("checkout", "-q", "develop")
+        (self.root / "symlink.js").symlink_to("app.js")
+        self.g("add", ".")
+        self.g("commit", "-qm", "published non-regular input")
+        develop = self.g("rev-parse", "HEAD")
+        self.g("update-ref", "refs/remotes/origin/develop", develop)
+        self.g("checkout", "-q", "--detach", develop)
+        with self.assertRaisesRegex(ValueError, "unclassifiable refresh path or file type"):
+            release.refresh_context(self.root, repo, refs["sandbox-albert"], self.env)
 
     def test_local_edits_in_merge_or_worktree_are_refused(self):
         repo = "popcre/designflow-frontend"
@@ -194,10 +245,19 @@ class ReleaseProof(unittest.TestCase):
             release.refresh_context(self.root, repo, refs["sandbox-albert"], self.env)
 
     def test_native_refresh_keeps_action_and_archive_guards(self):
-        repo = "popcre/designflow-frontend"
+        self.verify_native_refresh_refusal(release.FRONTEND, "unapproved-chat.jsonl", b"raw transcript")
+
+    def test_data_syncing_refresh_refuses_archives(self):
+        self.verify_native_refresh_refusal(release.DATA_SYNCING, "unapproved-chat.jsonl", b"raw transcript")
+
+    def test_data_syncing_refresh_refuses_application_owned_structure(self):
+        self.verify_native_refresh_refusal(release.DATA_SYNCING, "supabase/application-owned.sql",
+                                           b"protected contributor")
+
+    def verify_native_refresh_refusal(self, repo, path, expected):
         refs = self.prepare_refresh(repo)
         self.g("checkout", "-q", "develop")
-        (self.root / "unapproved-chat.jsonl").write_text("{}\n")
+        (self.root / path).write_text("synthetic test fixture\n")
         self.g("add", ".")
         self.g("commit", "-qm", "synthetic raw archive path")
         develop = self.g("rev-parse", "HEAD")
@@ -211,25 +271,29 @@ class ReleaseProof(unittest.TestCase):
         self.assertEqual(start.returncode, 0, start.stderr.decode())
         self.g("merge", "-q", "--no-edit", "--no-ff", develop)
         args = ["--published-sandbox-refresh", "--acknowledge", "synthetic owner instruction"]
-        for action, failure in [("production", b"requires deployment"), ("deploy", b"raw transcript")]:
+        for action, failure in [("production", b"requires deployment"), ("database", b"requires deployment"),
+                                ("deploy", expected)]:
             checked = subprocess.run(command + ["check", "--before", action] + args,
                                      cwd=self.root, env=env, capture_output=True)
             self.assertEqual(checked.returncode, 3, checked.stderr.decode())
             self.assertIn(failure, checked.stderr)
 
     def test_frontend_refresh_cloud_trigger_and_test_build_are_required(self):
-        repo = "popcre/designflow-frontend"
+        self.verify_refresh_cloud(release.FRONTEND)
+
+    def test_data_syncing_requires_the_exact_cloud_trigger_and_both_prior_checks(self):
+        self.verify_refresh_cloud(release.DATA_SYNCING)
+
+    def verify_refresh_cloud(self, repo):
         self.prepare_refresh(repo, fast_forward=True)
         (self.root / ".dockerignore").write_text("shared-db\n")
         (self.root / "Dockerfile").write_text("RUN yarn test\nRUN yarn build:${NODE_ENV}\n")
         self.g("add", ".")
         self.g("commit", "-qm", "published application test build inputs")
         develop = self.g("rev-parse", "HEAD")
-        toolkit = Path(__file__).resolve().parents[1]
-        policy = json.loads((toolkit / "config/task-gates.json").read_text())
-        target = policy["application_source_releases"][repo]["target"]
-        project, region = target["project"], target["region"]
-        linked = f"projects/{project}/locations/{region}/connections/popcre/repositories/pop-dflow-frontend"
+        project, region = "lithe-breaker-323913", "us-east4"
+        source, sandbox_service, develop_service = release.REFRESH_TARGETS[repo]
+        linked = f"projects/{project}/locations/{region}/connections/popcre/repositories/{source}"
         github = f"https://github.com/{repo}.git"
         develop_trigger = "a" * 36
         sandbox_trigger = "b" * 36
@@ -240,13 +304,24 @@ class ReleaseProof(unittest.TestCase):
                                               "push": {"branch": f"^{branch}$"}},
                     "ignoredFiles": ignored, "substitutions": {
                         "_REGION": region, "_APP_ENV": branch, "_SERVICE_NAME": service}}
-        sandbox = trigger(sandbox_trigger, "sandbox-albert", target["service"], [])
-        development = trigger(develop_trigger, "develop", "popcre-frontend-dev", ["shared-db/**"])
+        sandbox = trigger(sandbox_trigger, "sandbox-albert", sandbox_service, [])
+        development = trigger(develop_trigger, "develop", develop_service, ["shared-db/**"])
         build = {"id": build_id, "status": "SUCCESS", "buildTriggerId": develop_trigger,
                  "sourceProvenance": {"resolvedGitSource": {"url": github, "revision": develop}},
                  "substitutions": {"COMMIT_SHA": develop}, "steps": [
                      {"id": "Build", "name": "gcr.io/cloud-builders/docker",
                       "status": "SUCCESS", "args": ["build", "."]}]}
+        if repo == release.DATA_SYNCING:
+            sandbox["substitutions"].update(
+                _DB_PROVIDER="supabase", _DB_NETWORK_PATH="public-pooler", _DB_SCHEMA="dflow",
+                _DB_EXPECTED_PORT="6543", _DB_SSL="true")
+            build["steps"][0]["id"] = "Build the image"
+            build["steps"].extend([
+                {"id": "Validate database deployment contract", "name": "node:24-alpine",
+                 "status": "SUCCESS", "entrypoint": "node", "args": ["scripts/validate-db-deploy-contract.js"]},
+                {"id": "Run unit tests", "name": "node:24-alpine", "status": "SUCCESS", "entrypoint": "sh",
+                 "args": ["-c", 'test "$(npm --version)" = "11.19.1" && npm ci --include=dev && npm test']},
+            ])
         responses = {
             ("config", "list"): None,
             ("builds", "repositories"): {"name": linked, "remoteUri": github},
@@ -268,18 +343,29 @@ class ReleaseProof(unittest.TestCase):
                 patch.object(release, "run", side_effect=boundary):
             supplied = {**self.env, "HTTPS_PROXY": "fixture.invalid", "CLOUDSDK_CONFIG": "/foreign",
                         "SSL_CERT_DIR": "/foreign", "GOOGLE_APPLICATION_CREDENTIALS": "/foreign"}
-            self.assertEqual(release.frontend_cloud_proof(self.root, develop, supplied),
+            self.assertEqual(release.cloud_refresh_proof(self.root, repo, develop, supplied),
                              {"sandbox_trigger": sandbox_trigger, "tested_develop_build": build_id,
                               "tested_develop_source": develop})
             build["steps"][0]["status"] = "FAILURE"
             with self.assertRaisesRegex(ValueError, "test-and-build step unavailable"):
-                release.frontend_cloud_proof(self.root, develop, self.env)
+                release.cloud_refresh_proof(self.root, repo, develop, self.env)
+            build["steps"][0]["status"] = "SUCCESS"
+            if repo == release.DATA_SYNCING:
+                for step in build["steps"][1:]:
+                    step["status"] = "FAILURE"
+                    with self.assertRaisesRegex(ValueError, "database contract or unit test step unavailable"):
+                        release.cloud_refresh_proof(self.root, repo, develop, self.env)
+                    step["status"] = "SUCCESS"
+                sandbox["substitutions"]["_DB_SCHEMA"] = "dflow_prod"
+                with self.assertRaisesRegex(ValueError, "enabled Cloud Build target is unavailable"):
+                    release.cloud_refresh_proof(self.root, repo, develop, self.env)
+                sandbox["substitutions"]["_DB_SCHEMA"] = "dflow"
             sandbox["disabled"] = True
             with self.assertRaisesRegex(ValueError, "enabled Cloud Build target is unavailable"):
-                release.frontend_cloud_proof(self.root, develop, self.env)
+                release.cloud_refresh_proof(self.root, repo, develop, self.env)
             responses[("config", "list")] = {"proxy": {"address": "fixture.invalid"}}
             with self.assertRaisesRegex(ValueError, "alternate Cloud Build endpoint, proxy"):
-                release.frontend_cloud_proof(self.root, develop, self.env)
+                release.cloud_refresh_proof(self.root, repo, develop, self.env)
 
     def test_native_additive_contributor_proofs_include_ui_and_code(self):
         source = (Path(__file__).resolve().parents[1] / "bin/ai-task-gates").read_text()
