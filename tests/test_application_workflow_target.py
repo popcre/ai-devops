@@ -183,6 +183,48 @@ class BoundedAcceptanceTarget(ClosedRecoveryTarget):
             self.assertEqual(TARGET.main(), 1)
 
 
+class BoundedDesignFlowQATarget(ClosedRecoveryTarget):
+    def setUp(self):
+        super().setUp()
+        subprocess.run(["git", "init", "-q", str(self.root)], check=True)
+        subprocess.run(["git", "-C", str(self.root), "-c", "user.name=Test",
+                        "-c", "user.email=test@example.invalid", "commit", "--allow-empty", "-qm", "base"], check=True)
+        self.head = subprocess.check_output(["git", "-C", str(self.root), "rev-parse", "HEAD"], text=True).strip()
+
+    def declaration(self, name):
+        target = copy.deepcopy(TARGET.DESIGNFLOW_QA_TARGETS[name])
+        target.update({
+            "fixture_prefix": f"AI-QA-20261121-{name}-abcdef123456-",
+            "source_head": self.head,
+            "expires_at": (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=30)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "bindings": {key: "a" * 64 for key in target["private_binding_keys"]},
+        })
+        return target
+
+    def test_all_three_exact_sandbox_profiles_are_admitted(self):
+        for name in TARGET.DESIGNFLOW_QA_TARGETS:
+            with self.subTest(scope=name):
+                self.assertEqual(self.validate(self.declaration(name)), 0)
+
+    def test_profiles_reject_expiry_route_scope_binding_and_production_changes(self):
+        for name in TARGET.DESIGNFLOW_QA_TARGETS:
+            declaration = self.declaration(name)
+            mutations = [
+                ("api_origin", "https://api.designflow.app/api/tracking"),
+                ("service", "popcre-albert-core-prod"),
+                ("routes", declaration["routes"] + ["POST /unlisted"]),
+                ("expires_at", "2026-11-20T00:00:00Z"),
+                ("bindings", {**declaration["bindings"], "extra": "a" * 64}),
+                ("bindings", {**declaration["bindings"], next(iter(declaration["bindings"])): "bad"}),
+                ("fixture_prefix", f"AI-QA-20261121-other-abcdef123456-"),
+            ]
+            for field, changed in mutations:
+                with self.subTest(scope=name, field=field):
+                    candidate = copy.deepcopy(declaration)
+                    candidate[field] = changed
+                    self.assertEqual(self.validate(candidate), 1)
+
+
 class BoundedLegacyProofTarget(BoundedAcceptanceTarget):
     def setUp(self):
         super().setUp()

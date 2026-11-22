@@ -915,11 +915,15 @@ application_release_finish(){ # EFFECTIVE_CLASS
 # Ordinary application-owned rows use an authenticated application workflow,
 # never the SQL/structure or cloud-action gates. This is deliberately one target.
 application_workflow_finish(){ # MANIFEST EFFECTIVE_CLASS
-  local manifest="$1" effective="$2" head blob summary reason state py
-  [ "$IDENTITY" = popcre/designflow-backend ] \
-    || blocked 'ai-task-gates: STOP. Application workflow requires canonical popcre/designflow-backend.'
+  local manifest="$1" effective="$2" head blob summary reason state py expected_origin
+  case "$IDENTITY" in
+    popcre/designflow-backend) expected_origin=designflow-backend ;;
+    popcre/designflow-tracking) expected_origin=designflow-tracking ;;
+    popcre/designflow-item-master) expected_origin=designflow-item-master ;;
+    *) blocked 'ai-task-gates: STOP. Application workflow requires a canonical DesignFlow application repository.' ;;
+  esac
   case "$(git -C "$TOPLEVEL" remote get-url origin 2>/dev/null)" in
-    https://github.com/popcre/designflow-backend|https://github.com/popcre/designflow-backend.git|git@github.com:popcre/designflow-backend|git@github.com:popcre/designflow-backend.git|ssh://git@github.com/popcre/designflow-backend|ssh://git@github.com/popcre/designflow-backend.git) ;;
+    "https://github.com/popcre/$expected_origin"|"https://github.com/popcre/$expected_origin.git"|"git@github.com:popcre/$expected_origin"|"git@github.com:popcre/$expected_origin.git"|"ssh://git@github.com/popcre/$expected_origin"|"ssh://git@github.com/popcre/$expected_origin.git") ;;
     *) blocked 'ai-task-gates: STOP. Application workflow origin is not canonical.' ;;
   esac
   case "$effective" in reviewer-safety|ui-live-workflow) ;; *) blocked 'ai-task-gates: STOP. Application workflow requires reviewer-safety or ui-live-workflow; stronger/private classes stay sealed.' ;; esac
@@ -946,7 +950,7 @@ application_workflow_finish(){ # MANIFEST EFFECTIVE_CLASS
     && "$py" "$REAL_DIR/../tools/application_workflow_target.py" "$TOPLEVEL" "$manifest" \
     && [ "$(application_release_file_blob "$manifest")" = "$blob" ] \
     || blocked 'ai-task-gates: STOP. Application workflow source or review changed during admission.'
-  printf 'ai-task-gates: authenticated HTS sandbox workflow may start; no SQL, cloud mutation, manual promotion, operative Apply/Save or production action is admitted.\n'
+  printf 'ai-task-gates: authenticated, bounded sandbox application workflow may start; no SQL, cloud mutation, manual promotion, operative Apply/Save or production action is admitted.\n'
 }
 
 # A small owner-requested entry is optional history only (owner ruling

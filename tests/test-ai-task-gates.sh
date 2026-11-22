@@ -1972,6 +1972,31 @@ check 'workflow cannot omit explicit target' "rc 3 '$WF' check --before applicat
 check 'workflow cannot override base' "rc 3 '$WF' check $WF_ARGS --base HEAD --reviewer-approval '$WF_APPROVAL'"
 check 'workflow needs no reviewer approval (#2041)' "rc 0 '$WF' check $WF_ARGS"
 check 'workflow ignores a non-independent or untested report (review is advisory)' "rc 0 '$WF' check $WF_ARGS --reviewer-approval \"\$(appr '$WF' application-workflow '$WF_HEAD' '.tests=null')\""
+for QA_REPO in popcre/designflow-tracking popcre/designflow-item-master; do
+  QA_DIR="$TMP/qa-${QA_REPO##*/}"
+  newrepo "$QA_DIR" "$QA_REPO"
+  (cd "$QA_DIR" && "$GATES" start --class reviewer-safety >/dev/null)
+  mkdir -p "$QA_DIR/.ai-devops"
+  python3 - "$ROOT" "$QA_DIR" "${QA_REPO##*/}" <<'PY'
+import datetime, importlib.util, json, pathlib, subprocess, sys
+spec = importlib.util.spec_from_file_location('target', sys.argv[1] + '/tools/application_workflow_target.py')
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+name = 'tracking-photo-removal' if sys.argv[3] == 'designflow-tracking' else 'item-master-teams-delivery'
+target = dict(mod.DESIGNFLOW_QA_TARGETS[name])
+target.update({
+  'fixture_prefix': 'AI-QA-' + datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%d') + '-' + name + '-abcdef123456-',
+  'source_head': subprocess.check_output(['git', '-C', sys.argv[2], 'rev-parse', 'HEAD'], text=True).strip(),
+  'expires_at': (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=30)).strftime('%Y-%m-%dT%H:%M:%SZ'),
+  'bindings': {key: 'a' * 64 for key in target['private_binding_keys']},
+})
+pathlib.Path(sys.argv[2] + '/.ai-devops/application-workflow-target.json').write_text(json.dumps(target))
+PY
+  git -C "$QA_DIR" add .ai-devops/application-workflow-target.json
+  git -C "$QA_DIR" commit -qm 'declare bounded DesignFlow sandbox QA'
+  check "bounded QA admission succeeds for $QA_REPO" "rc 0 '$QA_DIR' check --before application-workflow --application-workflow-target .ai-devops/application-workflow-target.json"
+done
+check 'unrelated repository cannot use DesignFlow QA admission' "rc 3 '$TMP/class' check --before application-workflow --application-workflow-target .ai-devops/application-workflow-target.json"
 cp "$WF/.ai-devops/application-workflow-target.json" "$TMP/wf-original"
 python3 - "$ROOT" "$WF" <<'PY'
 import datetime, importlib.util, json, pathlib, subprocess, sys
@@ -2339,7 +2364,7 @@ cp "$TMP/wf-original" "$WF/.ai-devops/application-workflow-target.json"
 git -C "$WF" remote set-url origin https://github.com/popcre/other.git
 check 'workflow refuses foreign origin before reaching admission' "rc 4 '$WF' check $WF_ARGS --reviewer-approval '$WF_APPROVAL'"
 (cd "$WF" && "$GATES" start --class reviewer-safety >/dev/null)
-check 'workflow refuses declared foreign repository at canonical identity check' "out '$WF' check $WF_ARGS --reviewer-approval '$WF_APPROVAL' | grep -q 'requires canonical popcre/designflow-backend'"
+check 'workflow refuses declared foreign repository at canonical identity check' "out '$WF' check $WF_ARGS --reviewer-approval '$WF_APPROVAL' | grep -q 'requires a canonical DesignFlow application repository'"
 git -C "$WF" remote set-url origin https://github.com/popcre/designflow-backend.git
 (cd "$WF" && "$GATES" start --class production >/dev/null)
 check 'workflow refuses stronger production class' "rc 3 '$WF' check $WF_ARGS --reviewer-approval '$WF_APPROVAL'"

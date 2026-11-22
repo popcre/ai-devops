@@ -54,6 +54,106 @@ RECOVERY_TARGET = {
     },
 }
 
+# These three time-limited declarations authorize only the existing DesignFlow
+# sandbox proofs. The hashes bind private fixture IDs, recipient/group identity,
+# and cleanup IDs without placing those identifiers in GitHub source.
+DESIGNFLOW_QA_TARGETS = {
+    "tracking-photo-removal": {
+        "schema_version": 1,
+        "repository": "popcre/designflow-tracking",
+        "issue": "https://github.com/popcre/designflow-tracking/issues/214",
+        "route": "authenticated-application-http",
+        "api_origin": "https://api.sandbox-albert.designflow.app/api/tracking",
+        "project": "lithe-breaker-323913",
+        "region": "us-east4",
+        "service": "popcre-albert-tracking-sandbox",
+        "scope": "tracking-photo-removal",
+        "routes": [
+            "POST /sample/guided-create",
+            "POST /sample/getPreSignedUrl",
+            "POST /sample/setObjectPublic",
+            "POST /sample/photos",
+            "GET /sample/:id/photos",
+            "DELETE /sample/photos/:attId",
+            "POST /sample/qa-fixtures/cleanup",
+        ],
+        "limits": {
+            "synthetic_only": True,
+            "maximum_fixtures": 1,
+            "maximum_photos": 1,
+            "maximum_photo_delete_attempts": 3,
+            "existing_records_read_only": True,
+            "messages": False,
+        },
+        "forbidden": ["production", "direct-sql", "schema", "real-records",
+                      "unlisted-route", "cleanup-outside-fixture"],
+        "private_binding_keys": ["actor_sha256", "sample_id_sha256",
+                                  "photo_id_sha256", "cleanup_ids_sha256"],
+    },
+    "tracking-reminder-retry": {
+        "schema_version": 1,
+        "repository": "popcre/designflow-tracking",
+        "issue": "https://github.com/popcre/designflow-tracking/issues/212",
+        "route": "authenticated-application-http",
+        "api_origin": "https://api.sandbox-albert.designflow.app/api/tracking",
+        "project": "lithe-breaker-323913",
+        "region": "us-east4",
+        "service": "popcre-albert-tracking-sandbox",
+        "scope": "tracking-reminder-retry",
+        "routes": [
+            "POST /prod-tracking/qa-fixtures",
+            "POST /prod-tracking/qa-fixtures/:fixtureId/run",
+            "POST /prod-tracking/qa-fixtures/:fixtureId/cleanup",
+        ],
+        "limits": {
+            "synthetic_only": True,
+            "maximum_fixtures": 1,
+            "maximum_schedule_rows": 1,
+            "maximum_factory_emails": 1,
+            "maximum_simulated_rejections": 1,
+            "maximum_retries": 1,
+            "in_app_notifications_idempotent": True,
+            "existing_records_read_only": True,
+        },
+        "forbidden": ["production", "direct-sql", "schema", "real-records",
+                      "broad-overdue-scan", "unlisted-recipient", "cleanup-outside-fixture"],
+        "private_binding_keys": ["actor_sha256", "order_id_sha256",
+                                  "schedule_id_sha256", "recipient_sha256",
+                                  "cleanup_ids_sha256"],
+    },
+    "item-master-teams-delivery": {
+        "schema_version": 1,
+        "repository": "popcre/designflow-item-master",
+        "issue": "https://github.com/popcre/designflow-item-master/issues/262",
+        "route": "authenticated-application-http",
+        "api_origin": "https://api.sandbox-albert.designflow.app/api/item_master",
+        "project": "lithe-breaker-323913",
+        "region": "us-east4",
+        "service": "popcre-albert-item-sandbox",
+        "scope": "item-master-teams-delivery",
+        "routes": [
+            "POST /lib/createItem",
+            "POST /detail/AddLicensingStatus",
+            "POST /detail/UpdateLicensingStatus",
+            "POST /detail/DeleteLicensingStatus",
+        ],
+        "limits": {
+            "synthetic_only": True,
+            "maximum_items": 1,
+            "maximum_licensing_status_writes": 1,
+            "maximum_teams_messages": 1,
+            "test_prefix_required": True,
+            "recipient_set_must_match": True,
+            "existing_records_read_only": True,
+        },
+        "forbidden": ["production", "direct-sql", "schema", "real-records",
+                      "unlisted-recipient", "unlisted-group", "cleanup-outside-fixture"],
+        "private_binding_keys": ["actor_sha256", "item_id_sha256",
+                                  "licensing_status_id_sha256", "teams_group_sha256",
+                                  "recipient_set_sha256", "cleanup_ids_sha256"],
+    },
+}
+
 # This declaration is admission metadata, never an HTTP credential or executor.
 # Every write must independently prove that its record is a declared synthetic
 # fixture. Existing business records are read-only under this profile.
@@ -607,10 +707,11 @@ def common_sense_development_proof(value, root):
     return bounded_metadata(value, root, maximum_hours=1)
 
 
-def bounded_metadata(value, root, synthetic=True, maximum_hours=24):
+def bounded_metadata(value, root, synthetic=True, maximum_hours=24,
+                     repository="popcre/designflow-backend"):
     """Shared source, issue, prefix and expiry checks for bounded profiles."""
     if not isinstance(value["issue"], str) or not re.fullmatch(
-            r"https://github\.com/popcre/designflow-backend/issues/[1-9][0-9]*", value["issue"]):
+            r"https://github\.com/" + re.escape(repository) + r"/issues/[1-9][0-9]*", value["issue"]):
         return False
     if synthetic and (not isinstance(value["fixture_prefix"], str) or not re.fullmatch(
             r"AI-QA-[0-9]{8}-[a-z0-9][a-z0-9-]{0,39}-", value["fixture_prefix"])):
@@ -637,6 +738,31 @@ def bounded_metadata(value, root, synthetic=True, maximum_hours=24):
         return result.returncode == 0
     except (OSError, ValueError, subprocess.TimeoutExpired):
         return False
+
+
+def bounded_designflow_qa(value, root):
+    """Admit only one expiring, exact issue-specific DesignFlow QA declaration."""
+    if not isinstance(value, dict):
+        return False
+    dynamic = {"fixture_prefix", "source_head", "expires_at", "bindings"}
+    for name, target in DESIGNFLOW_QA_TARGETS.items():
+        if value.keys() != target.keys() | dynamic:
+            continue
+        if any(not exact(value[key], expected) for key, expected in target.items()):
+            continue
+        if not isinstance(value["bindings"], dict) or value["bindings"].keys() != set(target["private_binding_keys"]):
+            continue
+        if not all(isinstance(item, str) and re.fullmatch(r"[a-f0-9]{64}", item)
+                   for item in value["bindings"].values()):
+            continue
+        if not bounded_metadata(value, root, maximum_hours=1,
+                                repository=target["repository"]):
+            continue
+        if not re.fullmatch(r"AI-QA-[0-9]{8}-" + re.escape(name) + r"-[a-z0-9]{6,24}-",
+                            value["fixture_prefix"]):
+            continue
+        return True
+    return False
 
 
 def exact(value, expected):
@@ -686,7 +812,8 @@ def main():
                      or frozen_prepack_identity_continuation(value, root)
                      or diagnostic_metadata_closeout(value, root)
                      or frozen_private_runtime_continuation(value, root)
-                     or common_sense_development_proof(value, root)) else 1
+                     or common_sense_development_proof(value, root)
+                     or bounded_designflow_qa(value, root)) else 1
     except (OSError, ValueError, TypeError, IndexError):
         return 1
 
