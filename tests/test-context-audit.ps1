@@ -494,6 +494,7 @@ owner: claude/fixture-$n
         "Codex" = Get-Content -LiteralPath (Join-Path $repo "templates\system\AGENTS-global-codex.md") -Raw
         "ZCode" = Get-Content -LiteralPath (Join-Path $repo "templates\system\AGENTS-global-zcode.md") -Raw
         "MiMo" = Get-Content -LiteralPath (Join-Path $repo "templates\system\AGENTS-global-mimo.md") -Raw
+        "Antigravity" = Get-Content -LiteralPath (Join-Path $repo "templates\system\AGENTS-global-antigravity.md") -Raw
     }
     foreach ($client in $clientGlobals.Keys) {
         foreach ($required in @(
@@ -507,7 +508,8 @@ owner: claude/fixture-$n
             "reported problem is gone",
             "original capability still works",
             "present symptom suppression as a fix",
-            "Do not load unrelated handoffs"
+            "Do not load unrelated handoffs",
+            "fenced next-session prompt directly in chat"
         )) {
             if ($clientGlobals[$client] -notmatch [regex]::Escape($required)) {
                 throw "The $client global lost its autonomy rule: $required"

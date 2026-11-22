@@ -201,13 +201,17 @@ confirms that execution is still needed; no unattended timer renews an idle chat
 7. **Next-session prompt — REQUIRED whenever anything is unfinished. A
    closeout that omits it while work remains is INCOMPLETE; do not send the
    closing report without it.** End with a copy-paste prompt Albert can drop
-   into a fresh session to resume exactly here. Put it in its own fenced block
-   at the very bottom of the closing report, and make it self-contained: a
-   stranger pasting it into an empty session must be able to continue with no
-   chat context. It states the repo and branch, the one-sentence goal, what is
-   already done, the exact next action, how to verify success, and a pointer to
-   the `HANDOFF.d/` file written in step 4 — every file named by its **GitHub
-   URL** (see the path rule below), never a machine-local path.
+   into a fresh session to resume exactly here. **Always print it directly in
+   the chat reply** in its own fenced block at the very bottom — never omit it
+   to stay under the 120-word Response Style cap, and never hide it only inside
+   a handoff file or artifact link. (Response Style explicitly exempts this
+   fenced prompt from the 120-word cap; keep the closing summary above it under
+   120 words.) Make the prompt self-contained: a stranger pasting it into an
+   empty session must be able to continue with no chat context. It states the
+   repo and branch, the one-sentence goal, what is already done, the exact next
+   action, how to verify success, and a pointer to the `HANDOFF.d/` file written
+   in step 4 — every file named by its **GitHub URL** (see the path rule
+   below), never a machine-local path.
 
    **Unfinished means any of:** you wrote a `HANDOFF.d/` file in step 4;
    commits are unpushed; a PR is unmerged; an issue or checklist item is still
