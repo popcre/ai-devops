@@ -37,8 +37,9 @@ instead — same phrases, different pipeline. When in doubt, check `git remote -
    affected repo. Author: `Albert Hazan <u2giants@users.noreply.github.com>`.
 3. **Push** to origin.
 4. **PR:** for each affected repo, `gh pr create` (or `gh pr edit` if one exists)
-   from the user branch → `develop`. **Never target `main`. Never merge** — Uma
-   (`devopswithkube`) reviews and merges.
+   from the user branch → `develop`. Merge it yourself only when every
+   rule in the repo's `GATEKEEPER.md` is met and evidenced on the PR (owner
+   ruling 2026-11-22); a PROD release (`develop` → `main`) follows the same file.
 5. **Watch the deploy.** Pushing the user branch triggers Cloud Build. Poll it
    in the background (don't make the user ask "did it finish?").
 6. **Verify live.** When the build lands, confirm the sandbox site
