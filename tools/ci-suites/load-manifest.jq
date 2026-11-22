@@ -70,7 +70,7 @@ def fail($file; $msg): error("load-manifest: \($file): \($msg)");
     ($g[0].windows_offline_powershell_shard // 0) as $psh
     | [ range(1; $ncount + 1) as $i
       | select($i != $psh)
-      | select([$suites[] | select(.windows_section == $i)] | length == 0)
+      | select([$suites[] | select(.kind == "bash" and .windows_section == $i)] | length == 0)
       | "section \($i)" ] as $empty
     | if ($empty | length) > 0 then
         error("load-manifest: every declared section must carry work; empty: \($empty | join(", "))")
@@ -83,11 +83,11 @@ def fail($file; $msg): error("load-manifest: \($file): \($msg)");
     linux_offline_suite_seconds: ([$suites[] | select(.kind == "bash" and .linux_seconds != null) | {(.suite): .linux_seconds}] | add // {}),
     bash: [$suites[] | select(.kind == "bash") | .suite] | sort,
     powershell: [$suites[] | select(.kind == "powershell") | .suite] | sort,
-    windows_sensitive_bash: [$suites[] | select(.windows | index("offline")) | .suite] | sort,
-    windows_reviewer_safety_bash: [$suites[] | select(.windows | index("reviewer-safety")) | .suite] | sort,
-    windows_offline_bash: [$suites[] | select(.windows | index("offline")) | .suite] | sort,
+    windows_sensitive_bash: [$suites[] | select(.kind == "bash" and (.windows | index("offline"))) | .suite] | sort,
+    windows_reviewer_safety_bash: [$suites[] | select(.kind == "bash" and (.windows | index("reviewer-safety"))) | .suite] | sort,
+    windows_offline_bash: [$suites[] | select(.kind == "bash" and (.windows | index("offline"))) | .suite] | sort,
     windows_offline_shards: [ range(1; $ncount + 1) as $i
-                              | [$suites[] | select(.windows_section == $i) | .suite] | sort ]
+                              | [$suites[] | select(.kind == "bash" and .windows_section == $i) | .suite] | sort ]
   }
 + ($g[0] | {
     windows_offline_powershell_shard,
