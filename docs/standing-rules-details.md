@@ -233,11 +233,14 @@ and points here.
   (66bd69f2) on hetz`. Omit the name when the app has none:
   `Posted by Claude chat (66bd69f2) on hetz`. The display name is the
   session's own name in its app (MiMo session title, ZCode task title, Claude
-  custom title, Codex thread name) — never a prompt excerpt, since prompts can
-  hold private data and this line is posted in public. The short id keeps the
+  custom title, Codex thread name, Antigravity conversation title) — never a
+  prompt excerpt, since prompts can hold private data and this line is posted
+  in public. Antigravity signs with the display name only (`Posted by
+  Antigravity chat "<display name>" on <machine>`) and falls back to the short
+  id only when the chat has no title yet. The short id keeps the
   id's `ses_`/`sess_` prefix plus 8 characters, or the first 8 characters of a
   UUID. `bin/ai-gh-signature` builds the line (app: mimo, zcode, claude,
-  codex); the managed shell snippet exports it ready-made as
+  codex, antigravity); the managed shell snippet exports it ready-made as
   `$AI_GH_SIGNATURE`. Legacy full-id signatures stay valid. When editing a
   body, keep existing signatures and add yours.
 - **Successors:** never inherit a predecessor's repository, work type, route,

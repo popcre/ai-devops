@@ -142,10 +142,10 @@ rulings, verbatim: `docs/owner-rulings.md`.
   curated Master Data, is authored first in `popcre/shared-db` (claim-first,
   minimum scope). Before any shared-db work, load `shared-db-change`.
 - **Sign everything posted to GitHub** with `Posted by Antigravity chat "<display
-  name>" (<short id>) on <machine>` — omit the name when the app has none.
+  name>" on <machine>` — omit the name when the app has none.
   The display name is the session's own name in its app; the short id keeps
   any `ses_`/`sess_` prefix plus 8 characters, or is the first 8 characters
-  of a UUID. `ai-gh-signature` builds the line from `$AGY_CONVERSATION_ID`.
+  of a UUID. `ai-gh-signature` builds the line from `$ANTIGRAVITY_CONVERSATION_ID`.
   When editing a body, keep existing signatures and add yours.
 - **Reviews are advice only** (owner ruling 2026-10-29): CI runs one
   advisory AI review per code or plan PR and never blocks a merge; findings
