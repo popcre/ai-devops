@@ -533,6 +533,12 @@ another user's bus or the user-scoped private-memory hub. Gate state is
 `$HOME`-scoped — one user per install; a root run forks a parallel transaction
 universe and rewrites `/etc/ai-devops/install-manifest.tsv` owned by root.
 
+If the private memory seed refuses an oversized navigation index, the current
+toolkit's `ai-memory-sync compact-index <project>` can normalize the published
+index's link separators. The private hub transaction preserves link labels,
+targets, descriptions, and fact files, and runs the same secret and index
+health checks. Retry the pinned install after the private transaction succeeds.
+
 If the installed Linux manifest names an older source SHA than the live clean
 checkout, the independent exact-head report must explicitly name
 `Approved stale-linux-manifest-recovery.` and bind the stale manifest SHA and file hash
