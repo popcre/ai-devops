@@ -4,19 +4,20 @@
 Format (docs/standing-rules-details.md "GitHub signature"):
 
     Posted by <App> chat "<display name>" (<short id>) on <machine>
+    Posted by Antigravity chat "<display name>" on <machine>   # display name only
     Posted by <App> chat (<short id>) on <machine>      # when the app has no name
 
 The display name is the session's own name in its app (MiMo session title,
-ZCode task title, Claude custom title, Codex thread name). Never fall back to
-a prompt excerpt: prompts can hold private data and this line is posted in
-public.
+ZCode task title, Claude custom title, Codex thread name, Antigravity
+conversation title). Never fall back to a prompt excerpt: prompts can hold
+private data and this line is posted in public.
 
 The short id keeps a ses_/sess_ prefix and the first 8 characters after it,
 or the first 8 characters of a UUID. Same session, stable short form.
 
 Store roots are overridable for tests:
     AI_GH_SIG_MIMO_DB, AI_GH_SIG_ZCODE_DB, AI_GH_SIG_CLAUDE_PROJECTS,
-    AI_GH_SIG_CODEX_INDEX
+    AI_GH_SIG_CODEX_INDEX, AI_GH_SIG_ANTIGRAVITY_DIR
 """
 
 import json
@@ -26,19 +27,27 @@ import socket
 import sqlite3
 import sys
 
-APPS = ("mimo", "zcode", "claude", "codex")
-LABEL = {"mimo": "MiMo", "zcode": "ZCode", "claude": "Claude", "codex": "Codex"}
+APPS = ("mimo", "zcode", "claude", "codex", "antigravity")
+LABEL = {
+    "mimo": "MiMo",
+    "zcode": "ZCode",
+    "claude": "Claude",
+    "codex": "Codex",
+    "antigravity": "Antigravity",
+}
 ALIAS = {
     "mimo": "mimo", "mimo desktop": "mimo", "mimocode": "mimo",
     "zcode": "zcode",
     "claude": "claude", "claude code": "claude", "claude desktop": "claude",
     "codex": "codex", "chatgpt": "codex", "chatgpt for windows": "codex",
+    "antigravity": "antigravity", "agy": "antigravity", "google antigravity": "antigravity",
 }
 ID_ENV = {
     "mimo": ("MIMO_SESSION_ID",),
     "zcode": ("ZCODE_SESSION_ID",),
     "claude": ("CLAUDE_CODE_SESSION_ID",),
     "codex": ("CODEX_THREAD_ID", "CODEX_SESSION_ID"),
+    "antigravity": ("ANTIGRAVITY_CONVERSATION_ID", "AGY_CONVERSATION_ID"),
 }
 NAME_MAX = 80
 
@@ -153,16 +162,56 @@ def lookup_codex(sid):
     return ""
 
 
+def lookup_antigravity(sid):
+    root = (
+        os.environ.get("AI_GH_SIG_ANTIGRAVITY_DIR")
+        or os.environ.get("ANTIGRAVITY_APP_DATA_DIR")
+        or os.path.join(home(), ".gemini", "antigravity")
+    )
+    if not os.path.isdir(root):
+        return ""
+    if re.fullmatch(r"[A-Za-z0-9._-]{1,128}", sid):
+        pbtxt = os.path.join(root, "annotations", sid + ".pbtxt")
+        if os.path.isfile(pbtxt):
+            try:
+                with open(pbtxt, encoding="utf-8", errors="replace") as handle:
+                    text = handle.read()
+                m = re.search(r'\btitle\s*:\s*"((?:[^"\\]|\\.)*)"', text)
+                if m and m.group(1):
+                    raw = m.group(1).replace('\\"', '"').replace("\\\\", "\\")
+                    if raw.strip():
+                        return raw
+            except OSError:
+                pass
+    db_path = os.path.join(root, "conversation_summaries.db")
+    if not os.path.isfile(db_path):
+        return ""
+    uri = "file:" + db_path.replace("\\", "/") + "?mode=ro"
+    try:
+        con = sqlite3.connect(uri, uri=True)
+        try:
+            row = con.execute(
+                "select title from conversation_summaries where conversation_id = ?",
+                (sid,),
+            ).fetchone()
+        finally:
+            con.close()
+    except sqlite3.Error:
+        return ""
+    return row[0] if row and row[0] else ""
+
+
 LOOKUP = {
     "mimo": lookup_mimo,
     "zcode": lookup_zcode,
     "claude": lookup_claude,
     "codex": lookup_codex,
+    "antigravity": lookup_antigravity,
 }
 
 
 def detect_app():
-    for app in ("mimo", "claude", "codex", "zcode"):
+    for app in ("antigravity", "mimo", "claude", "codex", "zcode"):
         for var in ID_ENV[app]:
             if os.environ.get(var):
                 return app
@@ -181,7 +230,9 @@ def resolve_app(raw):
     key = (raw or "").strip().lower()
     if key in ALIAS:
         return ALIAS[key]
-    raise SystemExit("ai-gh-signature: unknown app %r (use mimo|zcode|claude|codex)" % raw)
+    raise SystemExit(
+        "ai-gh-signature: unknown app %r (use mimo|zcode|claude|codex|antigravity)" % raw
+    )
 
 
 def build(app, sid, name=""):
@@ -189,6 +240,8 @@ def build(app, sid, name=""):
     short = short_id(sid)
     host = machine()
     if name:
+        if app == "antigravity":
+            return 'Posted by %s chat "%s" on %s' % (label, name, host)
         return 'Posted by %s chat "%s" (%s) on %s' % (label, name, short, host)
     return "Posted by %s chat (%s) on %s" % (label, short, host)
 

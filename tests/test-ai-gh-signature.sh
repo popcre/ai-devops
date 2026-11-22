@@ -18,13 +18,17 @@ export AI_GH_SIG_MIMO_DB="$work/mimo.db"
 export AI_GH_SIG_ZCODE_DB="$work/zcode.db"
 export AI_GH_SIG_CLAUDE_PROJECTS="$work/claude-projects"
 export AI_GH_SIG_CODEX_INDEX="$work/codex-index.jsonl"
+export AI_GH_SIG_ANTIGRAVITY_DIR="$work/antigravity"
 unset MIMO_SESSION_ID ZCODE_SESSION_ID CLAUDE_CODE_SESSION_ID \
-      CODEX_THREAD_ID CODEX_SESSION_ID 2>/dev/null || true
+      CODEX_THREAD_ID CODEX_SESSION_ID \
+      ANTIGRAVITY_CONVERSATION_ID AGY_CONVERSATION_ID 2>/dev/null || true
 
 MIMO_ID="ses_ffe5e2d8d4fcdffeS1R1pHQ7vt"
 ZCODE_ID="sess_9ed78740-9d9d-4622-9fbd-09f4b00dd4d7"
 CLAUDE_ID="66bd69f2-fdd8-4bf0-9082-9239896851bb"
 CODEX_ID="01a011c9-7fb6-7213-a61e-06cee388789d"
+AGY_PBTXT_ID="924f9fa3-bca1-45f6-9d16-bca73a6defca"
+AGY_DB_ID="36f3b9c9-b45d-4541-9bdc-ab2eb59996e5"
 
 "$py" - "$work" <<'PYEOF'
 import json, os, sqlite3, sys
@@ -50,6 +54,15 @@ with open(os.path.join(root, "custom-title.json"), "w", encoding="utf-8") as fh:
 with open(os.path.join(work, "codex-index.jsonl"), "w", encoding="utf-8") as fh:
     fh.write(json.dumps({"id": "01a011c9-7fb6-7213-a61e-06cee388789d",
                          "thread_name": "Pull latest ai-devops repo"}) + "\n")
+agy_ann = os.path.join(work, "antigravity", "annotations")
+os.makedirs(agy_ann)
+with open(os.path.join(agy_ann, "924f9fa3-bca1-45f6-9d16-bca73a6defca.pbtxt"), "w", encoding="utf-8") as fh:
+    fh.write('title:"Antigravity \\"GitHub\\" Post Signing" last_user_view_time:{seconds:1}\n')
+con = sqlite3.connect(os.path.join(work, "antigravity", "conversation_summaries.db"))
+con.execute("create table conversation_summaries (conversation_id text primary key, title text not null)")
+con.execute("insert into conversation_summaries values (?, ?)",
+            ("36f3b9c9-b45d-4541-9bdc-ab2eb59996e5", "Shared-db summary fallback"))
+con.commit(); con.close()
 PYEOF
 
 # expect_sig <description> <expected through "on "> <tool args...>
@@ -89,6 +102,20 @@ expect_sig "codex resolves the thread name" \
 expect_sig "chatgpt alias signs as Codex" \
   "Posted by Codex chat \"Pull latest ai-devops repo\" (01a011c9)" \
   --app "ChatGPT for Windows" --id "$CODEX_ID"
+expect_sig "antigravity resolves pbtxt title with display name only" \
+  "Posted by Antigravity chat \"Antigravity 'GitHub' Post Signing\"" \
+  --app antigravity --id "$AGY_PBTXT_ID"
+expect_sig "antigravity falls back to conversation_summaries.db" \
+  "Posted by Antigravity chat \"Shared-db summary fallback\"" \
+  --app agy --id "$AGY_DB_ID"
+expect_sig "antigravity without a title falls back to short id" \
+  "Posted by Antigravity chat (22222222)" \
+  --app antigravity --id "22222222-3333-4444-5555-666666666666"
+
+export ANTIGRAVITY_CONVERSATION_ID="$AGY_PBTXT_ID"
+expect_sig "antigravity env supplies the id without --app or --id" \
+  "Posted by Antigravity chat \"Antigravity 'GitHub' Post Signing\""
+unset ANTIGRAVITY_CONVERSATION_ID
 
 export MIMO_SESSION_ID="$MIMO_ID"
 expect_sig "session env supplies the id without --id" \
