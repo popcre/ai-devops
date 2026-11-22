@@ -178,8 +178,12 @@ the correct route. A predecessor's repository is context, not routing proof.
 3. **Author the change in shared-db**, not only in the app repo. App repos get
    generated types and adapters; durable backend truth lives in shared-db.
 4. **Branch policy exception:** shared-db is the ONE repo that uses branches +
-   PR (all app repos are main-only). Claude merges the shared-db PR itself once
-   checks pass — Albert cannot.
+   PR (all app repos are main-only). The AI merges the shared-db PR itself once
+   checks pass — Albert cannot. Production promotion is a separate action
+   (`shared-db-promotion`): the sole exception is the separately activated automatic workflow
+   recorded by issue #2716 (after exact structural admission, guarded merge,
+   merged-main preview, and every immutable evidence gate). A session never reconstructs it or applies to production
+   by hand; absent or ambiguous evidence stops for an engineer.
 5. **Correct project refs** (never mix):
    - shared backend **PRODUCTION**: `<protected-shared-prod-ref>`
    - shared backend **PREVIEW**: `<protected-shared-preview-ref>` (Supabase branch

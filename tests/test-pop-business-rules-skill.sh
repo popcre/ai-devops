@@ -25,7 +25,7 @@ require "Audit an application or document"
 require "replace them with a pointer"
 require 'Update `application-map.md`'
 require "Never copy rule content into this Skill"
-require "codex-shared-db-change"
+require "shared-db-change"
 
 if grep -Eq 'C:\\repos|mgCategory.*Wall|royalty.*[0-9]+%' "$SKILL"; then
   fail "Skill embeds a machine path or copied business-rule value"

@@ -57,8 +57,8 @@ instead — same phrases, different pipeline. When in doubt, check `git remote -
 ## Follow-ups (mandatory at session end)
 
 - **Run the installed client documentation skill** (`session-docs-update` on
-  Claude; `codex-docs-update` on Codex) — do not merely offer it. The skill
+  `session-docs-update`) — do not merely offer it. The skill
   itself decides what needs updating and says so if nothing durable changed, so
   running it is always safe. Skipping docs is the #1 recurring wrap-up failure.
 - If the session touched the shared backend, run the installed shared-database
-  skill (`shared-db-change` on Claude; `codex-shared-db-change` on Codex).
+  skill (`shared-db-change`).

@@ -262,7 +262,7 @@ When asked whether the plan is comprehensive/detailed enough:
   closing note. Do **not** open a leftover-proof issue, an "unproven step"
   issue, or a second ticket for that gap.
 - **A plan goes stale the moment someone executes part of it.** Whoever does the work
-  owns updating it — the `session-docs-update` / `codex-docs-update` skills carry a
+  owns updating it — the `session-docs-update` skill carries a
   **mandatory plan-file gate** for exactly this (de-stale the "current state" section,
   keep the reasoning as history, mark passed verification, record what is blocked and
   on whom). Real failure it prevents: on 2026-07-26 four steps of

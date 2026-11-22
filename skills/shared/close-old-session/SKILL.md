@@ -78,7 +78,7 @@ outstanding" items proceed, and they go to the existing close-out owner — do
   which owns the chain and delegates ship per repo (dflow → `dflow-ship`, hetz
   apps → `deploy-and-verify`, else main).
 - If Albert only wants the docs touched, not a full close-out → run
-  **`session-docs-update`** (`codex-docs-update` in Codex) directly.
+  **`session-docs-update`** directly.
 
 Feed `wrap-up` the reconciled picture from Steps 2–3 so it records/ships only
 what actually survived — never the stale edits this skill just discarded.

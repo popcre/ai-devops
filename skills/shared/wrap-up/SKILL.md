@@ -121,7 +121,7 @@ confirms that execution is still needed; no unattended timer renews an idle chat
 ## The chain
 
 2. **Docs** — run the installed client documentation skill
-   (`session-docs-update` on Claude; `codex-docs-update` on Codex): record what
+   (`session-docs-update`): record what
    this session learned or changed in the right .md files (AGENTS.md / docs/ /
    your own `HANDOFF.d/` file), and route any shared-backend change through its
    governed repository. If nothing durable changed, state that explicitly.
