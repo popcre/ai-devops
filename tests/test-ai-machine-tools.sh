@@ -35,7 +35,7 @@ grep -q $'ai-task-gates\tbin/ai-task-gates\tbash+cmd\tyes\tnone\tinstall-machine
 grep -q 'install-machine-tools.ps1' "$repo/bin/setup-machine.ps1"
 ! grep -q 'foreach (\$grokWrapper' "$repo/bin/setup-machine.ps1"
 grep -q "SYNC INCOMPLETE — do not report success; rerun 'sync my dotfiles'." "$repo/bin/ai-install-skills"
-for skill in "$repo/skills/claude/sync-dotfiles/SKILL.md" "$repo/skills/codex/codex-sync-dotfiles/SKILL.md"; do
+for skill in "$repo/skills/shared/sync-dotfiles/SKILL.md" "$repo/skills/shared/codex-sync-dotfiles/SKILL.md"; do
   grep -q 'ai-machine-tools-doctor' "$skill"; grep -q 'install-machine-tools' "$skill"
   grep -q 'bin/ai-adopt-globals' "$skill"
   ! grep -q 'fall back to appending' "$skill"

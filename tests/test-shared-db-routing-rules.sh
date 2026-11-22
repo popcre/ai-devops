@@ -7,7 +7,7 @@ PASS=0; FAIL=0
 FIX="$ROOT/tests/fixtures/shared-db-routing/1097-successor-1113.md"
 ORCH="$ROOT/docs/shared-db-structural-safety/README.md"
 MANUAL="$ROOT/docs/shared-db-structural-safety/references/operating-manual.md"
-AUTHORING="$ROOT/skills/codex/codex-shared-db-change/SKILL.md"
+AUTHORING="$ROOT/skills/shared/codex-shared-db-change/SKILL.md"
 CLAUDE="$ROOT/templates/system/CLAUDE-global.md"
 CODEX="$ROOT/templates/system/AGENTS-global-codex.md"
 REPO_AGENTS="$ROOT/AGENTS.md"
