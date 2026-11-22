@@ -3,7 +3,7 @@
 # launchers it generates, and bin/install-ai-devops-windows.ps1 accepts
 # exactly this set in its source receipts. ProgramFiles (and LOCALAPPDATA) can
 # be absent in service and task environments (#1713) while Git for Windows is
-# still installed under the standard root, so that root is always offered —
+# still installed under the standard root, so that root is always offered -
 # the same probe bin/ai-task-gates windows_program_files() performs on the
 # bash side. Keeping one list here stops the generator and the validator from
 # drifting apart again.
