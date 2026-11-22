@@ -3,7 +3,7 @@ set -euo pipefail
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source_file="$repo/bin/setup-secrets.sh"
-skill_file="$repo/skills/codex/codex-transcript-miner/SKILL.md"
+skill_file="$repo/skills/shared/codex-transcript-miner/SKILL.md"
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
