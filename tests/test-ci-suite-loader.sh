@@ -97,6 +97,7 @@ rm -f "$TMP/ci-suites/README.md"
 # sections.
 printf '#!/usr/bin/env bash\nexit 0\n' >"$TMP/tests/test-newsuite.sh"
 printf '#!/usr/bin/env bash\nexit 0\n' >"$TMP/tests/test-other.sh"
+printf '# PowerShell suite\n' >"$TMP/tests/test-newpowershell.ps1"
 new_rc=0; new_out="$(load)" || new_rc=$?
 check 'a suite with no manifest entry is still assembled' '[ "$new_rc" -eq 0 ]'
 check 'an unlisted suite runs on Linux' \
@@ -107,7 +108,9 @@ check 'an unlisted suite lands in a hosted section, never skipping sections' \
   "printf '%s' \"\$new_out\" | jq -e '.windows_offline_shards | any(.[]; index(\"test-newsuite.sh\") != null)'"
 check 'every unlisted suite is placed in exactly one section' \
   "test \"\$(printf '%s' \"\$new_out\" | jq '[.windows_offline_shards[][]] | map(select(. == \"test-newsuite.sh\" or . == \"test-other.sh\")) | length')\" = 2"
-rm -f "$TMP/tests/test-newsuite.sh" "$TMP/tests/test-other.sh"
+check 'an unlisted PowerShell suite is not included in Bash Windows groups' \
+  "printf '%s' \"\$new_out\" | jq -e '(.powershell | index(\"test-newpowershell.ps1\") != null) and ([.windows_sensitive_bash[], .windows_reviewer_safety_bash[], .windows_offline_bash[], .windows_offline_shards[][]] | index(\"test-newpowershell.ps1\") == null)'"
+rm -f "$TMP/tests/test-newsuite.sh" "$TMP/tests/test-other.sh" "$TMP/tests/test-newpowershell.ps1"
 
 # The repository's own configuration must load and satisfy the same contract.
 repo_rc=0; repo_out="$(bash "$LOADER")" || repo_rc=$?

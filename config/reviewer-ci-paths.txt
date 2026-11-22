@@ -21,7 +21,9 @@ config/reviewer-registry.json
 config/review-runner-doors.json
 config/task-gates.json
 config/review-action-profiles.json
+config/supabase-capacity-restart-profile.json
 tools/review_action_profile.py
+tools/supabase_capacity_restart_profile.py
 bin/ai-repo-policy
 config/repository-policy.json
 config/repository-coverage.json

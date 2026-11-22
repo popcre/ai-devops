@@ -1,7 +1,7 @@
 # One Git Bash candidate list backs both the launcher generator and the
 # Windows installer's source receipts (bin/git-bash-candidates.ps1). #2709
 # host shape: ProgramFiles absent from the environment while Git for Windows
-# lives under the standard root — the generator used to crash and the receipt
+# lives under the standard root - the generator used to crash and the receipt
 # check used to reject the launchers it had generated.
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot

@@ -6,6 +6,7 @@ live target identity immediately before requests and retain actual acceptance.
 import json
 import pathlib
 import datetime
+import hmac
 import math
 import os
 import re
@@ -51,6 +52,110 @@ RECOVERY_TARGET = {
         "before_snapshot": "immutable-full-run-provider-audit",
         "scheduler": "existing-automatic-bounded",
         "manual_drain": False,
+    },
+}
+
+# These three time-limited declarations authorize only the existing DesignFlow
+# sandbox proofs. The hashes bind private fixture IDs, recipient/group identity,
+# and cleanup IDs without placing those identifiers in GitHub source.
+DESIGNFLOW_QA_TARGETS = {
+    "tracking-photo-removal": {
+        "schema_version": 1,
+        "repository": "popcre/designflow-tracking",
+        "issue": "https://github.com/popcre/designflow-tracking/issues/214",
+        "route": "authenticated-application-http",
+        "api_origin": "https://api.sandbox-albert.designflow.app/api/tracking",
+        "project": "lithe-breaker-323913",
+        "region": "us-east4",
+        "service": "popcre-albert-tracking-sandbox",
+        "scope": "tracking-photo-removal",
+        "routes": [
+            "POST /sample/guided-create",
+            "POST /sample/getPreSignedUrl",
+            "POST /sample/setObjectPublic",
+            "POST /sample/photos",
+            "GET /sample/:id/photos",
+            "DELETE /sample/photos/:attId",
+            "POST /sample/qa-fixtures/cleanup",
+        ],
+        "limits": {
+            "synthetic_only": True,
+            "maximum_fixtures": 1,
+            "maximum_photos": 1,
+            "maximum_photo_delete_attempts": 3,
+            "existing_records_read_only": True,
+            "messages": False,
+        },
+        "forbidden": ["production", "direct-sql", "schema", "real-records",
+                      "unlisted-route", "cleanup-outside-fixture"],
+        "private_binding_keys": ["actor_sha256", "sample_id_sha256",
+                                  "photo_id_sha256", "cleanup_ids_sha256"],
+    },
+    "tracking-reminder-retry": {
+        "schema_version": 1,
+        "repository": "popcre/designflow-tracking",
+        "issue": "https://github.com/popcre/designflow-tracking/issues/212",
+        "route": "authenticated-application-http",
+        "api_origin": "https://api.sandbox-albert.designflow.app/api/tracking",
+        "project": "lithe-breaker-323913",
+        "region": "us-east4",
+        "service": "popcre-albert-tracking-sandbox",
+        "scope": "tracking-reminder-retry",
+        "authorized_recipient": "u2giants@gmail.com",
+        "routes": [
+            "POST /prod-tracking/qa-fixtures",
+            "POST /prod-tracking/qa-fixtures/:fixtureId/run",
+            "POST /prod-tracking/qa-fixtures/:fixtureId/cleanup",
+        ],
+        "limits": {
+            "synthetic_only": True,
+            "maximum_fixtures": 1,
+            "maximum_schedule_rows": 1,
+            "maximum_factory_emails": 1,
+            "maximum_simulated_rejections": 1,
+            "maximum_retries": 1,
+            "in_app_notifications_idempotent": True,
+            "existing_records_read_only": True,
+        },
+        "forbidden": ["production", "direct-sql", "schema", "real-records",
+                      "broad-overdue-scan", "unlisted-recipient", "cleanup-outside-fixture"],
+        "private_binding_keys": ["actor_sha256", "order_id_sha256",
+                                  "schedule_id_sha256", "recipient_sha256",
+                                  "cleanup_ids_sha256"],
+    },
+    "item-master-teams-delivery": {
+        "schema_version": 1,
+        "repository": "popcre/designflow-item-master",
+        "issue": "https://github.com/popcre/designflow-item-master/issues/262",
+        "route": "authenticated-application-http",
+        "api_origin": "https://api.sandbox-albert.designflow.app/api/item_master",
+        "project": "lithe-breaker-323913",
+        "region": "us-east4",
+        "service": "popcre-albert-item-sandbox",
+        "scope": "item-master-teams-delivery",
+        "authorized_teams_group": "MasterData migration",
+        "routes": [
+            "POST /lib/createItem",
+            "POST /detail/AddLicensingStatus",
+            "POST /detail/UpdateLicensingStatus",
+            "POST /detail/DeleteLicensingStatus",
+        ],
+        "limits": {
+            "synthetic_only": True,
+            "maximum_items": 1,
+            "maximum_licensing_status_writes": 1,
+            "maximum_teams_messages": 1,
+            "maximum_email_recipients": 0,
+            "email_fanout_suppressed": True,
+            "test_prefix_required": True,
+            "recipient_set_must_match": True,
+            "existing_records_read_only": True,
+        },
+        "forbidden": ["production", "direct-sql", "schema", "real-records",
+                      "unlisted-recipient", "unlisted-group", "cleanup-outside-fixture"],
+        "private_binding_keys": ["actor_sha256", "item_id_sha256",
+                                  "licensing_status_id_sha256", "teams_group_sha256",
+                                  "recipient_set_sha256", "cleanup_ids_sha256"],
     },
 }
 
@@ -607,10 +712,11 @@ def common_sense_development_proof(value, root):
     return bounded_metadata(value, root, maximum_hours=1)
 
 
-def bounded_metadata(value, root, synthetic=True, maximum_hours=24):
+def bounded_metadata(value, root, synthetic=True, maximum_hours=24,
+                     repository="popcre/designflow-backend"):
     """Shared source, issue, prefix and expiry checks for bounded profiles."""
     if not isinstance(value["issue"], str) or not re.fullmatch(
-            r"https://github\.com/popcre/designflow-backend/issues/[1-9][0-9]*", value["issue"]):
+            r"https://github\.com/" + re.escape(repository) + r"/issues/[1-9][0-9]*", value["issue"]):
         return False
     if synthetic and (not isinstance(value["fixture_prefix"], str) or not re.fullmatch(
             r"AI-QA-[0-9]{8}-[a-z0-9][a-z0-9-]{0,39}-", value["fixture_prefix"])):
@@ -637,6 +743,96 @@ def bounded_metadata(value, root, synthetic=True, maximum_hours=24):
         return result.returncode == 0
     except (OSError, ValueError, subprocess.TimeoutExpired):
         return False
+
+
+def private_qa_bindings(value, root, target):
+    """Compare public HMACs with owner-scoped values in a private evidence file."""
+    evidence_name = os.environ.get("DESIGNFLOW_QA_PRIVATE_EVIDENCE", "")
+    if not evidence_name:
+        return False
+    evidence_path = pathlib.Path(evidence_name).expanduser()
+    try:
+        if not evidence_path.is_absolute() or stat.S_ISLNK(evidence_path.lstat().st_mode):
+            return False
+        info = evidence_path.stat()
+        if not stat.S_ISREG(info.st_mode) or info.st_size > 16384:
+            return False
+        resolved = evidence_path.resolve(strict=True)
+        try:
+            resolved.relative_to(root)
+            return False
+        except ValueError:
+            pass
+        if os.name == "nt":
+            local_app_data = os.environ.get("LOCALAPPDATA", "")
+            if not local_app_data:
+                return False
+            resolved.relative_to(pathlib.Path(local_app_data).resolve(strict=True))
+        elif stat.S_IMODE(info.st_mode) & 0o077:
+            return False
+        with resolved.open("r", encoding="utf-8") as source:
+            evidence = json.load(source, object_pairs_hook=unique)
+    except (OSError, ValueError, TypeError):
+        return False
+    if (not isinstance(evidence, dict)
+            or evidence.keys() != {"schema_version", "scope", "hmac_key", "bindings"}
+            or type(evidence.get("schema_version")) is not int
+            or evidence["schema_version"] != 1
+            or evidence.get("scope") != target["scope"]
+            or not isinstance(evidence.get("hmac_key"), str)
+            or not re.fullmatch(r"[a-f0-9]{64}", evidence["hmac_key"])):
+        return False
+    raw_bindings = evidence.get("bindings")
+    expected_keys = {key.removesuffix("_sha256") for key in target["private_binding_keys"]}
+    if not isinstance(raw_bindings, dict) or raw_bindings.keys() != expected_keys:
+        return False
+    approved = {
+        "recipient": target.get("authorized_recipient"),
+        "teams_group": target.get("authorized_teams_group"),
+    }
+    if any(key in approved and not exact(raw_bindings[key], approved[key])
+           for key in raw_bindings):
+        return False
+    try:
+        key = bytes.fromhex(evidence["hmac_key"])
+        for digest_name, raw_name in ((name, name.removesuffix("_sha256"))
+                                      for name in target["private_binding_keys"]):
+            canonical = json.dumps(raw_bindings[raw_name], ensure_ascii=False,
+                                   sort_keys=True, separators=(",", ":"),
+                                   allow_nan=False).encode("utf-8")
+            digest = hmac.new(key, canonical, "sha256").hexdigest()
+            if not hmac.compare_digest(value["bindings"].get(digest_name, ""), digest):
+                return False
+    except (TypeError, ValueError):
+        return False
+    return True
+
+
+def bounded_designflow_qa(value, root):
+    """Admit only one expiring, exact issue-specific DesignFlow QA declaration."""
+    if not isinstance(value, dict):
+        return False
+    dynamic = {"fixture_prefix", "source_head", "expires_at", "bindings"}
+    for name, target in DESIGNFLOW_QA_TARGETS.items():
+        if value.keys() != target.keys() | dynamic:
+            continue
+        if any(not exact(value[key], expected) for key, expected in target.items()):
+            continue
+        if not isinstance(value["bindings"], dict) or value["bindings"].keys() != set(target["private_binding_keys"]):
+            continue
+        if not all(isinstance(item, str) and re.fullmatch(r"[a-f0-9]{64}", item)
+                   for item in value["bindings"].values()):
+            continue
+        if not bounded_metadata(value, root, maximum_hours=1,
+                                repository=target["repository"]):
+            continue
+        if not private_qa_bindings(value, root, target):
+            continue
+        if not re.fullmatch(r"AI-QA-[0-9]{8}-" + re.escape(name) + r"-[a-z0-9]{6,24}-",
+                            value["fixture_prefix"]):
+            continue
+        return True
+    return False
 
 
 def exact(value, expected):
@@ -686,7 +882,8 @@ def main():
                      or frozen_prepack_identity_continuation(value, root)
                      or diagnostic_metadata_closeout(value, root)
                      or frozen_private_runtime_continuation(value, root)
-                     or common_sense_development_proof(value, root)) else 1
+                     or common_sense_development_proof(value, root)
+                     or bounded_designflow_qa(value, root)) else 1
     except (OSError, ValueError, TypeError, IndexError):
         return 1
 

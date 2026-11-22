@@ -125,7 +125,7 @@ preservation), MCP servers in `~/.zcode/cli/config.json` via
   `zcode-transcript-backup` skill (private repo destination only;
   on `hetz` the owner ruled 2026-10-29 that all transcripts go to
   Dropbox instead — see
-  [skills/zcode/transcript-to-dropbox](../skills/zcode/transcript-to-dropbox/SKILL.md)).
+  [skills/shared/transcript-to-dropbox](../skills/shared/transcript-to-dropbox/SKILL.md)).
 
 ## MiMo (Windows)
 

@@ -36,6 +36,8 @@ make_fixture() {
   printf '%s' "$TEMPLATE_CODEX"  > "$fixture/templates/system/AGENTS-global-codex.md"
   printf '%s' "$TEMPLATE_ZCODE"  > "$fixture/templates/system/AGENTS-global-zcode.md"
   printf '%s' "$TEMPLATE_MIMO"   > "$fixture/templates/system/AGENTS-global-mimo.md"
+  cp "$REPO_ROOT/templates/system/AGENTS-global-antigravity.md" \
+    "$fixture/templates/system/AGENTS-global-antigravity.md"
 }
 
 run_adopt() {
@@ -157,10 +159,10 @@ echo "8/13 an old installed sync skill adopts globals on its first post-pull ins
 fixture="$TMP_ROOT/bootstrap/repo"; claude="$TMP_ROOT/bootstrap/claude"; codex="$TMP_ROOT/bootstrap/codex"
 home="$TMP_ROOT/bootstrap/home"
 make_fixture "$fixture"
-mkdir -p "$fixture/skills/claude/sync-dotfiles" "$claude/skills/sync-dotfiles" "$codex" "$home"
+mkdir -p "$fixture/skills/shared/sync-dotfiles" "$claude/skills/sync-dotfiles" "$codex" "$home"
 printf '%s\n' '---' 'name: sync-dotfiles' 'description: current test skill' '---' \
   'Run bin/ai-adopt-globals during every sync.' \
-  > "$fixture/skills/claude/sync-dotfiles/SKILL.md"
+  > "$fixture/skills/shared/sync-dotfiles/SKILL.md"
 printf '%s\n' '---' 'name: sync-dotfiles' 'description: old test skill' '---' \
   'Run bin/ai-install-skills during every sync.' \
   > "$claude/skills/sync-dotfiles/SKILL.md"
