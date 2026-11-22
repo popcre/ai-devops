@@ -1,0 +1,4 @@
+interface:
+  display_name: "Ask Antigravity"
+  short_description: "Second opinions, reviews, and scoped edits via Antigravity + Gemini"
+  default_prompt: "Use $ask-antigravity to get a read-only Antigravity + Gemini second opinion on this task."

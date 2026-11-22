@@ -237,5 +237,99 @@ class ReviewTests(unittest.TestCase):
         self.assertTrue(res["error"].startswith("local: CalledProcessError"), res["error"])
 
 
+FAKE_AGY = textwrap.dedent("""\
+    #!/usr/bin/env python3
+    import json, os, sys
+    state = os.environ["AI_REVIEW_SIMPLE_FAKE_STATE"]
+    calls = int(open(state).read() or 0) if os.path.exists(state) else 0
+    open(state, "w").write(str(calls + 1))
+    prompt = sys.stdin.read()
+    with open(state + ".args", "w") as fh:
+        json.dump({"args": sys.argv[1:], "cwd": os.getcwd(), "prompt_len": len(prompt)}, fh)
+    mode = open(state + ".mode").read().strip()
+    if mode == "approve":
+        print(json.dumps({"conversation_id": "cid-1", "status": "SUCCESS",
+                          "response": "Findings: none.\\nVERDICT: APPROVE\\n"}))
+    elif mode == "revise":
+        print("warning: noisy line before json")
+        print(json.dumps({"conversation_id": "cid-2", "status": "SUCCESS",
+                          "response": "- a.txt:1 missing check\\nVERDICT: REVISE\\n"}))
+    elif mode == "auth":
+        print(json.dumps({"conversation_id": "", "status": "ERROR", "response": "",
+                          "error": "authentication failed or timed out"}))
+        sys.exit(1)
+    elif mode == "credit":
+        print(json.dumps({"conversation_id": "", "status": "ERROR", "response": "",
+                          "error": "status 429 quota exceeded"}))
+        sys.exit(1)
+""")
+
+
+class AntigravityReviewTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.repo = os.path.join(self.tmp, "repo")
+        subprocess.run(["git", "init", "-q", self.repo], check=True)
+        g = ["git", "-C", self.repo, "-c", "user.name=t", "-c", "user.email=t@l"]
+        with open(os.path.join(self.repo, "a.txt"), "w") as fh:
+            fh.write("one\n")
+        subprocess.run(g[:3] + ["add", "a.txt"], check=True)
+        subprocess.run(g + ["commit", "-qm", "base"], check=True)
+        self.base = subprocess.check_output(["git", "-C", self.repo, "rev-parse", "HEAD"], text=True).strip()
+        with open(os.path.join(self.repo, "a.txt"), "a") as fh:
+            fh.write("two\n")
+        subprocess.run(g + ["commit", "-qam", "change"], check=True)
+        self.head = subprocess.check_output(["git", "-C", self.repo, "rev-parse", "HEAD"], text=True).strip()
+        fake = os.path.join(self.tmp, "agy")
+        with open(fake, "w") as fh:
+            fh.write(FAKE_AGY)
+        os.chmod(fake, 0o755)
+        if os.name == "nt":
+            with open(fake + ".cmd", "w") as fh:
+                fh.write('@"%s" "%s" %%*\r\n' % (sys.executable, fake))
+            fake += ".cmd"
+        self.state = os.path.join(self.tmp, "state")
+        self.out = os.path.join(self.tmp, "result.json")
+        self.env = dict(os.environ, AI_REVIEW_SIMPLE_AGY=fake, AI_REVIEW_SIMPLE_FAKE_STATE=self.state,
+                        PYTHONDONTWRITEBYTECODE="1")
+
+    def tearDown(self):
+        ars._force_rmtree(self.tmp)
+
+    def run_review(self, mode):
+        with open(self.state + ".mode", "w") as fh:
+            fh.write(mode)
+        proc = subprocess.run(
+            [sys.executable, SCRIPT, "--provider", "antigravity", "--repo", self.repo,
+             "--base", self.base, "--head", self.head, "--out", self.out],
+            env=self.env, capture_output=True, text=True)
+        with open(self.out) as fh:
+            return proc.returncode, json.load(fh)
+
+    def test_approve_and_revise_verdicts(self):
+        rc, res = self.run_review("approve")
+        self.assertEqual((rc, res["verdict"], res["provider"]), (0, "APPROVE", "antigravity"))
+        recorded = json.load(open(self.state + ".args"))
+        self.assertIn("--mode", recorded["args"])
+        self.assertEqual(recorded["args"][recorded["args"].index("--mode") + 1], "plan")
+        self.assertNotEqual(os.path.realpath(recorded["cwd"]), os.path.realpath(self.repo))
+        rc, res = self.run_review("revise")
+        self.assertEqual((rc, res["verdict"]), (0, "REVISE"))
+        self.assertIn("a.txt:1 missing check", res["findings"])
+
+    def test_auth_and_credit_exit_unavailable(self):
+        rc, res = self.run_review("auth")
+        self.assertEqual((rc, res["verdict"]), (3, None))
+        self.assertIn("authentication", res["error"])
+        rc, res = self.run_review("credit")
+        self.assertEqual((rc, res["verdict"], res["error"]), (3, None, "out-of-credit"))
+
+    def test_missing_agy_binary_exits_unavailable(self):
+        self.env["AI_REVIEW_SIMPLE_AGY"] = os.path.join(self.tmp, "no-such-agy")
+        rc, res = self.run_review("approve")
+        self.assertEqual((rc, res["verdict"]), (3, None))
+        self.assertIn("not found", res["error"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

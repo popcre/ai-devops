@@ -28,6 +28,7 @@ config/repository-coverage.json
 config/task-gates.schema.json
 config/reviewer-ci-paths.txt
 skills/shared/ask-glm/**
+skills/shared/ask-antigravity/**
 templates/delegation/debate-turn.md
 tests/lib-test-harness.sh
 tests/lib-test-part.sh
@@ -133,6 +134,7 @@ bin/ai-second-opinion
 bin/ai-second-opinion.cmd
 tests/test_ai_second_opinion.py
 bin/ai-hy4*
+bin/ai-antigravity*
 tools/reviewer_routes.py
 tools/deepseek_harness_chat.py
 config/reviewer-routes.json
