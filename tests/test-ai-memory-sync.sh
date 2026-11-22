@@ -22,7 +22,7 @@ cat > "$SEED/memory/sample/MEMORY.md" <<'EOF'
 # Memory index - sample
 
 - [hub](hub.md) - hub fact.
-- [stay](stay.md) - fact that keeps project health active after forget.
+- [stay](stay.md) — fact that keeps project health active after forget.
 EOF
 printf 'hub fact\n' > "$SEED/memory/sample/hub.md"
 printf 'stay fact\n' > "$SEED/memory/sample/stay.md"
@@ -49,6 +49,43 @@ sync_a() {
   GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.autocrlf GIT_CONFIG_VALUE_0=true \
     bash "$ROOT/bin/ai-memory-sync" "$@"
 }
+
+# The navigation-only transaction preserves descriptions, links, fact bytes,
+# and the machine index. It never stamps a normal sync as completed.
+COMPACT_REMOTE="$TMP/compact-private.git"
+cp -a "$REMOTE" "$COMPACT_REMOTE"
+compact_index() {
+  HOME="$HOME_A" CLAUDE_HOME="$CLAUDE_A" \
+  AI_MEMORY_TEST_MODE=1 AI_MEMORY_TEST_PRIVATE=1 \
+  AI_MEMORY_TOOL_ROOT="$ROOT" AI_MEMORY_REMOTE="$COMPACT_REMOTE" \
+  AI_MEMORY_HUB="$TMP/compact-hub" AI_MEMORY_LOG="$TMP/compact.log" \
+    bash "$ROOT/bin/ai-memory-sync" compact-index "$@"
+}
+if compact_index ../sample > "$TMP/compact.out" 2>&1; then
+  fail "navigation compaction accepted an escaping project"
+fi
+cp "$CLAUDE_A/projects/C--repos-sample/memory/MEMORY.md" "$TMP/machine-index.before"
+compact_index sample > "$TMP/compact.out"
+compact_head="$(git --git-dir="$COMPACT_REMOTE" rev-parse main)"
+compact_paths="$(git --git-dir="$COMPACT_REMOTE" diff-tree --no-commit-id --name-only -r "$compact_head")"
+[[ "$compact_paths" == "memory/sample/MEMORY.md" ]] ||
+  fail "navigation compaction modified non-index content"
+cat > "$TMP/compact.expected" <<'EOF'
+# Memory index - sample
+
+- [hub](hub.md): hub fact.
+- [stay](stay.md): fact that keeps project health active after forget.
+EOF
+git --git-dir="$COMPACT_REMOTE" show main:memory/sample/MEMORY.md > "$TMP/compact.actual"
+cmp -s "$TMP/compact.expected" "$TMP/compact.actual" ||
+  fail "navigation compaction did not preserve the exact links and descriptions"
+cmp -s "$TMP/machine-index.before" "$CLAUDE_A/projects/C--repos-sample/memory/MEMORY.md" ||
+  fail "navigation compaction changed machine memory"
+[[ ! -e "$HOME_A/.cache/ai-memory-sync.last-success" ]] ||
+  fail "navigation compaction marked ordinary sync successful"
+compact_index sample > "$TMP/compact.out"
+[[ "$(git --git-dir="$COMPACT_REMOTE" rev-parse main)" == "$compact_head" ]] ||
+  fail "navigation compaction was not idempotent"
 
 # A restore-from-zero home has managed skills but no Claude project memory yet.
 # Pulling must validate the hub and succeed without inventing project paths or
