@@ -1391,6 +1391,7 @@ cmd_check(){
   local target_head="" installed_checkout="" installed_launcher="" first_install=0
   local small_entry="" small_rows="" small_quote="" action_manifest_stdin=0 action_manifest_file="" action_stage=initial-forward
   local application_release_target="" application_workflow_target="" base_explicit=0 application_release_ready=0
+  local pgss_restart_authorized=0 pgss_restart_summary=""
   local published_refresh=0 refresh_head=""
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -1431,7 +1432,7 @@ cmd_check(){
   fi
   case "$action_stage" in initial-forward) ;; original-restoration) [ "$action_manifest_stdin" -eq 1 ] || die 'restoration stage requires bounded action stdin.' ;; *) die 'unknown bounded action stage.' ;; esac
   if [ "$action_manifest_stdin" -eq 1 ]; then
-    { { [ "$action" = database ] && [ -n "$reviewer_approval" ]; } || [ "$action" = offline-private-capture-transform ]; } && [ -z "$base$small_entry" ] || die 'bounded action stdin requires a closed native action and unchanged recorded task base.'
+    { { [ "$action" = database ] && [ -n "$reviewer_approval" ]; } || [ "$action" = offline-private-capture-transform ] || { [ "$action" = production ] && [ -n "$acknowledge" ] && [ -z "$reviewer_approval" ]; }; } && [ -z "$base$small_entry" ] || die 'bounded action stdin requires a closed native action and unchanged recorded task base.'
     action_manifest_file="$(umask 077; mktemp)" || die 'cannot reserve private action stdin.'
     trap "$(printf 'rm -f -- %q' "$action_manifest_file")" EXIT
     head -c 16777217 > "$action_manifest_file" || die 'cannot retain bounded action stdin.'
@@ -1814,9 +1815,36 @@ sys.stdout.buffer.write(("\n".join(names) + "\n").encode("utf-8", "surrogateesca
     # fresh from the fixed canonical URL with no system, global, or repository
     # Git config (so no insteadOf rewrite or local ref can stand in for it).
     if [ "$effective" = infrastructure ] && [ -n "$release_gate" ]; then
-      local infra_origin infra_head infra_main infra_status
+      local infra_origin infra_head infra_main infra_status py_cmd
       infra_origin="$(git -C "$TOPLEVEL" remote get-url origin 2>/dev/null || true)"
       infra_head="$(git -C "$TOPLEVEL" rev-parse HEAD 2>/dev/null || true)"
+      if [ "$IDENTITY" = popcre/shared-db ]; then
+        py_cmd="$(command -v python3 2>/dev/null || command -v python 2>/dev/null || true)"
+        infra_main="$(GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_TERMINAL_PROMPT=0 \
+          timeout 30 git ls-remote --exit-code https://github.com/popcre/shared-db.git refs/heads/main 2>/dev/null \
+          | awk 'NR==1 && $2=="refs/heads/main" {print $1}')" || infra_main=""
+        if [ "$action" = production ] && [ "$declared" = infrastructure ] \
+          && [ "$release_gate" = reviewed-production-dispatch ] \
+          && [ -n "$py_cmd" ] && [ -z "${BASH_ENV+x}${ENV+x}" ] \
+          && case "$(uname -s)" in Linux|MINGW*|MSYS*|CYGWIN*) true ;; *) false ;; esac \
+          && case "$infra_origin" in
+               https://github.com/popcre/shared-db|https://github.com/popcre/shared-db.git|\
+               git@github.com:popcre/shared-db|git@github.com:popcre/shared-db.git) true ;;
+               *) false ;;
+             esac \
+          && application_release_file_blob "$CONSUMER_FILE_NAME" >/dev/null \
+          && infra_status="$(git -c core.fsmonitor=false -C "$TOPLEVEL" --no-optional-locks status --porcelain --untracked-files=all --ignored 2>/dev/null)" \
+          && [ -z "$infra_status" ] && [ -n "$infra_head" ] && [ "$infra_head" = "$infra_main" ] \
+          && [ -z "$small_entry$target_head$installed_checkout$installed_launcher$reviewer_approval" ] \
+          && [ "$first_install" -eq 0 ] && [ "$action_manifest_stdin" -eq 1 ] \
+          && [ "$action_stage" = initial-forward ] \
+          && pgss_restart_summary="$("$py_cmd" -I "$ROOT/tools/supabase_capacity_restart_profile.py" \
+               --repo "$TOPLEVEL" --head "$infra_head" --main "$infra_main" < "$action_manifest_file")"; then
+          pgss_restart_authorized=1
+        else
+          release_gate=""
+        fi
+      else
       infra_main="$(cd / && env -i PATH=/usr/bin:/bin HOME=/nonexistent GIT_CONFIG_NOSYSTEM=1 \
         GIT_CONFIG_GLOBAL=/dev/null GIT_TERMINAL_PROMPT=0 \
         timeout 30 git ls-remote --exit-code https://github.com/u2giants/ansible.git refs/heads/main 2>/dev/null \
@@ -1835,6 +1863,7 @@ sys.stdout.buffer.write(("\n".join(names) + "\n").encode("utf-8", "surrogateesca
         && [ -z "$small_entry$target_head$installed_checkout$installed_launcher" ] \
         && [ "$first_install" -eq 0 ] && [ "$action_manifest_stdin" -eq 0 ] \
         || release_gate=""
+      fi
     fi
     if [ "$protected" = true ] && [ -z "$release_gate" ]; then
       blocked "$(printf 'ai-task-gates: STOP. "%s" is forbidden for the protected class "%s" in %s.\nA protected forbidden action has no reviewer-approval and no acknowledge path outside its closed owner release.\nNarrow the change set out of protected paths, or change this policy through its own path.' \
@@ -1908,8 +1937,11 @@ sys.stdout.buffer.write(("\n".join(names) + "\n").encode("utf-8", "surrogateesca
       blocked "$(printf 'ai-task-gates: STOP. "%s" is not a gate for a "%s" change in %s.\nRequired gates for this class: %s\nTo proceed, the owner must authorize this exact action and resource; re-run with --acknowledge "<owner authorization>". No AI reviewer verdict is required (#2041).' \
         "$action" "$effective" "$IDENTITY" "${required:-<none>}")"
     fi
-    [ "$action_manifest_stdin" -eq 0 ] \
+    { [ "$action_manifest_stdin" -eq 0 ] || [ "$pgss_restart_authorized" -eq 1 ]; } \
       || blocked "$(printf 'ai-task-gates: STOP before "%s". A bounded stdin action cannot take the owner-authorization route.' "$action")"
+    if [ "$pgss_restart_authorized" -eq 1 ]; then
+      acknowledge="$acknowledge; bounded workflow dispatch only: $pgss_restart_summary"
+    fi
     state_record_override owner-authorization "$action" "$acknowledge" "$effective" \
       && jq -e --arg r "$acknowledge" --arg a "$action" '.overrides | map(select(.kind=="owner-authorization" and .action==$a and .reason==$r)) | length>0' "$(state_path)" >/dev/null 2>&1 \
       || blocked 'ai-task-gates: STOP. The owner authorization could not be recorded in the task state; nothing was released.'

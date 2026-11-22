@@ -503,6 +503,14 @@
           "class": "code"
         },
         {
+          "glob": "tools/supabase_capacity_restart_profile.py",
+          "class": "code"
+        },
+        {
+          "glob": "config/supabase-capacity-restart-profile.json",
+          "class": "code"
+        },
+        {
           "glob": "tools/application_workflow_target.py",
           "class": "code"
         },
