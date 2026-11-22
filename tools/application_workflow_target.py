@@ -145,6 +145,8 @@ DESIGNFLOW_QA_TARGETS = {
             "maximum_items": 1,
             "maximum_licensing_status_writes": 1,
             "maximum_teams_messages": 1,
+            "maximum_email_recipients": 0,
+            "email_fanout_suppressed": True,
             "test_prefix_required": True,
             "recipient_set_must_match": True,
             "existing_records_read_only": True,

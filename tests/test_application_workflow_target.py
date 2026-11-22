@@ -250,6 +250,18 @@ class BoundedDesignFlowQATarget(ClosedRecoveryTarget):
             with self.subTest(scope=name):
                 self.assertEqual(self.validate(self.declaration(name)), 0)
 
+    def test_item_master_test_profile_suppresses_all_group_email_fanout(self):
+        declaration = self.declaration("item-master-teams-delivery")
+        limits = declaration["limits"]
+        self.assertEqual(limits["maximum_email_recipients"], 0)
+        self.assertIs(limits["email_fanout_suppressed"], True)
+        for field, value in (("maximum_email_recipients", 1),
+                             ("email_fanout_suppressed", False)):
+            candidate = copy.deepcopy(declaration)
+            candidate["limits"][field] = value
+            with self.subTest(field=field):
+                self.assertEqual(self.validate(candidate), 1)
+
     def test_profiles_reject_expiry_route_scope_binding_and_production_changes(self):
         for name in TARGET.DESIGNFLOW_QA_TARGETS:
             declaration = self.declaration(name)
