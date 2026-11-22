@@ -60,9 +60,9 @@ EOF
 chmod +x "$STUB_CLI"
 
 out="$(AI_AGY_CLI="$STUB_CLI" "$AI_AGY" ask "hello world")"
-assert_contains "$out" "--print --mode plan" "ask defaults to --print --mode plan"
+assert_contains "$out" "--mode plan" "ask defaults to --mode plan"
 assert_contains "$out" "--output-format text" "ask defaults to --output-format text"
-assert_contains "$out" "hello world" "ask passes prompt"
+assert_contains "$out" "--print hello world" "ask passes --print with prompt last"
 
 # 5. Stub CLI: --json-output wraps plain text into JSON object
 out="$(AI_AGY_CLI="$STUB_CLI" "$AI_AGY" ask --json-output "hello json")"

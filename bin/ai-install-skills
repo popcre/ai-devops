@@ -233,8 +233,8 @@ if ! $ADOPT_GLOBALS; then
       SYNC_GLOBALS_BOOTSTRAP=true
     fi
   done <<EOF
-$REPO_ROOT/skills/claude/sync-dotfiles/SKILL.md|$CLAUDE_HOME/skills/sync-dotfiles/SKILL.md
-$REPO_ROOT/skills/codex/codex-sync-dotfiles/SKILL.md|$CODEX_HOME/skills/codex-sync-dotfiles/SKILL.md
+$REPO_ROOT/skills/shared/sync-dotfiles/SKILL.md|$CLAUDE_HOME/skills/sync-dotfiles/SKILL.md
+$REPO_ROOT/skills/shared/codex-sync-dotfiles/SKILL.md|$CODEX_HOME/skills/codex-sync-dotfiles/SKILL.md
 EOF
 fi
 

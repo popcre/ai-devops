@@ -59,7 +59,7 @@ if AI_TRANSCRIPT_TEST_MODE=1 AI_TRANSCRIPT_TEST_PRIVATE=1 \
   fail "non-repository destination was accepted"
 fi
 
-[[ "$(head -1 "$ROOT/skills/claude/claude-transcript-backup/SKILL.md")" == '---' ]] ||
+[[ "$(head -1 "$ROOT/skills/shared/claude-transcript-backup/SKILL.md")" == '---' ]] ||
   fail "Claude transcript skill frontmatter is not on line 1"
 
 python3 - "$AI_GH_STATE_DIR/measurements" <<'PY' || fail 'privacy receipts lost failure/refusal/skipped boundaries'

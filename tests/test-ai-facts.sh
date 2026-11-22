@@ -29,5 +29,5 @@ before="$(find "$TMP/hub" -type f -printf '%P %s %T@\n' | sort)"; "$SCRIPT" sear
 [ "$before" = "$after" ] && ok 'fact access never writes the hub' || bad 'fact access never writes the hub'
 unset AI_FACTS_ALLOW_FIXTURE
 check 'noncanonical root is refused without fixture override' "! '$SCRIPT' index >/dev/null 2>&1"
-check 'skill forbids Codex SQLite access' "grep -Fq 'Never read or synchronize Codex SQLite memory' '$ROOT/skills/codex/codex-portable-facts/SKILL.md'"
+check 'skill forbids Codex SQLite access' "grep -Fq 'Never read or synchronize Codex SQLite memory' '$ROOT/skills/shared/codex-portable-facts/SKILL.md'"
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"; [ "$FAIL" -eq 0 ]

@@ -1,6 +1,6 @@
 ---
 name: gemini-code-delegation
-description: "FROZEN 2026-10-13 (popcre/ai-devops#1714), best-effort; callable by name. Gemini 3.8 Flash via ai-gemini for an independent review in a disposable copy. Use for ask Gemini, use Gemini, Gemini review, run this by Gemini, or Gemini 3.8 Flash."
+description: "FROZEN 2026-10-13 (popcre/ai-devops#1714), legacy Gemini 3.8 Flash wrapper (`ai-gemini`) only. For current Antigravity + Gemini second opinions or reviews, use `ask-antigravity` (`ai-antigravity`)."
 ---
 
 # Gemini code review

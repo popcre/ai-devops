@@ -167,7 +167,12 @@ and a Stop completion-check hook in `~/.gemini/config/hooks.json` via
   ceiling (`AI_AGY_ASK_TIMEOUT`, default 900s). Refuses `--yolo`,
   `--dangerously-skip-permissions`, and `--never-ask`. Health:
   `ai-agy doctor [--live]`.
-- **No Antigravity reviewer.** Interactive client only (ZCode/MiMo pattern).
+- **Second opinions and GitHub reviews:** `ai-antigravity` (thin entry to
+  `bin/ai-second-opinion antigravity`, skill `ask-antigravity`) and the
+  `antigravity` slot in `bin/ai-review-simple` (`ROTATION`) drive `agy` with
+  Gemini (`gemini-4-neon-medium` by default; override `AI_ANTIGRAVITY_MODEL`)
+  in a read-only private repository copy. On hosts where `agy` is absent or not
+  signed in, calls exit 3 (unavailable) and CI review falls through cleanly.
 
 ## Important: the exact flags may differ on your machine
 

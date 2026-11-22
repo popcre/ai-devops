@@ -117,7 +117,7 @@ cmd_ask() {
 
   local cli rc
   cli="$(resolve_cli)"
-  local -a argv=(--print --mode "$mode" --print-timeout "${ASK_TIMEOUT}s")
+  local -a argv=(--mode "$mode" --print-timeout "${ASK_TIMEOUT}s")
   [ -n "$model" ] && argv+=(--model "$model")
   [ -n "$effort" ] && argv+=(--effort "$effort")
   if [ "$json_out" = 1 ]; then
@@ -125,7 +125,7 @@ cmd_ask() {
   else
     argv+=(--output-format text)
   fi
-  argv+=("$prompt")
+  argv+=(--print "$prompt")
 
   out="$(mktemp)"; err="$(mktemp)"
   trap 'rm -f "$out" "$err"' EXIT

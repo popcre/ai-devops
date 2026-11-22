@@ -276,7 +276,7 @@ class RegistryTests(Base):
                           "stepfun", "hy4-openrouter"])
         proc = subprocess.run([sys.executable, SCRIPT, "--rotation", "3"], env=self.env,
                               capture_output=True, text=True)
-        self.assertEqual(proc.stdout.split(), ["stepfun", "muse", "glm", "deepseek"])
+        self.assertEqual(proc.stdout.split(), ["stepfun", "antigravity", "muse", "glm", "deepseek"])
 
     def test_classification_order(self):
         self.assertEqual(RR.classify("HTTP 403 forbidden"), ("terminal", "policy"))

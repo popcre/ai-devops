@@ -44,13 +44,14 @@ class RuleTests(unittest.TestCase):
         s = ars.combine([r("deepseek", None), r("stepfun", "APPROVE"), r("muse", "REJECT")], HEAD)
         self.assertEqual((s["state"], s["reviewer"]), ("pass", "stepfun"))
 
-    def test_rotation_is_pr_mod_4_with_fallthrough(self):
-        self.assertEqual(ars.rotation(8), ["muse", "glm", "deepseek", "stepfun"])
-        self.assertEqual(ars.rotation(2045), ["glm", "deepseek", "stepfun", "muse"])
+    def test_rotation_is_pr_mod_5_with_fallthrough(self):
+        self.assertEqual(ars.rotation(10), ["muse", "glm", "deepseek", "stepfun", "antigravity"])
+        self.assertEqual(ars.rotation(2046), ["glm", "deepseek", "stepfun", "antigravity", "muse"])
         self.assertEqual(ars.rotation(3)[0], "stepfun")
-        out = subprocess.run([sys.executable, SCRIPT, "--rotation", "6"], capture_output=True,
+        self.assertEqual(ars.rotation(4)[0], "antigravity")
+        out = subprocess.run([sys.executable, SCRIPT, "--rotation", "7"], capture_output=True,
                              text=True, check=True).stdout.split()
-        self.assertEqual(out, ["deepseek", "stepfun", "muse", "glm"])
+        self.assertEqual(out, ["deepseek", "stepfun", "antigravity", "muse", "glm"])
 
     def test_docs_only_classifier(self):
         yes = [["README.md"], ["docs/x.json", "HANDOFF.d/a.txt", "a/b/NOTES.md"], ["docs/plan_x.md"]]
