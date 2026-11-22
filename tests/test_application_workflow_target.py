@@ -245,7 +245,7 @@ class BoundedDesignFlowQATarget(ClosedRecoveryTarget):
             with patch("sys.argv", ["validator", str(self.root), "target.json"]):
                 return TARGET.main()
 
-    def test_all_three_exact_sandbox_profiles_are_admitted(self):
+    def test_all_exact_sandbox_profiles_are_admitted(self):
         for name in TARGET.DESIGNFLOW_QA_TARGETS:
             with self.subTest(scope=name):
                 self.assertEqual(self.validate(self.declaration(name)), 0)
@@ -257,6 +257,29 @@ class BoundedDesignFlowQATarget(ClosedRecoveryTarget):
         self.assertIs(limits["email_fanout_suppressed"], True)
         for field, value in (("maximum_email_recipients", 1),
                              ("email_fanout_suppressed", False)):
+            candidate = copy.deepcopy(declaration)
+            candidate["limits"][field] = value
+            with self.subTest(field=field):
+                self.assertEqual(self.validate(candidate), 1)
+
+    def test_item_master_recipient_check_is_one_fixed_test_message(self):
+        declaration = self.declaration("item-master-teams-check")
+        self.assertEqual(declaration["authorized_teams_group"], "MasterData migration")
+        self.assertEqual(declaration["message_prefix"], "TEST ONLY:")
+        self.assertEqual(declaration["routes"], ["POST /qa/teams-masterdata-recipient-check"])
+        limits = declaration["limits"]
+        self.assertEqual(limits["maximum_teams_messages"], 1)
+        self.assertEqual(limits["maximum_email_recipients"], 0)
+        self.assertEqual(limits["maximum_attachment_count"], 0)
+        self.assertIs(limits["email_fanout_suppressed"], True)
+        self.assertIs(limits["recipient_set_must_match"], True)
+        self.assertIs(limits["no_database_writes"], True)
+        for field, value in (("maximum_teams_messages", 2),
+                             ("maximum_email_recipients", 1),
+                             ("maximum_attachment_count", 1),
+                             ("email_fanout_suppressed", False),
+                             ("recipient_set_must_match", False),
+                             ("no_database_writes", False)):
             candidate = copy.deepcopy(declaration)
             candidate["limits"][field] = value
             with self.subTest(field=field):
