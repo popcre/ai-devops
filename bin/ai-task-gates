@@ -932,6 +932,8 @@ application_workflow_finish(){ # MANIFEST EFFECTIVE_CLASS
   fi
   [ "$manifest" = .ai-devops/application-workflow-target.json ] \
     || blocked 'ai-task-gates: STOP. Application workflow manifest path is not canonical.'
+  [ "$(jqr --raw-output '.repository // empty' "$TOPLEVEL/$manifest" 2>/dev/null)" = "$IDENTITY" ] \
+    || blocked 'ai-task-gates: STOP. Application workflow manifest belongs to a different DesignFlow application.'
   py="$(command -v python3 || command -v python)" \
     || blocked 'ai-task-gates: STOP. Application workflow validator runtime is unavailable.'
   "$py" "$REAL_DIR/../tools/application_workflow_target.py" "$TOPLEVEL" "$manifest" \

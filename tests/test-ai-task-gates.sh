@@ -1972,29 +1972,59 @@ check 'workflow cannot omit explicit target' "rc 3 '$WF' check --before applicat
 check 'workflow cannot override base' "rc 3 '$WF' check $WF_ARGS --base HEAD --reviewer-approval '$WF_APPROVAL'"
 check 'workflow needs no reviewer approval (#2041)' "rc 0 '$WF' check $WF_ARGS"
 check 'workflow ignores a non-independent or untested report (review is advisory)' "rc 0 '$WF' check $WF_ARGS --reviewer-approval \"\$(appr '$WF' application-workflow '$WF_HEAD' '.tests=null')\""
-for QA_REPO in popcre/designflow-tracking popcre/designflow-item-master; do
-  QA_DIR="$TMP/qa-${QA_REPO##*/}"
+for QA_PROFILE in tracking-photo-removal tracking-reminder-retry item-master-teams-delivery; do
+  case "$QA_PROFILE" in
+    tracking-photo-removal|tracking-reminder-retry) QA_REPO=popcre/designflow-tracking ;;
+    item-master-teams-delivery) QA_REPO=popcre/designflow-item-master ;;
+  esac
+  QA_DIR="$TMP/qa-$QA_PROFILE"
+  QA_EVIDENCE="$TMP/qa-private-$QA_PROFILE.json"
   newrepo "$QA_DIR" "$QA_REPO"
   (cd "$QA_DIR" && "$GATES" start --class reviewer-safety >/dev/null)
   mkdir -p "$QA_DIR/.ai-devops"
-  python3 - "$ROOT" "$QA_DIR" "${QA_REPO##*/}" <<'PY'
-import datetime, importlib.util, json, pathlib, subprocess, sys
+python3 - "$ROOT" "$QA_DIR" "$QA_PROFILE" "$QA_EVIDENCE" <<'PY'
+import datetime, hashlib, hmac, importlib.util, json, os, pathlib, subprocess, sys
 spec = importlib.util.spec_from_file_location('target', sys.argv[1] + '/tools/application_workflow_target.py')
 mod = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(mod)
-name = 'tracking-photo-removal' if sys.argv[3] == 'designflow-tracking' else 'item-master-teams-delivery'
+name = sys.argv[3]
 target = dict(mod.DESIGNFLOW_QA_TARGETS[name])
+key = bytes.fromhex('b' * 64)
+raw = {}
+for digest_name in target['private_binding_keys']:
+  raw_name = digest_name.removesuffix('_sha256')
+  if raw_name == 'recipient': raw[raw_name] = target['authorized_recipient']
+  elif raw_name == 'teams_group': raw[raw_name] = target['authorized_teams_group']
+  elif raw_name == 'recipient_set': raw[raw_name] = ['authorized-member-id']
+  elif raw_name == 'cleanup_ids': raw[raw_name] = ['fixture-record-id']
+  else: raw[raw_name] = 'private-' + name + '-' + raw_name
+def digest(value):
+  encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(',', ':')).encode('utf-8')
+  return hmac.new(key, encoded, hashlib.sha256).hexdigest()
 target.update({
   'fixture_prefix': 'AI-QA-' + datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%d') + '-' + name + '-abcdef123456-',
   'source_head': subprocess.check_output(['git', '-C', sys.argv[2], 'rev-parse', 'HEAD'], text=True).strip(),
   'expires_at': (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=30)).strftime('%Y-%m-%dT%H:%M:%SZ'),
-  'bindings': {key: 'a' * 64 for key in target['private_binding_keys']},
+  'bindings': {binding: digest(raw[binding.removesuffix('_sha256')]) for binding in target['private_binding_keys']},
 })
 pathlib.Path(sys.argv[2] + '/.ai-devops/application-workflow-target.json').write_text(json.dumps(target))
+evidence = {'schema_version': 1, 'scope': name, 'hmac_key': key.hex(), 'bindings': raw}
+evidence_path = pathlib.Path(sys.argv[4])
+evidence_path.write_text(json.dumps(evidence))
+os.chmod(evidence_path, 0o600)
 PY
   git -C "$QA_DIR" add .ai-devops/application-workflow-target.json
   git -C "$QA_DIR" commit -qm 'declare bounded DesignFlow sandbox QA'
-  check "bounded QA admission succeeds for $QA_REPO" "rc 0 '$QA_DIR' check --before application-workflow --application-workflow-target .ai-devops/application-workflow-target.json"
+  check "bounded QA admission succeeds for $QA_PROFILE" "DESIGNFLOW_QA_PRIVATE_EVIDENCE='$QA_EVIDENCE' rc 0 '$QA_DIR' check --before application-workflow --application-workflow-target .ai-devops/application-workflow-target.json"
+  check "bounded QA admission refuses missing private evidence for $QA_PROFILE" "rc 3 '$QA_DIR' check --before application-workflow --application-workflow-target .ai-devops/application-workflow-target.json"
+  case "$QA_REPO" in
+    popcre/designflow-tracking) WRONG_ORIGIN=popcre/designflow-item-master ;;
+    popcre/designflow-item-master) WRONG_ORIGIN=popcre/designflow-tracking ;;
+  esac
+  git -C "$QA_DIR" remote set-url origin "https://github.com/$WRONG_ORIGIN.git"
+  (cd "$QA_DIR" && "$GATES" start --class reviewer-safety >/dev/null)
+  check "bounded QA admission refuses the wrong app origin for $QA_PROFILE" "DESIGNFLOW_QA_PRIVATE_EVIDENCE='$QA_EVIDENCE' rc 3 '$QA_DIR' check --before application-workflow --application-workflow-target .ai-devops/application-workflow-target.json"
+  git -C "$QA_DIR" remote set-url origin "https://github.com/$QA_REPO.git"
 done
 check 'unrelated repository cannot use DesignFlow QA admission' "rc 3 '$TMP/class' check --before application-workflow --application-workflow-target .ai-devops/application-workflow-target.json"
 cp "$WF/.ai-devops/application-workflow-target.json" "$TMP/wf-original"

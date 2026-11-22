@@ -6,6 +6,7 @@ live target identity immediately before requests and retain actual acceptance.
 import json
 import pathlib
 import datetime
+import hmac
 import math
 import os
 import re
@@ -100,6 +101,7 @@ DESIGNFLOW_QA_TARGETS = {
         "region": "us-east4",
         "service": "popcre-albert-tracking-sandbox",
         "scope": "tracking-reminder-retry",
+        "authorized_recipient": "u2giants@gmail.com",
         "routes": [
             "POST /prod-tracking/qa-fixtures",
             "POST /prod-tracking/qa-fixtures/:fixtureId/run",
@@ -131,6 +133,7 @@ DESIGNFLOW_QA_TARGETS = {
         "region": "us-east4",
         "service": "popcre-albert-item-sandbox",
         "scope": "item-master-teams-delivery",
+        "authorized_teams_group": "MasterData migration",
         "routes": [
             "POST /lib/createItem",
             "POST /detail/AddLicensingStatus",
@@ -740,6 +743,69 @@ def bounded_metadata(value, root, synthetic=True, maximum_hours=24,
         return False
 
 
+def private_qa_bindings(value, root, target):
+    """Compare public HMACs with owner-scoped values in a private evidence file."""
+    evidence_name = os.environ.get("DESIGNFLOW_QA_PRIVATE_EVIDENCE", "")
+    if not evidence_name:
+        return False
+    evidence_path = pathlib.Path(evidence_name).expanduser()
+    try:
+        if not evidence_path.is_absolute() or stat.S_ISLNK(evidence_path.lstat().st_mode):
+            return False
+        info = evidence_path.stat()
+        if not stat.S_ISREG(info.st_mode) or info.st_size > 16384:
+            return False
+        resolved = evidence_path.resolve(strict=True)
+        try:
+            resolved.relative_to(root)
+            return False
+        except ValueError:
+            pass
+        if os.name == "nt":
+            local_app_data = os.environ.get("LOCALAPPDATA", "")
+            if not local_app_data:
+                return False
+            resolved.relative_to(pathlib.Path(local_app_data).resolve(strict=True))
+        elif stat.S_IMODE(info.st_mode) & 0o077:
+            return False
+        with resolved.open("r", encoding="utf-8") as source:
+            evidence = json.load(source, object_pairs_hook=unique)
+    except (OSError, ValueError, TypeError):
+        return False
+    if (not isinstance(evidence, dict)
+            or evidence.keys() != {"schema_version", "scope", "hmac_key", "bindings"}
+            or type(evidence.get("schema_version")) is not int
+            or evidence["schema_version"] != 1
+            or evidence.get("scope") != target["scope"]
+            or not isinstance(evidence.get("hmac_key"), str)
+            or not re.fullmatch(r"[a-f0-9]{64}", evidence["hmac_key"])):
+        return False
+    raw_bindings = evidence.get("bindings")
+    expected_keys = {key.removesuffix("_sha256") for key in target["private_binding_keys"]}
+    if not isinstance(raw_bindings, dict) or raw_bindings.keys() != expected_keys:
+        return False
+    approved = {
+        "recipient": target.get("authorized_recipient"),
+        "teams_group": target.get("authorized_teams_group"),
+    }
+    if any(key in approved and not exact(raw_bindings[key], approved[key])
+           for key in raw_bindings):
+        return False
+    try:
+        key = bytes.fromhex(evidence["hmac_key"])
+        for digest_name, raw_name in ((name, name.removesuffix("_sha256"))
+                                      for name in target["private_binding_keys"]):
+            canonical = json.dumps(raw_bindings[raw_name], ensure_ascii=False,
+                                   sort_keys=True, separators=(",", ":"),
+                                   allow_nan=False).encode("utf-8")
+            digest = hmac.new(key, canonical, "sha256").hexdigest()
+            if not hmac.compare_digest(value["bindings"].get(digest_name, ""), digest):
+                return False
+    except (TypeError, ValueError):
+        return False
+    return True
+
+
 def bounded_designflow_qa(value, root):
     """Admit only one expiring, exact issue-specific DesignFlow QA declaration."""
     if not isinstance(value, dict):
@@ -757,6 +823,8 @@ def bounded_designflow_qa(value, root):
             continue
         if not bounded_metadata(value, root, maximum_hours=1,
                                 repository=target["repository"]):
+            continue
+        if not private_qa_bindings(value, root, target):
             continue
         if not re.fullmatch(r"AI-QA-[0-9]{8}-" + re.escape(name) + r"-[a-z0-9]{6,24}-",
                             value["fixture_prefix"]):

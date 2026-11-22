@@ -1,8 +1,10 @@
 """Offline adversarial tests of the closed HTS retry declaration."""
 import copy
 import datetime
+import hmac
 import importlib.util
 import json
+import os
 import pathlib
 import tempfile
 import subprocess
@@ -186,6 +188,10 @@ class BoundedAcceptanceTarget(ClosedRecoveryTarget):
 class BoundedDesignFlowQATarget(ClosedRecoveryTarget):
     def setUp(self):
         super().setUp()
+        self.evidence_temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.evidence_temp.cleanup)
+        self.evidence_path = pathlib.Path(self.evidence_temp.name) / "private-evidence.json"
+        self.evidence_enabled = True
         subprocess.run(["git", "init", "-q", str(self.root)], check=True)
         subprocess.run(["git", "-C", str(self.root), "-c", "user.name=Test",
                         "-c", "user.email=test@example.invalid", "commit", "--allow-empty", "-qm", "base"], check=True)
@@ -193,13 +199,51 @@ class BoundedDesignFlowQATarget(ClosedRecoveryTarget):
 
     def declaration(self, name):
         target = copy.deepcopy(TARGET.DESIGNFLOW_QA_TARGETS[name])
+        hmac_key = "b" * 64
+        raw_bindings = {}
+        for digest_name in target["private_binding_keys"]:
+            raw_name = digest_name.removesuffix("_sha256")
+            if raw_name == "recipient":
+                raw_bindings[raw_name] = target["authorized_recipient"]
+            elif raw_name == "teams_group":
+                raw_bindings[raw_name] = target["authorized_teams_group"]
+            elif raw_name == "recipient_set":
+                raw_bindings[raw_name] = ["authorized-member-id"]
+            elif raw_name == "cleanup_ids":
+                raw_bindings[raw_name] = ["fixture-record-id"]
+            else:
+                raw_bindings[raw_name] = f"private-{name}-{raw_name}"
+        key_bytes = bytes.fromhex(hmac_key)
+        manifest_bindings = {
+            digest_name: hmac.new(
+                key_bytes,
+                json.dumps(raw_bindings[digest_name.removesuffix("_sha256")],
+                           ensure_ascii=False, sort_keys=True,
+                           separators=(",", ":")).encode("utf-8"),
+                "sha256").hexdigest()
+            for digest_name in target["private_binding_keys"]
+        }
+        self.evidence_path.write_text(json.dumps({
+            "schema_version": 1,
+            "scope": name,
+            "hmac_key": hmac_key,
+            "bindings": raw_bindings,
+        }))
+        os.chmod(self.evidence_path, 0o600)
         target.update({
             "fixture_prefix": f"AI-QA-20261121-{name}-abcdef123456-",
             "source_head": self.head,
             "expires_at": (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=30)).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "bindings": {key: "a" * 64 for key in target["private_binding_keys"]},
+            "bindings": manifest_bindings,
         })
         return target
+
+    def validate(self, value):
+        self.path.write_text(json.dumps(value))
+        evidence = str(self.evidence_path) if self.evidence_enabled else str(self.evidence_path) + ".missing"
+        with patch.dict(os.environ, {"DESIGNFLOW_QA_PRIVATE_EVIDENCE": evidence}):
+            with patch("sys.argv", ["validator", str(self.root), "target.json"]):
+                return TARGET.main()
 
     def test_all_three_exact_sandbox_profiles_are_admitted(self):
         for name in TARGET.DESIGNFLOW_QA_TARGETS:
@@ -217,12 +261,28 @@ class BoundedDesignFlowQATarget(ClosedRecoveryTarget):
                 ("bindings", {**declaration["bindings"], "extra": "a" * 64}),
                 ("bindings", {**declaration["bindings"], next(iter(declaration["bindings"])): "bad"}),
                 ("fixture_prefix", f"AI-QA-20261121-other-abcdef123456-"),
+                ("issue", "https://github.com/popcre/designflow-tracking/issues/1"),
+                ("authorized_recipient", "someone-else@example.com"),
+                ("authorized_teams_group", "unapproved group"),
             ]
             for field, changed in mutations:
                 with self.subTest(scope=name, field=field):
                     candidate = copy.deepcopy(declaration)
                     candidate[field] = changed
                     self.assertEqual(self.validate(candidate), 1)
+
+    def test_private_evidence_is_required_and_must_match_each_hmac(self):
+        declaration = self.declaration("tracking-photo-removal")
+        self.evidence_enabled = False
+        self.assertEqual(self.validate(declaration), 1)
+        self.evidence_enabled = True
+        placeholders = {key: "a" * 64 for key in declaration["bindings"]}
+        self.assertEqual(self.validate({**declaration, "bindings": placeholders}), 1)
+        evidence = json.loads(self.evidence_path.read_text())
+        evidence["bindings"]["sample_id"] = "a different sample"
+        self.evidence_path.write_text(json.dumps(evidence))
+        os.chmod(self.evidence_path, 0o600)
+        self.assertEqual(self.validate(declaration), 1)
 
 
 class BoundedLegacyProofTarget(BoundedAcceptanceTarget):
