@@ -35,8 +35,14 @@ designflow-bff, designflow-item-master, designflow-tracking, designflow-data-syn
 
 ## Standing rules (in force for the whole session)
 
-- Work ONLY on the user branch. Pull from `develop`. **Never touch `main`.**
-  Never merge PRs — the human developer (Uma, `devopswithkube`) reviews them.
+- Work ONLY on the user branch. Pull from `develop`. Never commit directly to
+  `main` or `develop`.
+- **Merging (owner ruling 2026-11-22):** AI may merge its own PRs into
+  `develop` and `main` without waiting for Uma — only after every rule in the
+  repo's `GATEKEEPER.md` is met and evidenced on the PR. Read it before any
+  merge or PROD data change. Changes to the `designflow` database still need
+  Uma's (`devopswithkube`) prior approval; PROD data changes are rehearsed on
+  DEV and agreed with a second AI reviewer first.
 - All AG-Grid coding per `search_docs` in the AG-Grid MCP server (Angular 35.1.0
   is the latest version it exposes; the app runs AG-Grid Enterprise v35/v36).
   Theming API only (`themeQuartz.withParams`) — no legacy `--ag-*` CSS variables,
