@@ -86,6 +86,12 @@ PROVIDERS = {
         "key_file": "zai-coding-plan-key.json", "key_env": "ZHIPU_API_KEY",
         "override": "ZAI_API_KEY", "timeout": 1200, "provider": {},
     },
+    "antigravity": {
+        "engine": "antigravity",
+        "model": os.environ.get("AI_ANTIGRAVITY_MODEL") or "gemini-4-neon-medium",
+        "key_file": None, "key_env": None, "override": None,
+        "timeout": 1200, "provider": None,
+    },
 }
 
 # Candidate reviewer entries built from the shared route registry
@@ -322,10 +328,61 @@ def resolve_opencode():
     return shutil.which("opencode")
 
 
+def resolve_antigravity():
+    """The Google Antigravity CLI (`agy`): explicit override, PATH, then standard install paths."""
+    override = os.environ.get("AI_REVIEW_SIMPLE_AGY") or os.environ.get("AI_AGY_CLI")
+    if override:
+        return override if os.path.isfile(override) and os.access(override, os.X_OK) else None
+    found = shutil.which("agy")
+    if found:
+        return found
+    if os.name == "nt" and os.environ.get("LOCALAPPDATA"):
+        win_cli = os.path.join(os.environ["LOCALAPPDATA"], "agy", "bin", "agy.exe")
+        if os.path.isfile(win_cli):
+            return win_cli
+    unix_cli = os.path.expanduser("~/.local/bin/agy")
+    if os.path.isfile(unix_cli) and os.access(unix_cli, os.X_OK):
+        return unix_cli
+    return None
+
+
+def read_antigravity_result(stdout):
+    """Parse `agy --output-format json` stdout into (response, conversation_id, error).
+
+    Tolerates leading non-JSON warning lines before the final JSON payload.
+    Only status == 'SUCCESS' with a non-empty response counts as an answer."""
+    text = (stdout or "").strip()
+    if not text:
+        return "", None, "empty output"
+    data = None
+    try:
+        data = json.loads(text)
+    except ValueError:
+        for line in reversed(text.splitlines()):
+            line = line.strip()
+            if line.startswith("{"):
+                try:
+                    data = json.loads(line)
+                    break
+                except ValueError:
+                    continue
+    if not isinstance(data, dict):
+        return "", None, text[:500]
+    cid = data.get("conversation_id") or None
+    status = str(data.get("status") or "").upper()
+    response = data.get("response") if isinstance(data.get("response"), str) else ""
+    err = str(data.get("error") or "").strip()
+    if status != "SUCCESS" or not response.strip():
+        return "", cid, err or f"status={status or 'unknown'}"
+    return response, cid, ""
+
+
 def read_key(name):
     spec = PROVIDERS[name] if isinstance(name, str) else name
-    if os.environ.get(spec["override"]):
+    if spec.get("override") and os.environ.get(spec["override"]):
         return os.environ[spec["override"]]
+    if not spec.get("key_file"):
+        return None
     secrets = os.environ.get("AI_REVIEW_SIMPLE_SECRETS_DIR",
                              os.path.expanduser("~/.config/ai-devops/secrets"))
     try:
@@ -405,6 +462,8 @@ def make_workspace(repo, head, provider, tmp, spec=None, cache=None, affinity_id
     spec = spec or PROVIDERS[provider]
     home = os.path.join(tmp, "home")
     os.makedirs(home)
+    if spec.get("engine") == "antigravity":
+        return work, home
     if spec.get("engine") == "deepseek-harness":
         # A fresh private harness profile: only this route's adapter and model.
         profiles = os.path.join(tmp, "dsh", "profiles", "headless")
@@ -431,6 +490,8 @@ def make_workspace(repo, head, provider, tmp, spec=None, cache=None, affinity_id
 def run_once(provider, prompt, work, home, tmp, key, timeout, spec=None, observe=None):
     """One attempt. Returns (verdict, text, error)."""
     spec = spec or PROVIDERS[provider]
+    if spec.get("engine") == "antigravity":
+        return run_antigravity_once(spec, prompt, work, timeout, observe=observe)
     if spec.get("engine") == "deepseek-harness":
         return run_harness_once(spec, prompt, work, tmp, key, timeout, observe=observe)
     oc = resolve_opencode()
@@ -572,6 +633,58 @@ def run_harness_once(spec, prompt, work, tmp, key, timeout, observe=None):
                                               + problem[:500]).strip(), None
 
 
+def run_antigravity_once(spec, prompt, work, timeout, observe=None):
+    """One read-only Google Antigravity + Gemini attempt via `agy`."""
+    agy = resolve_antigravity()
+    if not agy:
+        return None, "", "local: antigravity CLI (agy) not found", None
+    env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "PYTHONDONTWRITEBYTECODE": "1"}
+    for n in ("HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "XDG_CONFIG_HOME",
+              "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME", "LANG", "TMPDIR",
+              "TEMP", "TMP", "SYSTEMROOT", "COMSPEC", "PATHEXT", "WINDIR",
+              "SSL_CERT_FILE", "SSL_CERT_DIR", "NODE_EXTRA_CA_CERTS",
+              "AI_REVIEW_SIMPLE_FAKE_STATE"):
+        if os.environ.get(n):
+            env[n] = os.environ[n]
+    cmd = [agy, "--mode", "plan", "--model", spec["model"], "--output-format", "json",
+           "--print-timeout", f"{timeout}s"]
+    proc = subprocess.Popen(cmd, cwd=work, env=env, stdin=subprocess.PIPE,
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            text=True, encoding="utf-8", errors="replace",
+                            start_new_session=hasattr(os, "killpg"))
+    try:
+        out, err = proc.communicate(prompt, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        try:
+            if hasattr(os, "killpg"):
+                os.killpg(proc.pid, signal.SIGKILL)
+            elif os.name == "nt":
+                subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                               capture_output=True)
+            else:
+                proc.kill()
+        except OSError:
+            pass
+        try:
+            out, _ = proc.communicate(timeout=10)
+        except Exception:
+            out = ""
+        if observe:
+            observe(out, "timeout")
+        return None, "", f"timeout after {timeout}s", None
+    response, _cid, ev_err = read_antigravity_result(out)
+    verdict = parse_verdict(response)
+    if observe:
+        observe(out, "verdict" if verdict else "failed")
+    if verdict:
+        return verdict, final_report(response, response), None, {"read": None, "write": None}
+    problem = redact("\n".join(x for x in (ev_err, (err or "")[-2000:]) if x.strip()))
+    if is_credit_error(problem):
+        return None, final_report(response, response), "out-of-credit: " + problem[:500], None
+    return None, final_report(response, response), (f"no verdict (exit {proc.returncode}): "
+                                                    + problem[:500]).strip(), None
+
+
 def review(args):
     start = time.monotonic()
     route = getattr(args, "route", None)
@@ -621,10 +734,12 @@ def review(args):
         result["error"] = f"refused: head mismatch (checkout {actual}, requested {head})"
         return finish(2)
     result["head"] = head
-    key = read_key(spec)
-    if not key:
-        result["error"] = "local: credential missing"
-        return finish(3)
+    key = None
+    if spec.get("engine") != "antigravity":
+        key = read_key(spec)
+        if not key:
+            result["error"] = "local: credential missing"
+            return finish(3)
     timeout = args.timeout or spec["timeout"]
     tmp = None
     try:
@@ -671,11 +786,11 @@ def review(args):
     return finish(0 if verdict else 3)
 
 
-ROTATION = ("muse", "glm", "deepseek", "stepfun")
+ROTATION = ("muse", "glm", "deepseek", "stepfun", "antigravity")
 
 
 def rotation(pr):
-    """REVISION rule 2: one reviewer per PR, PR number mod 4, then fall through."""
+    """REVISION rule 2: one reviewer per PR, PR number mod len(ROTATION), then fall through."""
     start = int(pr) % len(ROTATION)
     return list(ROTATION[start:] + ROTATION[:start])
 
