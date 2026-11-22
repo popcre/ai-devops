@@ -1972,10 +1972,10 @@ check 'workflow cannot omit explicit target' "rc 3 '$WF' check --before applicat
 check 'workflow cannot override base' "rc 3 '$WF' check $WF_ARGS --base HEAD --reviewer-approval '$WF_APPROVAL'"
 check 'workflow needs no reviewer approval (#2041)' "rc 0 '$WF' check $WF_ARGS"
 check 'workflow ignores a non-independent or untested report (review is advisory)' "rc 0 '$WF' check $WF_ARGS --reviewer-approval \"\$(appr '$WF' application-workflow '$WF_HEAD' '.tests=null')\""
-for QA_PROFILE in tracking-photo-removal tracking-reminder-retry item-master-teams-delivery; do
+for QA_PROFILE in tracking-photo-removal tracking-reminder-retry item-master-teams-delivery item-master-teams-check; do
   case "$QA_PROFILE" in
     tracking-photo-removal|tracking-reminder-retry) QA_REPO=popcre/designflow-tracking ;;
-    item-master-teams-delivery) QA_REPO=popcre/designflow-item-master ;;
+    item-master-teams-delivery|item-master-teams-check) QA_REPO=popcre/designflow-item-master ;;
   esac
   QA_DIR="$TMP/qa-$QA_PROFILE"
   QA_EVIDENCE="$TMP/qa-private-$QA_PROFILE.json"

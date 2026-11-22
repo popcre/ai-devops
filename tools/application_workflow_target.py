@@ -55,7 +55,7 @@ RECOVERY_TARGET = {
     },
 }
 
-# These three time-limited declarations authorize only the existing DesignFlow
+# These time-limited declarations authorize only the existing DesignFlow
 # sandbox proofs. The hashes bind private fixture IDs, recipient/group identity,
 # and cleanup IDs without placing those identifiers in GitHub source.
 DESIGNFLOW_QA_TARGETS = {
@@ -156,6 +156,37 @@ DESIGNFLOW_QA_TARGETS = {
         "private_binding_keys": ["actor_sha256", "item_id_sha256",
                                   "licensing_status_id_sha256", "teams_group_sha256",
                                   "recipient_set_sha256", "cleanup_ids_sha256"],
+    },
+    "item-master-teams-check": {
+        "schema_version": 1,
+        "repository": "popcre/designflow-item-master",
+        "issue": "https://github.com/popcre/designflow-item-master/issues/262",
+        "route": "authenticated-application-http",
+        "api_origin": "https://api.sandbox-albert.designflow.app/api/item_master",
+        "project": "lithe-breaker-323913",
+        "region": "us-east4",
+        "service": "popcre-albert-item-sandbox",
+        "scope": "item-master-teams-check",
+        "authorized_teams_group": "MasterData migration",
+        "message_prefix": "TEST ONLY:",
+        "routes": ["POST /qa/teams-masterdata-recipient-check"],
+        "limits": {
+            "synthetic_only": True,
+            "maximum_teams_messages": 1,
+            "maximum_email_recipients": 0,
+            "email_fanout_suppressed": True,
+            "maximum_attachment_count": 0,
+            "test_prefix_required": True,
+            "recipient_set_must_match": True,
+            "no_database_writes": True,
+            "existing_records_read_only": True,
+        },
+        "forbidden": ["production", "direct-sql", "schema", "real-records",
+                      "unlisted-route", "unlisted-recipient", "unlisted-group",
+                      "attachments", "repeat-send"],
+        "private_binding_keys": ["actor_sha256", "teams_chat_sha256",
+                                  "teams_group_sha256",
+                                  "recipient_set_sha256"],
     },
 }
 
