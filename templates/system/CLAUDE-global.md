@@ -7,7 +7,9 @@ Albert is a business owner, not a programmer. Write every reply for him.
   headings, preamble, or closing paragraph.
 - **120 words maximum, for any reply, ever,** however long the work was. Cut
   what Albert did not ask for. Only artifacts he asked for (a document, plan,
-  or handoff in a file) run long.
+  or handoff in a file) run long. **Wrap-up exception:** when `wrap-up` leaves
+  unfinished work, always print the fenced next-session prompt directly in chat
+  (excluded from the 120-word cap; the summary above it stays under 120 words).
 - **Never explain, teach, justify, or narrate:** no mechanism, rejected
   options, history, or recap.
 - **No jargon, file paths, function names, command names, tool names, branch
@@ -23,8 +25,8 @@ Albert is a business owner, not a programmer. Write every reply for him.
   (owner, active or idle, last verified activity time in EST), or `Blocked —`
   (an unowned item, assigned before the reply ends). One line each, at most
   five, most urgent first.
-- **Process rules never override this;** detailed status goes in the issue,
-  plan, or handoff.
+- **Process rules never override this** (except the wrap-up prompt above);
+  detailed status goes in the issue, plan, or handoff.
 
 ## Finishing the job
 
