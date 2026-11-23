@@ -10,19 +10,22 @@ advice only (owner ruling 2026-10-29, #2104): nothing waits on DeepSeek.
 
 ## Opinions and debates: `ai-deepseek-agent`
 
-A thread-preserving wrapper over the DeepSeek API. Each tool turn runs in a
-fresh remote-less copy of the repository (no network, no credentials); your
+A thread-preserving wrapper. Ordinary `send` and `reply` run the read-only
+DeepSeek Harness (OpenRouter) with built-in repository inspection in a
+disposable, remote-less copy of the repo (no network, no credentials); your
 checkout is never touched. Attach anything the tools cannot reach with
 `--file`.
 
 ```bash
-ai-deepseek-agent send "<brief>" [--file plan.md] [--repo-tools]  # prints SESSION_ID
+ai-deepseek-agent send "<brief>" [--file plan.md]                 # prints SESSION_ID (read-only harness)
 ai-deepseek-agent reply <session-id> "<rebuttal>"                 # same thread, full memory
 ai-deepseek-agent show <session-id> | list
-ai-deepseek-agent send --review "<brief>"                         # must end in a ## Verdict section
+ai-deepseek-agent send --review "<brief>"                         # direct API; must end in ## Verdict
 ```
 
-A formal assigned review adds `--governed-verdict <exact-head-sha> --model
+Do not pass `--repo-tools` on ordinary `send` unless you explicitly want the
+legacy direct-API tool loop instead of the default DeepSeek Harness. A formal
+assigned review adds `--governed-verdict <exact-head-sha> --model
 deepseek-flash` and ends in one `VERDICT: <word> <sha>` line; `--system`
 cannot combine with `--review`. Set `AI_DEEPSEEK_CALLER` (`claude` or
 `codex`). A nonzero exit is incomplete evidence, never approval. Missing or

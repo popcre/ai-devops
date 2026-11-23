@@ -237,11 +237,15 @@ def billing_session_id():
 
 def harness_patch_yaml(spec, affinity_id=None):
     """cordis.patch.yml for a deepseek-harness route's private profile
-    (validated live 2026-11-16: llm-pi-ai registers the custom adapter)."""
+    (validated live 2026-11-16: llm-pi-ai registers the custom adapter;
+    session-title-llm disabled so headless turns do not fire an extra
+    title-generation LLM request)."""
     if spec.get("base_url") and not spec["base_url"].startswith("https://"):
         raise RouteError("route base_url must be https")
     headers = f"        headers:\n          x-session-id: {json.dumps(affinity_id)}\n" if affinity_id else ""
     return (
+        "- id: session-title-llm\n"
+        "  disabled: true\n"
         "- id: llm-pi-ai\n"
         "  config:\n"
         "    providers:\n"

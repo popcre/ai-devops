@@ -68,7 +68,7 @@ PROVIDERS = {
                         "apiKey": "{env:DEEPSEEK_API_KEY}"},
             "models": {"deepseek-flash": {
                 "name": "DeepSeek V4.1 Flash", "tool_call": True,
-                "limit": {"context": 131072, "output": 32768}}}}},
+                "limit": {"context": 1048576, "output": 65536}}}}},
     },
     "stepfun": {
         "model": "stepfun-api/step-5-preview",
@@ -586,6 +586,34 @@ def run_once(provider, prompt, work, home, tmp, key, timeout, spec=None, observe
     return None, text, (f"no verdict (exit {proc.returncode}): " + problem[:500]).strip(), cache_receipts(out)
 
 
+def harness_cache_receipts(stdout):
+    """Sum reported cache counters from dsh --json step_end events.
+
+    Unreported fields remain None; explicit nonnegative integers (including 0)
+    are summed as observed subtotals.
+    """
+    reads = writes = None
+    for line in (stdout or "").splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            ev = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(ev, dict) or ev.get("type") != "status" or ev.get("phase") != "step_end":
+            continue
+        usage = ev.get("usage")
+        if not isinstance(usage, dict):
+            continue
+        read, write = usage.get("cacheReadTokens"), usage.get("cacheWriteTokens")
+        if type(read) is int and read >= 0:
+            reads = (reads or 0) + read
+        if type(write) is int and write >= 0:
+            writes = (writes or 0) + write
+    return {"read": reads, "write": writes}
+
+
 def read_harness_events(stdout):
     """Split dsh --json NDJSON into (final text, error text).
 
@@ -661,12 +689,12 @@ def run_harness_once(spec, prompt, work, tmp, key, timeout, observe=None):
     if observe:
         observe(out, "verdict" if verdict else "failed")
     if verdict:
-        return verdict, final_report(final, final), None, {"read": None, "write": None}
+        return verdict, final_report(final, final), None, harness_cache_receipts(out)
     problem = redact("\n".join(x for x in (ev_err, (err or "")[-2000:]) if x.strip()), key)
     if is_credit_error(problem):
-        return None, final_report(final, final), "out-of-credit: " + problem[:500], None
+        return None, final_report(final, final), "out-of-credit: " + problem[:500], harness_cache_receipts(out)
     return None, final_report(final, final), (f"no verdict (exit {proc.returncode}): "
-                                              + problem[:500]).strip(), None
+                                              + problem[:500]).strip(), harness_cache_receipts(out)
 
 
 def run_antigravity_once(spec, prompt, work, timeout, observe=None):

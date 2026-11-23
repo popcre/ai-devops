@@ -50,6 +50,11 @@ def reviewer_attempt(stdout, *, route, model, engine, outcome, elapsed, billing_
         'input_uncached': ('input',), 'output_visible': ('output',), 'reasoning': ('reasoning',),
         'cache_read': ('cache', 'read'), 'cache_write': ('cache', 'write'),
     }
+    harness_fields = {
+        'input_uncached': 'inputTokens', 'output_visible': 'outputTokens',
+        'reasoning': 'reasoningTokens', 'cache_read': 'cacheReadTokens',
+        'cache_write': 'cacheWriteTokens',
+    }
     starts, finishes, seen = 0, [], {}
     if engine == 'opencode':
         for line in (stdout or '').splitlines():
@@ -77,23 +82,42 @@ def reviewer_attempt(stdout, *, route, model, engine, outcome, elapsed, billing_
                 starts += 1
             elif kind == 'step_finish':
                 finishes.append(part)
+    elif engine == 'deepseek-harness':
+        for line in (stdout or '').splitlines():
+            try:
+                event = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(event, dict) or event.get('type') != 'status':
+                continue
+            phase = event.get('phase')
+            if phase == 'step_start':
+                starts += 1
+            elif phase == 'step_end':
+                usage = event.get('usage')
+                finishes.append(usage if isinstance(usage, dict) else {})
     observed = {}
     for field, path in fields.items():
-        values = [nested(part, 'tokens', *path) for part in finishes]
+        if engine == 'deepseek-harness':
+            hkey = harness_fields[field]
+            values = [part.get(hkey) if isinstance(part, dict) else None for part in finishes]
+        else:
+            values = [nested(part, 'tokens', *path) for part in finishes]
         measured = [value for value in values if type(value) is int and value >= 0]
         observed[field] = {
             'subtotal': sum(measured) if measured else None,
             'reported_steps': len(measured),
         }
-    estimates = [number(nested(part, 'cost'), tokens=False) for part in finishes]
+    estimates = [number(nested(part, 'cost'), tokens=False) for part in finishes] if engine == 'opencode' else []
     # OpenCode can emit zero when model pricing is missing.
     measured_estimates = [value for value in estimates if value]
+    tracked_steps = engine in ('opencode', 'deepseek-harness')
     receipt = {
         'route': route, 'model': model, 'engine': engine,
         'outcome': outcome, 'elapsed_seconds': round(elapsed, 3),
         'source': 'runtime-events',
-        'step_starts': starts if engine == 'opencode' else None,
-        'step_finishes': len(finishes) if engine == 'opencode' else None,
+        'step_starts': starts if tracked_steps else None,
+        'step_finishes': len(finishes) if tracked_steps else None,
         'adapter_counters': observed,
         'adapter_cost_estimate_usd': {
             'subtotal': number(sum(measured_estimates), tokens=False) if measured_estimates else None,
