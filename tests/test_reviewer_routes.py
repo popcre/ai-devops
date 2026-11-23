@@ -146,6 +146,14 @@ FAKE_DSH = textwrap.dedent("""\
     if mode == "sleep":
         time.sleep(30)
     print(json.dumps({"type": "status", "phase": "turn_start", "turn": 1}))
+    if mode == "usage":
+        print(json.dumps({"type": "status", "phase": "step_start", "turn": 1, "step": 1}))
+        print(json.dumps({"type": "status", "phase": "step_end", "turn": 1, "step": 1,
+                          "usage": {"inputTokens": 500, "outputTokens": 25, "totalTokens": 525}}))
+        print(json.dumps({"type": "status", "phase": "step_start", "turn": 1, "step": 2}))
+        print(json.dumps({"type": "status", "phase": "step_end", "turn": 1, "step": 2,
+                          "usage": {"inputTokens": 20, "outputTokens": 15, "cacheReadTokens": 480,
+                                    "cacheWriteTokens": 0, "reasoningTokens": 10, "totalTokens": 515}}))
     print(json.dumps({"type": "text", "text": "Findings: none.\\nVERDICT: APPROVE"}))
     print(json.dumps({"type": "final", "sessionId": sid, "reason": {"kind": "completed"},
                       "text": "Findings: none.\\nVERDICT: APPROVE"}))
@@ -1374,6 +1382,58 @@ class CacheQualificationTests(SecondOpinionRouteTests):
             "muse-spark-1.3-contributor"]
         self.assertNotIn("options", nocache_model)
 
+    def test_harness_disables_session_title_llm(self):
+        patch = RR.harness_patch_yaml(RR.route("deepseek-openrouter"))
+        self.assertIn("- id: session-title-llm\n  disabled: true\n", patch)
+
+    def test_harness_usage_and_cache_receipts_distinguish_missing_from_zero(self):
+        from reviewer_usage import reviewer_attempt
+
+        lines = [
+            json.dumps({"type": "status", "phase": "step_start", "turn": 1, "step": 1}),
+            json.dumps({"type": "status", "phase": "step_end", "turn": 1, "step": 1,
+                        "usage": {"inputTokens": 100, "outputTokens": 10}}),
+            json.dumps({"type": "status", "phase": "step_start", "turn": 1, "step": 2}),
+            json.dumps({"type": "status", "phase": "step_end", "turn": 1, "step": 2,
+                        "usage": {"inputTokens": 12, "outputTokens": 8, "cacheReadTokens": 90,
+                                  "cacheWriteTokens": 0, "reasoningTokens": True}}),
+            json.dumps({"type": "status", "phase": "step_end", "turn": 1, "step": 3,
+                        "usage": {"cacheReadTokens": -1, "cacheWriteTokens": False}}),
+        ]
+        stdout = "\n".join(lines)
+        self.assertEqual(self.ars.harness_cache_receipts(stdout), {"read": 90, "write": 0})
+        self.assertEqual(self.ars.harness_cache_receipts("not json\n{}"), {"read": None, "write": None})
+
+        receipt = reviewer_attempt(stdout, route="deepseek-openrouter",
+                                   model="deepseek/deepseek-v4.1-flash-1017",
+                                   engine="deepseek-harness", outcome="verdict", elapsed=1.5)
+        self.assertEqual(receipt["step_starts"], 2)
+        self.assertEqual(receipt["step_finishes"], 3)
+        self.assertEqual(receipt["adapter_counters"]["input_uncached"], {"subtotal": 112, "reported_steps": 2})
+        self.assertEqual(receipt["adapter_counters"]["output_visible"], {"subtotal": 18, "reported_steps": 2})
+        self.assertEqual(receipt["adapter_counters"]["cache_read"], {"subtotal": 90, "reported_steps": 1})
+        self.assertEqual(receipt["adapter_counters"]["cache_write"], {"subtotal": 0, "reported_steps": 1})
+        self.assertEqual(receipt["adapter_counters"]["reasoning"], {"subtotal": None, "reported_steps": 0})
+
+        self.env.update(AI_REVIEW_USAGE="1", AI_REVIEW_CACHE="1")
+        self.mode("usage")
+        proc, result = self.run_review(route="deepseek-openrouter")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(result["cache"], {"read": 480, "write": 0})
+        attempt = result["usage_attempts"][0]
+        self.assertEqual((attempt["step_starts"], attempt["step_finishes"]), (2, 2))
+        self.assertEqual(attempt["adapter_counters"]["input_uncached"], {"subtotal": 520, "reported_steps": 2})
+        self.assertEqual(attempt["adapter_counters"]["cache_read"], {"subtotal": 480, "reported_steps": 1})
+        self.assertEqual(attempt["adapter_counters"]["reasoning"], {"subtotal": 10, "reported_steps": 1})
+
+    def test_opencode_deepseek_context_limits_match_model_capacity(self):
+        cfg_path = os.path.join(ROOT, "config", "opencode-deepseek", "opencode.json")
+        with open(cfg_path, encoding="utf-8") as fh:
+            models = json.load(fh)["provider"]["deepseek-api"]["models"]
+        for model_id in ("deepseek-flash", "deepseek-v4-pro"):
+            self.assertEqual(models[model_id]["limit"], {"context": 1048576, "output": 65536})
+        legacy = self.ars.PROVIDERS["deepseek"]["provider"]["deepseek-api"]["models"]["deepseek-flash"]
+        self.assertEqual(legacy["limit"], {"context": 1048576, "output": 65536})
 
 
 if __name__ == "__main__":
