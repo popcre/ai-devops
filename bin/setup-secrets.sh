@@ -540,6 +540,28 @@ servers = {
                                               "https://mcp.railway.com"]},
 }
 
+# Headless machines (hetz): mcp-remote's OAuth callback is http://localhost:<port>,
+# which a browser on another computer can never reach, and Railway refuses
+# non-https non-localhost redirect URIs. When the Railway CLI is installed AND
+# signed in (`railway login --browserless` works headless), use the MCP server
+# bundled in the CLI (`railway mcp`, stdio, reuses the CLI login). Otherwise keep
+# the hosted OAuth server, which works where a local browser exists.
+def _railway_cli_ready():
+    import shutil
+    exe = shutil.which("railway") or os.path.expanduser("~/.npm-global/bin/railway")
+    if not os.path.isfile(exe):
+        return None
+    try:
+        with open(os.path.expanduser("~/.railway/config.json")) as fh:
+            user = (json.load(fh).get("user") or {})
+    except Exception:
+        return None
+    return exe if (user.get("refreshToken") or user.get("token") or user.get("accessToken")) else None
+
+_railway_exe = _railway_cli_ready()
+if _railway_exe:
+    servers["railway"] = {"command": node_bin, "args": [guard_js, _railway_exe, "mcp"]}
+
 # codex-cli: Codex carries its own `codex login` session, so no launcher and no
 # token. Absolute path, not "codex", so it cannot resolve to a different binary.
 if codex:
