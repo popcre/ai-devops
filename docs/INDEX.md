@@ -4,6 +4,12 @@
 
 Read the summary; open a document only when it matches your task.
 
+## decision
+
+| File | Status | Summary | Read when |
+|---|---|---|---|
+| [docs/decisions/2026-11-23-deepseek-reviewer-optimization.md](decisions/2026-11-23-deepseek-reviewer-optimization.md) | current | DeepSeek reviewer and second-opinion optimization decisions from 42 live matched-pair trials (PR #2780). | Changing DeepSeek reviewer routes, caching, reasoning effort, context limits, or ask-deepseek defaults |
+
 ## living
 
 | File | Status | Summary | Read when |
