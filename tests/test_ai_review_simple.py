@@ -245,7 +245,10 @@ FAKE_AGY = textwrap.dedent("""\
     open(state, "w").write(str(calls + 1))
     prompt = sys.stdin.read()
     with open(state + ".args", "w") as fh:
-        json.dump({"args": sys.argv[1:], "cwd": os.getcwd(), "prompt_len": len(prompt)}, fh)
+        a = sys.argv[1:]
+        settings = open(a[a.index("--settings") + 1]).read() if "--settings" in a else None
+        json.dump({"args": a, "cwd": os.getcwd(), "prompt_len": len(prompt),
+                   "prompt_head": prompt[:40], "settings": settings}, fh)
     mode = open(state + ".mode").read().strip()
     if mode == "approve":
         print(json.dumps({"conversation_id": "cid-1", "status": "SUCCESS",
@@ -313,6 +316,12 @@ class AntigravityReviewTests(unittest.TestCase):
         self.assertIn("--mode", recorded["args"])
         self.assertEqual(recorded["args"][recorded["args"].index("--mode") + 1], "plan")
         self.assertNotEqual(os.path.realpath(recorded["cwd"]), os.path.realpath(self.repo))
+        allow = json.loads(recorded["settings"])["permissions"]["allow"]
+        self.assertIn("command(grep)", allow)
+        self.assertNotIn("command(*)", allow)
+        self.assertTrue(recorded["prompt_head"].startswith("Read-only session:"))
+        settings_path = recorded["args"][recorded["args"].index("--settings") + 1]
+        self.assertFalse(os.path.exists(settings_path))
         rc, res = self.run_review("revise")
         self.assertEqual((rc, res["verdict"]), (0, "REVISE"))
         self.assertIn("a.txt:1 missing check", res["findings"])
