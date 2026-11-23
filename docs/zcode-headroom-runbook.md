@@ -314,13 +314,15 @@ sudo systemctl daemon-reload && sudo systemctl restart headroom-zcode.service
 ```
 
 Verified: both services active, `/health` healthy, and a live desktop turn
-completed through the lane after the restart. **Savings watchpoint:** with CCR
-the lane had saved 3.1% of input on GLM-5.3 (277.5M of 8.98B tokens across
-50,195 requests, ledger read 2026-11-16). Re-check `proxy_savings.json` after
-a week of lossless mode; if savings collapse, revisit `HEADROOM_NO_CCR`
-(lossy, maximum savings) under the §5.3 standing rule. Do not remove the
-drop-in to chase retrieval back — with lossless mode no context ever receives
-a marker, so nothing needs retrieving.
+completed through the lane after the restart. **Savings watchpoint — resolved
+2026-11-23 9:02 AM EST.** First week of lossless mode (since 2026-11-16
+~5:15 PM EST): GLM-5.3 saved 30.1M of 1.067B input tokens across 6,345
+requests = **2.8%** (CCR baseline 3.1%); GLM-5.3-Flash saved 4.06M of 194.0M
+across 973 requests = 2.1%. No collapse, so lossless mode stays and
+`HEADROOM_NO_CCR` remains unused. Zero `tool.call.not_found` entries for
+`headroom_retrieve` in the week after the switch (`~/.zcode/cli/log/` Nov 17–23
+greps clean). Do not remove the drop-in to chase retrieval back — with
+lossless mode no context ever receives a marker, so nothing needs retrieving.
 
 ---
 
