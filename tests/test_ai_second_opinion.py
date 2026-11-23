@@ -365,6 +365,14 @@ class AntigravitySecondOpinion(unittest.TestCase):
         self.assertEqual(calls[0]["args"][calls[0]["args"].index("--mode") + 1], "plan")
         self.assertIn("--conversation", calls[1]["args"])
         self.assertEqual(calls[1]["args"][calls[1]["args"].index("--conversation") + 1], "cid_fake1")
+        for call in calls:
+            args = call["args"]
+            with open(args[args.index("--settings") + 1], encoding="utf-8") as fh:
+                allow = json.load(fh)["permissions"]["allow"]
+            self.assertIn("command(grep)", allow)
+            self.assertNotIn("command(*)", allow)
+            self.assertFalse({"--dangerously-skip-permissions", "--yolo"} & set(args))
+            self.assertTrue(call["prompt"].startswith("Read-only session:"))
 
     def test_implement_uses_accept_edits_and_returns_diff(self):
         with open(os.path.join(self.state, "mode"), "w") as fh:
@@ -375,6 +383,7 @@ class AntigravitySecondOpinion(unittest.TestCase):
         self.assertFalse(os.path.exists(os.path.join(self.repo, "AGY_NEW.txt")))
         call = self.calls()[0]
         self.assertEqual(call["args"][call["args"].index("--mode") + 1], "accept-edits")
+        self.assertNotIn("--settings", call["args"])
 
     def test_doctor_and_store_key_and_auth_error(self):
         r = self.run_tool("antigravity", "store-key")

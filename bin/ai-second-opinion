@@ -404,6 +404,11 @@ def run_antigravity_turn(provider, sdir, meta, prompt, spec):
     timeout = int(os.environ.get("AI_SECOND_OPINION_TIMEOUT") or spec["timeout"])
     cmd = [agy, "--mode", mode, "--model", spec["model"], "--output-format", "json",
            "--print-timeout", f"{timeout}s"]
+    if mode == "plan":
+        settings = os.path.join(sdir, "agy-readonly-settings.json")
+        with open(settings, "w", encoding="utf-8") as fh:
+            fh.write(ars.AGY_READONLY_SETTINGS)
+        cmd += ["--settings", settings]
     resume = meta.get("session")
     if resume:
         cmd += ["--conversation", resume]
@@ -411,6 +416,9 @@ def run_antigravity_turn(provider, sdir, meta, prompt, spec):
     else:
         prefix = AGY_WRITE_PREFIX if meta.get("mode") == "implement" else AGY_READ_PREFIX
         full_prompt = prefix + prompt
+    if mode == "plan":
+        # Every read-only turn, resumed ones included, restates the command limit.
+        full_prompt = ars.AGY_READONLY_RULE + full_prompt
     meta.update(state="running", pid=os.getpid(), updated=time.time())
     save_meta(sdir, meta)
     proc = subprocess.Popen(cmd, cwd=meta["work"], env=env, stdin=subprocess.PIPE,

@@ -21,6 +21,7 @@ a terminal refusal stops it, and a confirmed shared OpenRouter outage skips
 the remaining OpenRouter routes.
 """
 import argparse
+import contextlib
 import json
 import os
 import re
@@ -326,6 +327,39 @@ def resolve_opencode():
     except OSError:
         pass
     return shutil.which("opencode")
+
+
+# Headless `agy` auto-denies every shell command not on `permissions.allow`,
+# and a denied command ends the turn with no answer. Read-only turns therefore
+# get a session-only allow-list of commands that only read and cannot write
+# files or launch other programs (agy refuses output redirection on its own),
+# plus a prompt rule naming that list. Never yolo / skip-permissions.
+AGY_READONLY_COMMANDS = ("grep", "ls", "cat", "head", "wc")
+AGY_READONLY_SETTINGS = json.dumps(
+    {"permissions": {"allow": [f"command({c})" for c in AGY_READONLY_COMMANDS]}},
+    separators=(",", ":"))
+@contextlib.contextmanager
+def agy_readonly_settings_file():
+    """Yield a private temp file holding AGY_READONLY_SETTINGS for `agy --settings`.
+    A file path, not inline JSON, so Windows argument quoting cannot mangle it."""
+    fd, path = tempfile.mkstemp(prefix="agy-readonly-", suffix=".json")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(AGY_READONLY_SETTINGS)
+        yield path
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+
+
+AGY_READONLY_RULE = (
+    "Read-only session: use your file reading and file search tools. The only "
+    "shell commands you may run are " + ", ".join(AGY_READONLY_COMMANDS) +
+    " (pipes between them are fine; no output redirection). Any other shell "
+    "command is refused automatically and ends your turn with no answer.\n\n"
+)
 
 
 def resolve_antigravity():
@@ -650,6 +684,12 @@ def run_antigravity_once(spec, prompt, work, timeout, observe=None):
             env[n] = os.environ[n]
     cmd = [agy, "--mode", "plan", "--model", spec["model"], "--output-format", "json",
            "--print-timeout", f"{timeout}s"]
+    with agy_readonly_settings_file() as settings:
+        return _run_antigravity_proc(cmd + ["--settings", settings],
+                                     AGY_READONLY_RULE + prompt, work, env, timeout, observe)
+
+
+def _run_antigravity_proc(cmd, prompt, work, env, timeout, observe):
     proc = subprocess.Popen(cmd, cwd=work, env=env, stdin=subprocess.PIPE,
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                             text=True, encoding="utf-8", errors="replace",
