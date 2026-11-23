@@ -133,6 +133,12 @@ assert list(t["mcp_servers"]) == ["trigger"], t
 PY
 grep -qx '/.codex/config.toml' "$clones/oracle/.git/info/exclude" && ok "project Codex config is git-excluded" || bad "project Codex config not excluded"
 
+# #2778: a clone is matched by origin identity, not folder name.
+mkdir -p "$clones/popdam" && git -C "$clones/popdam" init -q && git -C "$clones/popdam" remote add origin https://github.com/u2giants/popdam3.git
+AI_REPO_CLONE_ROOTS="$clone_roots" "$PY3" -c 'import os, sys; sys.path.insert(0, sys.argv[1]); import mcp_policy as m
+r = m.clone_roots("popdam3"); assert [os.path.basename(x) for x in r] == ["popdam"], r' "$ROOT/bin" \
+  && ok "clone found by origin under a different folder name" || bad "clone not found by origin"
+
 rm "$T/cfg/state/mcp-catalog.json"
 "$ROOT/bin/setup-desktop-apps.sh" | grep -q "run bin/setup-secrets.sh first" && ok "missing catalog is a no-op" || bad "missing catalog not reported"
 
