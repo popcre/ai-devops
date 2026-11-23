@@ -1163,14 +1163,59 @@ class CacheQualificationTests(SecondOpinionRouteTests):
         self.assertNotIn("session_id", options)
         self.assertNotIn("headers", cfg)
 
-    def test_cache_off_by_default_everywhere(self):
+    def test_muse_cache_on_by_default_and_disableable(self):
+        self.env.pop("AI_REVIEW_CACHE", None)
         self.mode("ok")
-        proc, _ = self.run_review(route="muse-openrouter")
+        proc, result = self.run_review(route="muse-openrouter")
         self.assertEqual(proc.returncode, 0, proc.stderr)
-        cfg = self.oc_calls()[0]["config"]["provider"]["openrouter-muse"]
-        self.assertEqual(self.openrouter_options(self.oc_calls()[0]), {})
+        options = self.openrouter_options(self.oc_calls()[0])
+        self.assertTrue(options["prompt_cache_key"].startswith("aidv1-"))
+        self.assertTrue(options["session_id"].startswith("aidv1-s-"))
+        self.assertIn("cache", result)
+
+        self.mode("ok")
+        proc, result = self.run_review(route="muse-meta")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        meta_cfg = self.oc_calls()[1]["config"]["provider"]["meta-model-api"]
+        meta_opts = meta_cfg["models"]["muse-spark-1.3-contributor"].get("options", {})
+        self.assertTrue(meta_opts["promptCacheKey"].startswith("aidv1-"))
+        self.assertNotIn("session_id", meta_opts)
+        self.assertNotIn("headers", meta_cfg)
+        self.assertIn("cache", result)
+
+        self.env["AI_REVIEW_CACHE"] = "0"
+        self.mode("ok")
+        proc, result = self.run_review(route="muse-openrouter")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        cfg = self.oc_calls()[2]["config"]["provider"]["openrouter-muse"]
+        self.assertEqual(self.openrouter_options(self.oc_calls()[2]), {})
         self.assertNotIn("body", cfg)
         self.assertNotIn("headers", cfg)
+        self.assertNotIn("cache", result)
+
+        self.mode("ok")
+        proc, result = self.run_review(route="muse-meta")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        meta_cfg2 = self.oc_calls()[3]["config"]["provider"]["meta-model-api"]
+        self.assertNotIn("options", meta_cfg2["models"]["muse-spark-1.3-contributor"])
+        self.assertNotIn("cache", result)
+
+    def test_non_muse_routes_keep_cache_off_by_default(self):
+        self.env.pop("AI_REVIEW_CACHE", None)
+        self.mode("approve")
+        proc, result = self.run_review(route="deepseek-openrouter")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        patch = self.dsh_calls()[0]["patch"]
+        self.assertNotIn("x-session-id", patch)
+        self.assertNotIn("prompt_cache_key", patch)
+        self.assertNotIn("cache", result)
+
+        self.mode("ok")
+        proc, result = self.run_review(route="hy4-openrouter")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        model = self.oc_calls()[0]["config"]["provider"]["openrouter-hy4"]["models"]["tencent/hy4"]
+        self.assertNotIn("options", model)
+        self.assertNotIn("cache", result)
 
     def test_non_muse_routes_use_affinity_without_muse_cache_keys(self):
         self.env["AI_REVIEW_CACHE"] = "1"
@@ -1299,6 +1344,35 @@ class CacheQualificationTests(SecondOpinionRouteTests):
         cfgs = [self.openrouter_options(call) for call in self.oc_calls()]
         self.assertEqual(cfgs[0]["prompt_cache_key"], cfgs[1]["prompt_cache_key"])
         self.assertEqual(cfgs[0]["session_id"], cfgs[1]["session_id"])
+
+    def test_second_opinion_muse_auto_wires_cache_from_turn_one_and_failover(self):
+        self.env.pop("AI_REVIEW_CACHE", None)
+        self.mode("ok", "ok", "credit", "ok")
+        r1 = self.run_so("muse", "new", "auto-cache", "first")
+        self.assertEqual(r1.returncode, 0, r1.stderr)
+        r2 = self.run_so("muse", "ask", "auto-cache", "second")
+        self.assertEqual(r2.returncode, 0, r2.stderr)
+        r3 = self.run_so("muse", "ask", "auto-cache", "third")
+        self.assertEqual(r3.returncode, 0, r3.stderr)
+        calls = self.oc_calls()
+        turn1_opts = calls[0]["config"]["provider"]["meta-model-api"]["models"][
+            "muse-spark-1.3-contributor"].get("options", {})
+        turn2_opts = calls[1]["config"]["provider"]["meta-model-api"]["models"][
+            "muse-spark-1.3-contributor"].get("options", {})
+        self.assertTrue(turn1_opts.get("promptCacheKey", "").startswith("aidv1-"))
+        self.assertEqual(turn2_opts.get("promptCacheKey"), turn1_opts["promptCacheKey"])
+        self.assertIn("--session", calls[1]["args"])
+        failover_opts = self.openrouter_options(calls[3])
+        self.assertTrue(failover_opts["prompt_cache_key"].startswith("aidv1-"))
+        self.assertTrue(failover_opts["session_id"].startswith("aidv1-s-"))
+
+        self.env["AI_REVIEW_CACHE"] = "0"
+        self.mode("ok")
+        r4 = self.run_so("muse", "new", "auto-nocache", "first")
+        self.assertEqual(r4.returncode, 0, r4.stderr)
+        nocache_model = self.oc_calls()[4]["config"]["provider"]["meta-model-api"]["models"][
+            "muse-spark-1.3-contributor"]
+        self.assertNotIn("options", nocache_model)
 
 
 

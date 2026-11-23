@@ -125,11 +125,12 @@ def opencode_provider_block(spec, cache=None, affinity_id=None):
     """The OpenCode provider block for an opencode-engine route (plan section 5
     shapes, custom OpenAI-compatible connection for OpenRouter).
 
-    cache (Phase C, #2551, opt-in only) carries {"prompt_cache_key": str,
-    "session_id": str}. Both adapters forward model options into the request
-    body. The direct Responses adapter uses its camel-case option name.
-    OpenCode owns its session header, so send OpenRouter's affinity identifier
-    in the body.
+    cache carries {"prompt_cache_key": str, "session_id": str} (enabled by
+    default for Muse routes unless AI_REVIEW_CACHE=0; opt-in via
+    AI_REVIEW_CACHE=1 for non-Muse OpenRouter affinity). Both adapters forward
+    model options into the request body. The direct Responses adapter uses its
+    camel-case option name. OpenCode owns its session header, so send
+    OpenRouter's affinity identifier in the body.
     Nothing is added when cache is None: defaults are unchanged."""
     provider_id = spec["model"].split("/", 1)[0]
     model_id = spec["model"].split("/", 1)[1]
@@ -162,10 +163,14 @@ CACHE_VERSION = "aidv1"
 MUSE_ROUTES = ("muse-meta", "muse-openrouter")
 
 
-def cache_enabled():
-    """Phase C is opt-in and off by default: nothing changes unless a caller
-    sets AI_REVIEW_CACHE=1 for a scoped experiment (#2551)."""
-    return os.environ.get("AI_REVIEW_CACHE") == "1"
+def cache_enabled(route_id=None):
+    """Muse routes enable explicit caching by default unless AI_REVIEW_CACHE=0
+    (owner ruling 2026-11-23). Non-Muse routes (DeepSeek, Hy4) stay opt-in via
+    AI_REVIEW_CACHE=1 (#2551)."""
+    value = os.environ.get("AI_REVIEW_CACHE")
+    if route_id in MUSE_ROUTES:
+        return value != "0"
+    return value == "1"
 
 
 def cache_scope(repo=None):
@@ -191,18 +196,19 @@ def cache_session_id(namespace):
 
 
 def cache_fields(route_id, repo, namespace):
-    """The cache identifiers for a route run, or None when the experiment is
-    off or the route is not a Muse connection. Keys are scoped per repository
-    and route; the session id is independent of the shared key."""
-    if not cache_enabled() or route_id not in MUSE_ROUTES:
+    """The cache identifiers for a route run, or None when disabled or the
+    route is not a Muse connection. Keys are scoped per repository and route;
+    the session id is independent of the shared key."""
+    if route_id not in MUSE_ROUTES or not cache_enabled(route_id):
         return None
     return {"prompt_cache_key": cache_scope(repo) + "-" + route_id,
             "session_id": cache_session_id(namespace)}
 
 
 def cache_affinity_id(route_id, repo, namespace):
-    """OpenRouter affinity applies to its routes without adding Muse cache keys."""
-    if not cache_enabled() or not route_id or route(route_id).get("base_url") != OPENROUTER_URL:
+    """OpenRouter affinity applies to OpenRouter routes when caching is enabled
+    for that route (default on for muse-openrouter, opt-in for others)."""
+    if not route_id or not cache_enabled(route_id) or route(route_id).get("base_url") != OPENROUTER_URL:
         return None
     return cache_session_id("\0".join((cache_scope(repo), route_id, namespace)))
 
