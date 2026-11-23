@@ -8,7 +8,7 @@
     "cleanup-worktree",
     "close-old-session",
     "codex-portable-facts",
-    "deepseek-second-opinion",
+    "ask-deepseek",
     "fresh-session",
     "grok-cli",
     "handoff-writer",
