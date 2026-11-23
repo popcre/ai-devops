@@ -82,7 +82,7 @@ PROVIDERS = {
                 "limit": {"context": 131072, "output": 32768}}}}},
     },
     "glm": {
-        "model": "zai-coding-plan/glm-5.3",
+        "model": "zai-coding-plan/glm-5.4", "variant": "high",
         "key_file": "zai-coding-plan-key.json", "key_env": "ZHIPU_API_KEY",
         "override": "ZAI_API_KEY", "timeout": 1200, "provider": {},
     },
@@ -517,6 +517,8 @@ def run_once(provider, prompt, work, home, tmp, key, timeout, spec=None, observe
     seed_models(xdg, env)
     cmd = [oc, "run", "--agent", "simple-review", "--auto", "--format", "json",
            "--model", spec["model"], "--dir", work]
+    if spec.get("variant"):
+        cmd += ["--variant", spec["variant"]]
     proc = subprocess.Popen(cmd, cwd=work, env=env, stdin=subprocess.PIPE,
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                             text=True, start_new_session=True)

@@ -39,8 +39,8 @@ FAKE = textwrap.dedent("""\
         # Real OpenCode 1.18 with an empty cache uses its bundled catalogue and dies.
         mp = os.environ.get("OPENCODE_MODELS_PATH", "")
         cat = json.load(open(mp)) if mp and os.path.isfile(mp) else {}
-        if "glm-5.3" not in cat.get("zai-coding-plan", {}).get("models", {}):
-            print(json.dumps({"type": "error", "error": {"message": "ProviderModelNotFoundError: Model not found: zai-coding-plan/glm-5.3"}}))
+        if "glm-5.4" not in cat.get("zai-coding-plan", {}).get("models", {}):
+            print(json.dumps({"type": "error", "error": {"message": "ProviderModelNotFoundError: Model not found: zai-coding-plan/glm-5.4"}}))
             sys.exit(1)
     if mode == "write":
         with open("NEW.txt", "w") as fh:
@@ -90,7 +90,7 @@ class SecondOpinion(unittest.TestCase):
                         AI_OPENCODE_MODELS_CACHE=os.path.join(t, "models-cache", "models.json"),
                         AI_OPENCODE_MODELS_URL=pathlib.Path(t, "catalogue.json").as_uri())
         with open(os.path.join(t, "catalogue.json"), "w") as fh:
-            json.dump({"zai-coding-plan": {"models": {"glm-5.3": {}}}}, fh)
+            json.dump({"zai-coding-plan": {"models": {"glm-5.4": {}}}}, fh)
         for k in ("AI_MUSE_KEY", "AI_STEPFUN_KEY", "ZAI_API_KEY"):
             self.env.pop(k, None)
 
@@ -118,7 +118,7 @@ class SecondOpinion(unittest.TestCase):
         self.assertIn("ANSWER for: is this bounded?", r.stdout)
         call = self.calls()[0]
         self.assertIn("second-opinion", call["args"])
-        self.assertIn("zai-coding-plan/glm-5.3", call["args"])
+        self.assertIn("zai-coding-plan/glm-5.4", call["args"])
         self.assertNotEqual(os.path.realpath(call["cwd"]), os.path.realpath(self.repo))
         with open(os.path.join(call["cwd"], "a.txt")) as fh:
             self.assertEqual(fh.read(), "one\ntwo\n")  # uncommitted edit carried over
@@ -197,7 +197,7 @@ class SecondOpinion(unittest.TestCase):
             r = self.run_tool("ask", f"hi from {prov}", tool=os.path.join(ROOT, "bin", f"ai-{prov}" + (".cmd" if os.name == "nt" else "")))
             self.assertEqual(r.returncode, 0, r.stderr)
         models = [c["args"][c["args"].index("--model") + 1] for c in self.calls()]
-        self.assertEqual(models, ["zai-coding-plan/glm-5.3", "meta-model-api/muse-spark-1.3-contributor",
+        self.assertEqual(models, ["zai-coding-plan/glm-5.4", "meta-model-api/muse-spark-1.3-contributor",
                                   "stepfun-api/step-5-preview"])
 
     def doctor_receipt(self):

@@ -18,7 +18,7 @@ from reviewer_maintenance import physical, Blocked
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 ENDPOINT = 'https://api.z.ai/api/monitor/usage/quota/limit'
-MODEL = 'glm-5.3'
+MODEL = 'glm-5.4'
 MAX_BYTES = 65536
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):

@@ -15,7 +15,7 @@ It replaces `ai-glm-agent`, which ran GLM inside a Claude Code child process wit
 `--no-session-persistence` — every call was a brand-new conversation.
 
 - Qualified OpenCode version: **1.18.12**, qualified 2026-08-03 on Hetz.
-- Qualified provider/model: **`zai-coding-plan` / `glm-5.3`** (Z.ai Coding Plan).
+- Qualified provider/model: **`zai-coding-plan` / `glm-5.4`** (Z.ai Coding Plan), effort variant **`high`** (not `max`).
 - Last commit containing the old harness: recorded in the migration PR.
 
 ---
@@ -29,7 +29,7 @@ Claude or Codex
   → 127.0.0.1:4096                (OpenCode server, systemd USER service, HTTP Basic)
   → named OpenCode session        (agent glm-review or glm-implement, model pinned)
   → Z.ai Coding Plan
-  → GLM-5.3
+  → GLM-5.4
 ```
 
 ### Why OpenCode, and why Claude Code was removed

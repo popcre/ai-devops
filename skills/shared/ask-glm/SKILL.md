@@ -1,11 +1,11 @@
 ---
 name: ask-glm
-description: "GLM-5.3 second opinion; never reviews GLM-orchestrated (ZCode) work. Analysis, review, debate, second opinion, or scoped implementation through `ai-glm`. Use for \"ask GLM\", \"run this by GLM\", \"get GLM's opinion\", GLM-5.3, or delegating repository work to GLM."
+description: "GLM-5.4 second opinion; never reviews GLM-orchestrated (ZCode) work. Analysis, review, debate, second opinion, or scoped implementation through `ai-glm`. Use for \"ask GLM\", \"run this by GLM\", \"get GLM's opinion\", GLM-5.4, or delegating repository work to GLM."
 ---
 
 # Ask GLM
 
-GLM-5.3 gives second opinions, debates and small delegated changes. Review is
+GLM-5.4 gives second opinions, debates and small delegated changes. Review is
 advice only (owner ruling 2026-10-29, #2104): nothing waits on GLM. The
 2026-09-17 independence ruling still binds: GLM never reviews GLM-orchestrated
 (ZCode) work.

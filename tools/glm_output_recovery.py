@@ -123,7 +123,7 @@ def qualify(meta, permissions, messages, *, caller, session, boundary, head, pac
     requested_at = None
     for message in messages.get("data", []):
         if (message.get("type") != "assistant" or message.get("agent") != "glm-review"
-                or message.get("model", {}).get("id") != "glm-5.3"
+                or message.get("model", {}).get("id") != "glm-5.4"
                 or message.get("model", {}).get("providerID") != "zai-coding-plan"):
             continue
         for tool in message.get("content", []):

@@ -550,6 +550,8 @@ def _run_opencode_turn(provider, sdir, meta, prompt, spec, effective, auto, new_
     work = meta["work"]
     cmd = [oc, "run", "--agent", meta["agent"], "--auto", "--format", "json",
            "--model", spec["model"], "--dir", work]
+    if spec.get("variant"):
+        cmd += ["--variant", spec["variant"]]
     if meta.get("session") and not new_session:
         cmd += ["--session", meta["session"]]
     timeout = int(os.environ.get("AI_SECOND_OPINION_TIMEOUT") or spec["timeout"])

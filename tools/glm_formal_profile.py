@@ -271,8 +271,8 @@ def install(repo, home, port):
     secure_directory(p["unit"].parent)
     config = json.loads((repo / "config/opencode/opencode.json").read_text())
     require(not config.get("mcp") and not config.get("plugin"), "formal profile forbids custom tool origins")
-    require(config.get("model") == "zai-coding-plan/glm-5.3"
-            and config.get("small_model") == "zai-coding-plan/glm-5.3"
+    require(config.get("model") == "zai-coding-plan/glm-5.4"
+            and config.get("small_model") == "zai-coding-plan/glm-5.4"
             and not config.get("provider") and not config.get("instructions"),
             "formal model/provider/global instructions must preserve canonical policy")
     config.update({"plugin": [], "mcp": {}})
@@ -602,7 +602,7 @@ def _readiness_evidence(home, repository, name, caller, *, now, publishing=True)
     require(meta.get("schema_version") == 2 and meta.get("type") == "review"
             and meta.get("name") == name and meta.get("caller") == caller
             and meta.get("repository_root") == str(repository) and meta.get("repository_id") == rid
-            and meta.get("provider") == "zai-coding-plan" and meta.get("model") == "glm-5.3"
+            and meta.get("provider") == "zai-coding-plan" and meta.get("model") == "glm-5.4"
             and meta.get("agent") == "glm-review", "wrong formal completion identity")
     completed = meta.get("last_completed_turn", {})
     turn = meta.get("remote_turn", {}) if publishing else {k: v for k, v in completed.items()
@@ -637,7 +637,7 @@ def _readiness_evidence(home, repository, name, caller, *, now, publishing=True)
             "unexpected native model identity schema")
     require(terminal.get("finish") == "stop" and not terminal.get("error")
             and terminal.get("id") and terminal["id"] != turn.get("previous_message_id")
-            and terminal.get("model", {}).get("id") == "glm-5.3"
+            and terminal.get("model", {}).get("id") == "glm-5.4"
             and terminal.get("model", {}).get("providerID") == "zai-coding-plan"
             and terminal.get("agent") == "glm-review", "no successful native formal completion")
     session = meta.get("opencode_session_id")
@@ -686,7 +686,7 @@ def emit_readiness(home, repository, name, caller):
     facts = _readiness_evidence(home, repository, name, caller, now=now)
     credential = private_read(p["receipt"]).get("credential_profile_scope", "")
     require(re.fullmatch(r"sha256:[0-9a-f]{64}", credential), "unbound provider credential profile")
-    record = {"version": 1, "profile": "formal-review", "provider": "zai-coding-plan", "model": "glm-5.3",
+    record = {"version": 1, "profile": "formal-review", "provider": "zai-coding-plan", "model": "glm-5.4",
               "runtime_source_sha": settings["release_sha"], "settings_sha256": digest(p["settings"]),
               "credential_profile_scope": credential, "observed_at": now,
               "expires_at": min(now + 300, facts["deadline_epoch"]), "facts": facts}
@@ -707,7 +707,7 @@ def verify_readiness(home, settings, current):
             "settings_sha256", "credential_profile_scope", "observed_at", "expires_at", "facts"}
             and type(record["version"]) is int and record["version"] == 1
             and record["profile"] == "formal-review" and record["provider"] == "zai-coding-plan"
-            and record["model"] == "glm-5.3" and record["runtime_source_sha"] == settings["release_sha"]
+            and record["model"] == "glm-5.4" and record["runtime_source_sha"] == settings["release_sha"]
             and record["settings_sha256"] == digest(p["settings"]), "wrong provider readiness binding")
     require(type(record["observed_at"]) is int and type(record["expires_at"]) is int
             and record["observed_at"] <= now < record["expires_at"]

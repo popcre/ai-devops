@@ -134,7 +134,7 @@ prevents the
 GLM child from replacing or inheriting normal Anthropic authentication. Setup
 performs a real protected-review capability probe, verifies the structured
 review envelope and saved report, and rejects any returned model other than the
-explicitly requested `glm-5.3` model.
+explicitly requested `glm-5.4` model.
 
 ### Ubuntu / Claude Code (hetz and other servers) — fully automated & tested
 
