@@ -682,8 +682,8 @@ application_release_supplement(){
 published_sandbox_refresh(){
   local quote="$1" classified_head="$2" base start proof reason contributor cls path gate
   case "$IDENTITY" in
-    popcre/designflow-frontend|popcre/designflow-data-syncing) ;;
-    *) blocked 'ai-task-gates: STOP. Published refresh is limited to the exact Frontend and Data Syncing sandbox targets.' ;;
+    popcre/designflow-frontend|popcre/designflow-backend|popcre/designflow-bff|popcre/designflow-item-master|popcre/designflow-tracking|popcre/designflow-data-syncing) ;;
+    *) blocked 'ai-task-gates: STOP. Published refresh is limited to the exact DesignFlow sandbox targets.' ;;
   esac
   [ "$POLICY_FILE" = "$ROOT/config/task-gates.json" ] \
     || blocked 'ai-task-gates: STOP. Published refresh requires the canonical toolkit policy.'
@@ -691,14 +691,14 @@ published_sandbox_refresh(){
   start="$(state_field start_head)"
   [ "$(state_field declared_class)" = deployment ] && [ -n "$base" ] && [ "$start" = "$base" ] \
     || blocked 'ai-task-gates: STOP. Start a deployment task on the published sandbox head before preparing the refresh.'
-  if [ "$IDENTITY" = popcre/designflow-frontend ]; then
+  if [ "$IDENTITY" != popcre/designflow-data-syncing ]; then
     [ "$OBSERVED_CLASS" = shared-db ] \
       || blocked 'ai-task-gates: STOP. Published refresh requires a classified mirror-only change.'
   fi
   for contributor in "${CONTRIBUTORS[@]}"; do
     contributor="$(printf '%b' "$contributor")"
     cls="${contributor%%$'\t'*}"; path="${contributor#*$'\t'}"
-    if [ "$IDENTITY" = popcre/designflow-frontend ]; then
+    if [ "$IDENTITY" != popcre/designflow-data-syncing ]; then
       [[ "$cls" = shared-db && "$path" = shared-db/* ]] \
         || blocked 'ai-task-gates: STOP. Published mirror refresh cannot contribute source outside the read-only mirror.'
     else
@@ -732,11 +732,11 @@ published_sandbox_refresh(){
   application_release_json_valid "$CONSUMER_FILE_NAME" consumer \
     && application_release_file_blob "$CONSUMER_FILE_NAME" >/dev/null \
     || blocked 'ai-task-gates: STOP. The refresh requires its exact committed Cloud Build consumer declaration.'
-  if [ "$IDENTITY" = popcre/designflow-frontend ]; then
+  if jq -e --arg repo "$IDENTITY" 'has($repo)' <<<"$APP_RELEASE_SERVICES" >/dev/null; then
     APP_RELEASE_EXPECTED_TARGET="$(jqr --arg repo "$IDENTITY" '.application_source_releases[$repo].target' "$POLICY_FILE")"
     application_release_json_valid "$APP_RELEASE_MANIFEST_PATH" manifest \
       && application_release_file_blob "$APP_RELEASE_MANIFEST_PATH" >/dev/null \
-      || blocked 'ai-task-gates: STOP. The frontend release manifest must be an exact committed file.'
+      || blocked 'ai-task-gates: STOP. The refresh requires its exact committed sandbox release manifest.'
   fi
   proof="$(/usr/bin/python3 -I "$ROOT/tools/application_source_release.py" prove-refresh "$TOPLEVEL" "$IDENTITY" "$base")" \
     || blocked 'ai-task-gates: STOP. Exact published-upstream refresh proof refused.'
@@ -753,7 +753,7 @@ published_sandbox_refresh(){
       "$(state_path)" >/dev/null 2>&1 \
     || blocked 'ai-task-gates: STOP. Published sandbox refresh receipt could not be recorded.'
   printf 'ai-task-gates: verified published-only refresh for %s through the normal Cloud Build sandbox-albert branch push.\n' "$IDENTITY"
-  printf 'ai-task-gates: verified the enabled sandbox target and passing develop build for the application files outside the shared-db mirror.\n'
+  printf 'ai-task-gates: verified the enabled sandbox target and passing tests and build for the application files outside the shared-db mirror.\n'
 }
 
 application_release_contributor_gates(){

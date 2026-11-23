@@ -98,11 +98,11 @@ class ReleaseProof(unittest.TestCase):
                 self.assertNotIn("BASH_FUNC_cat%%", options["env"])
                 self.assertEqual(options["timeout"], 600)
 
-    def prepare_refresh(self, repo, fast_forward=False):
+    def prepare_refresh(self, repo, fast_forward=False, preserve_sandbox=False):
         sandbox = self.base if fast_forward else self.g("rev-parse", "HEAD")
         self.g("remote", "set-url", "origin", f"https://github.com/{repo}.git")
         self.g("checkout", "-q", "develop")
-        if not fast_forward:
+        if not fast_forward and not preserve_sandbox:
             (self.root / "app.js").write_text("// fixture\n")
         (self.root / "shared-db").mkdir()
         (self.root / "shared-db/mirror.sql").write_text("-- published fixture\n")
@@ -145,6 +145,19 @@ class ReleaseProof(unittest.TestCase):
         with self.refresh_api(refs):
             proof = release.prove_refresh(self.root, repo, refs["sandbox-albert"], self.env)
         self.assertEqual(proof["head"], refs["develop"])
+
+    def test_mirror_refresh_preserves_sandbox_only_application(self):
+        repo = release.TRACKING
+        refs = self.prepare_refresh(repo, preserve_sandbox=True)
+        with self.refresh_api(refs):
+            proof = release.prove_refresh(self.root, repo, refs["sandbox-albert"], self.env)
+        self.assertEqual(proof["head"], self.g("rev-parse", "HEAD"))
+        self.assertTrue((self.root / "app.js").is_file())
+        (self.root / "app.js").unlink()
+        self.g("add", "-u")
+        self.g("commit", "-q", "--amend", "--no-edit")
+        with self.assertRaisesRegex(ValueError, "read-only source-release proof command failed"):
+            release.refresh_context(self.root, repo, refs["sandbox-albert"], self.env)
 
     def test_data_syncing_refresh_allows_only_unmodified_published_tree(self):
         repo = release.DATA_SYNCING
@@ -206,7 +219,7 @@ class ReleaseProof(unittest.TestCase):
             release.refresh_context(self.root, repo, refs["sandbox-albert"], self.env)
         self.g("add", ".")
         self.g("commit", "-q", "--amend", "--no-edit")
-        with self.assertRaisesRegex(ValueError, "tree differs from the exact published develop tree"):
+        with self.assertRaisesRegex(ValueError, "read-only source-release proof command failed"):
             release.refresh_context(self.root, repo, refs["sandbox-albert"], self.env)
 
     def test_refuses_unpublished_parent_and_remote_drift(self):
@@ -236,7 +249,7 @@ class ReleaseProof(unittest.TestCase):
         repo = "popcre/designflow-frontend"
         refs = self.prepare_refresh(repo)
         with self.assertRaisesRegex(ValueError, "target or base refused"):
-            release.refresh_context(self.root, "popcre/designflow-tracking", refs["sandbox-albert"], self.env)
+            release.refresh_context(self.root, "popcre/unrelated-repository", refs["sandbox-albert"], self.env)
         with patch.object(sys, "platform", "win32"):
             with self.assertRaisesRegex(ValueError, "require qualified Linux"):
                 release.prove_refresh(self.root, repo, refs["sandbox-albert"], self.env)
@@ -284,8 +297,23 @@ class ReleaseProof(unittest.TestCase):
     def test_data_syncing_requires_the_exact_cloud_trigger_and_both_prior_checks(self):
         self.verify_refresh_cloud(release.DATA_SYNCING)
 
-    def verify_refresh_cloud(self, repo):
-        self.prepare_refresh(repo, fast_forward=True)
+    def test_other_mirror_targets_require_their_sandbox_trigger_and_build_checks(self):
+        for repo in (release.BACKEND, release.BFF, release.ITEM_MASTER, release.TRACKING):
+            with self.subTest(repo=repo), tempfile.TemporaryDirectory() as fixture:
+                old_root = self.root
+                self.root = Path(fixture)
+                # The fixture for Cloud Build only needs a committed source tree.
+                self.g("init", "-q")
+                self.g("config", "user.name", "Offline fixture")
+                self.g("config", "user.email", "fixture@example.invalid")
+                try:
+                    self.verify_refresh_cloud(repo, prepared=True)
+                finally:
+                    self.root = old_root
+
+    def verify_refresh_cloud(self, repo, prepared=False):
+        if not prepared:
+            self.prepare_refresh(repo, fast_forward=True)
         (self.root / ".dockerignore").write_text("shared-db\n")
         (self.root / "Dockerfile").write_text("RUN yarn test\nRUN yarn build:${NODE_ENV}\n")
         self.g("add", ".")
@@ -306,22 +334,26 @@ class ReleaseProof(unittest.TestCase):
                         "_REGION": region, "_APP_ENV": branch, "_SERVICE_NAME": service}}
         sandbox = trigger(sandbox_trigger, "sandbox-albert", sandbox_service, [])
         development = trigger(develop_trigger, "develop", develop_service, ["shared-db/**"])
-        build = {"id": build_id, "status": "SUCCESS", "buildTriggerId": develop_trigger,
+        use_develop = repo == release.DATA_SYNCING
+        tested_trigger = develop_trigger if use_develop else sandbox_trigger
+        build = {"id": build_id, "status": "SUCCESS", "buildTriggerId": tested_trigger,
                  "sourceProvenance": {"resolvedGitSource": {"url": github, "revision": develop}},
                  "substitutions": {"COMMIT_SHA": develop}, "steps": [
-                     {"id": "Build", "name": "gcr.io/cloud-builders/docker",
-                      "status": "SUCCESS", "args": ["build", "."]}]}
-        if repo == release.DATA_SYNCING:
+                     {"id": "Build" if repo == release.FRONTEND else "Build the image",
+                      "name": "gcr.io/cloud-builders/docker", "status": "SUCCESS", "args": ["build", "."]}]}
+        database_app = repo not in {release.FRONTEND, release.BFF}
+        if database_app:
             sandbox["substitutions"].update(
                 _DB_PROVIDER="supabase", _DB_NETWORK_PATH="public-pooler", _DB_SCHEMA="dflow",
                 _DB_EXPECTED_PORT="6543", _DB_SSL="true")
-            build["steps"][0]["id"] = "Build the image"
-            build["steps"].extend([
+            build["steps"].append(
                 {"id": "Validate database deployment contract", "name": "node:24-alpine",
-                 "status": "SUCCESS", "entrypoint": "node", "args": ["scripts/validate-db-deploy-contract.js"]},
-                {"id": "Run unit tests", "name": "node:24-alpine", "status": "SUCCESS", "entrypoint": "sh",
-                 "args": ["-c", 'test "$(npm --version)" = "11.19.1" && npm ci --include=dev && npm test']},
-            ])
+                 "status": "SUCCESS", "entrypoint": "node", "args": ["scripts/validate-db-deploy-contract.js"]})
+        if repo in release.UNIT_TEST_STEPS:
+            image, command = release.UNIT_TEST_STEPS[repo]
+            build["steps"].append(
+                {"id": "Run unit tests", "name": image, "status": "SUCCESS", "entrypoint": "sh",
+                 "args": ["-c", command]})
         responses = {
             ("config", "list"): None,
             ("builds", "repositories"): {"name": linked, "remoteUri": github},
@@ -330,7 +362,7 @@ class ReleaseProof(unittest.TestCase):
             ("builds", "describe"): build,
         }
         original_run = release.run
-        cloud_home = self.root.parent / "cloud-home"
+        cloud_home = self.root / "cloud-home"
         (cloud_home / ".config").mkdir(parents=True, mode=0o700)
         (cloud_home / ".config" / "gcloud").mkdir(mode=0o700)
         def boundary(argv, root, env, **kwargs):
@@ -343,19 +375,20 @@ class ReleaseProof(unittest.TestCase):
                 patch.object(release, "run", side_effect=boundary):
             supplied = {**self.env, "HTTPS_PROXY": "fixture.invalid", "CLOUDSDK_CONFIG": "/foreign",
                         "SSL_CERT_DIR": "/foreign", "GOOGLE_APPLICATION_CREDENTIALS": "/foreign"}
+            branch = "develop" if use_develop else "sandbox"
             self.assertEqual(release.cloud_refresh_proof(self.root, repo, develop, supplied),
-                             {"sandbox_trigger": sandbox_trigger, "tested_develop_build": build_id,
-                              "tested_develop_source": develop})
+                             {"sandbox_trigger": sandbox_trigger, f"tested_{branch}_build": build_id,
+                              f"tested_{branch}_source": develop})
             build["steps"][0]["status"] = "FAILURE"
             with self.assertRaisesRegex(ValueError, "test-and-build step unavailable"):
                 release.cloud_refresh_proof(self.root, repo, develop, self.env)
             build["steps"][0]["status"] = "SUCCESS"
-            if repo == release.DATA_SYNCING:
-                for step in build["steps"][1:]:
-                    step["status"] = "FAILURE"
-                    with self.assertRaisesRegex(ValueError, "database contract or unit test step unavailable"):
-                        release.cloud_refresh_proof(self.root, repo, develop, self.env)
-                    step["status"] = "SUCCESS"
+            for step in build["steps"][1:]:
+                step["status"] = "FAILURE"
+                with self.assertRaisesRegex(ValueError, "database contract or unit test step unavailable"):
+                    release.cloud_refresh_proof(self.root, repo, develop, self.env)
+                step["status"] = "SUCCESS"
+            if database_app:
                 sandbox["substitutions"]["_DB_SCHEMA"] = "dflow_prod"
                 with self.assertRaisesRegex(ValueError, "enabled Cloud Build target is unavailable"):
                     release.cloud_refresh_proof(self.root, repo, develop, self.env)
