@@ -113,7 +113,7 @@ def normalize(provider, value, now):
     result['observed_epoch'] = observed_epoch(value['checked_at'])
     if provider in ('deepseek', 'glm', 'stepfun'):
         version, source, model = {'deepseek': ('user-balance-v1', 'official-user-balance', 'deepseek-flash'),
-                                 'glm': ('zai-model-quota-v1', 'official-zai-model-quota', 'glm-5.3'),
+                                 'glm': ('zai-model-quota-v1', 'official-zai-model-quota', 'glm-5.4'),
                                  'stepfun': ('stepfun-account-v1', 'official-stepfun-account', 'step-5-preview')}[provider]
         if (value.get('qualified_version') != version
                 or value.get('source_kind') != source

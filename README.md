@@ -217,7 +217,7 @@ loopback-only OpenCode server. A session remembers the whole conversation,
 survives a server restart, and keeps its prefix warm so Z.ai serves most of the
 context from cache. Review sessions are structurally read-only (no write, edit,
 patch or bash tool); implementation runs in a throwaway git worktree that is
-deleted before the command exits. The model is pinned to `glm-5.3` and the
+deleted before the command exits. The model is pinned to `glm-5.4` and the
 Coding Plan key is resolved from 1Password only at launch. See
 [docs/glm-opencode.md](docs/glm-opencode.md). The shared `ask-glm` skill lets
 either Claude or Codex invoke it when
@@ -320,7 +320,7 @@ this repo; only the logins (gh / claude / codex) are re-done interactively.
 | `ai-task-gates start|check|explain|status|end` | Declare what a task is and refuse an action the change set does not call for |
 | `ai-lock-doctor [--recover] <lockfile>` | Diagnose a stuck Linux `flock`; with `--recover`, clear only this toolkit's own holders (see [docs/locks.md](docs/locks.md)) |
 | `ai-merge-queue-drift` | Compare the live merge-queue ruleset and required checks with `config/merge-queue-expected.json` |
-| `ai-glm new|ask|implement <name> ...` | Persistent, named GLM-5.3 sessions (see docs/glm-opencode.md) |
+| `ai-glm new|ask|implement <name> ...` | Persistent, named GLM-5.4 (high effort) sessions (see docs/glm-opencode.md) |
 | `ai-doc-reachability --repo . --base <ref>` | Block new or moved Markdown that no living root can reach |
 | `ai-doc-health --repo . [--fix-index]` | Advisory documentation upkeep: sizes, headers, generated index, strays, old handoffs, duplicates (see [docs/doc-health.md](docs/doc-health.md)) |
 

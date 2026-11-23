@@ -1,7 +1,7 @@
 ---
 description: Writable GLM implementer; only ever bound to an ephemeral remote-less ai-glm clone
 mode: primary
-model: zai-coding-plan/glm-5.3
+model: zai-coding-plan/glm-5.4
 tools:
   write: true
   edit: true

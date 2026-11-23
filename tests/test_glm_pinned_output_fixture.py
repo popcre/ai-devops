@@ -131,7 +131,7 @@ def isolated(args):
                     "options": {"baseURL": f"http://127.0.0.1:{fake.server_port}/v1", "apiKey": "public-fixture-not-a-real-key"},
                     "models": {"test": {"name": "Fixture", "limit": {"context": 200000, "output": 8192}}}}}}
     (config / "opencode.json").write_text(json.dumps(settings))
-    agent = (ROOT / "config/opencode/agent/glm-review.md").read_text().replace("zai-coding-plan/glm-5.3", "fixture/test")
+    agent = (ROOT / "config/opencode/agent/glm-review.md").read_text().replace("zai-coding-plan/glm-5.4", "fixture/test")
     (config / "agent/glm-review.md").write_text(agent)
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0)); port = probe.getsockname()[1]
