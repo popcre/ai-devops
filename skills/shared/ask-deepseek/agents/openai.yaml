@@ -1,0 +1,4 @@
+interface:
+  display_name: "Ask DeepSeek"
+  short_description: "DeepSeek second opinion, debate, or delegated change"
+  default_prompt: "Use $ask-deepseek to get a DeepSeek second opinion on this task."

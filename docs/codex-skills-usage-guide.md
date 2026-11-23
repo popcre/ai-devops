@@ -102,7 +102,7 @@ machine where the sync is run; distribution is not a broadcast.
 - `cleanup-worktree`: safely inventories, recovers, and removes stale Codex,
   Claude, and delegated-agent worktrees or temp clones across Windows and
   POSIX systems without losing unique work.
-- `deepseek-second-opinion`: runs a genuine bounded debate through
+- `ask-deepseek`: runs a genuine bounded debate (or a delegated change) through
   `ai-deepseek-agent`. DeepSeek receives only the text and files explicitly
   attached by the parent. A Codex custom-provider path was cancelled on
   2026-08-10 because Codex 0.145.0 requires the Responses API wire format and
