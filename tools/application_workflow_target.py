@@ -188,6 +188,37 @@ DESIGNFLOW_QA_TARGETS = {
                                   "teams_group_sha256",
                                   "recipient_set_sha256"],
     },
+    "rfq-delete-copies": {
+        "schema_version": 1,
+        "repository": "popcre/designflow-backend",
+        "issue": "https://github.com/popcre/designflow-backend/issues/459",
+        "route": "authenticated-application-http",
+        "api_origin": "https://api.alsand.designflow.app/api/core",
+        "project": "lithe-breaker-323913",
+        "region": "us-east4",
+        "service": "popcre-albert-core-sandbox",
+        "scope": "rfq-delete-copies",
+        "routes": [
+            "GET /getRFQGroup",
+            "POST /addNewRFQGroup",
+            "POST /addRfqItem",
+            "POST /getRFQItemById",
+            "POST /deleteRFQItem",
+        ],
+        "limits": {
+            "synthetic_only": True,
+            "maximum_fixtures": 1,
+            "maximum_rfq_groups": 1,
+            "maximum_rfq_items": 2,
+            "maximum_delete_attempts": 4,
+            "existing_records_read_only": True,
+            "messages": False,
+        },
+        "forbidden": ["production", "direct-sql", "schema", "real-records",
+                      "unlisted-route", "delete-outside-fixture"],
+        "private_binding_keys": ["actor_sha256", "group_id_sha256",
+                                  "item_ids_sha256"],
+    },
 }
 
 # This declaration is admission metadata, never an HTTP credential or executor.

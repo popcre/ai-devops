@@ -285,6 +285,20 @@ class BoundedDesignFlowQATarget(ClosedRecoveryTarget):
             with self.subTest(field=field):
                 self.assertEqual(self.validate(candidate), 1)
 
+    def test_rfq_delete_copies_is_one_bounded_backend_fixture(self):
+        declaration = self.declaration("rfq-delete-copies")
+        self.assertEqual(declaration["issue"], "https://github.com/popcre/designflow-backend/issues/459")
+        self.assertEqual(declaration["service"], "popcre-albert-core-sandbox")
+        self.assertIn("POST /deleteRFQItem", declaration["routes"])
+        self.assertNotIn("POST /deleteRFQItemVendor", declaration["routes"])
+        for field, value in (("maximum_rfq_items", 3), ("maximum_rfq_groups", 2),
+                             ("maximum_delete_attempts", 5),
+                             ("existing_records_read_only", False)):
+            candidate = copy.deepcopy(declaration)
+            candidate["limits"][field] = value
+            with self.subTest(field=field):
+                self.assertEqual(self.validate(candidate), 1)
+
     def test_profiles_reject_expiry_route_scope_binding_and_production_changes(self):
         for name in TARGET.DESIGNFLOW_QA_TARGETS:
             declaration = self.declaration(name)
