@@ -47,25 +47,34 @@ def _git(root, *args):
     return r.stdout if r.returncode == 0 else None
 
 
+_ACCEPTS = {}
+
+
+def _accepts(key, url):
+    if (key, url) not in _ACCEPTS:
+        # Resolve Bash from PATH before launching the shebang script.
+        # Native Windows process lookup otherwise checks System32 first.
+        path = os.pathsep.join(entry for entry in os.get_exec_path() if os.path.isabs(entry))
+        bash = shutil.which("bash", path=path)
+        if not bash or not os.path.isabs(bash):
+            raise SystemExit("mcp_policy: Bash is required to check repository identity")
+        _ACCEPTS[(key, url)] = subprocess.run(
+            [bash, os.path.join(BIN, "ai-repo-identity"), "accepts", key, url],
+            capture_output=True).returncode == 0
+    return _ACCEPTS[(key, url)]
+
+
 def clone_roots(key):
     env = os.environ.get("AI_REPO_CLONE_ROOTS")
     bases = env.split(os.pathsep) if env else ["/worksp", os.path.expanduser("~/repos")]
     found = []
     for base in filter(os.path.isdir, bases):
-        for clone in sorted({os.path.join(base, key), *glob.glob(os.path.join(base, "*", key))}):
-            if not os.path.exists(os.path.join(clone, ".git")):
-                continue
+        # Match clones by origin identity, not folder name (#2778): the
+        # popdam3 clone on hetz lives at /worksp/popdam.
+        marks = glob.glob(os.path.join(base, "*", ".git")) + glob.glob(os.path.join(base, "*", "*", ".git"))
+        for clone in sorted({os.path.dirname(m) for m in marks}):
             url = (_git(clone, "remote", "get-url", "origin") or "").strip()
-            if not url:
-                continue
-            # Resolve Bash from PATH before launching the shebang script.
-            # Native Windows process lookup otherwise checks System32 first.
-            path = os.pathsep.join(entry for entry in os.get_exec_path() if os.path.isabs(entry))
-            bash = shutil.which("bash", path=path)
-            if not bash or not os.path.isabs(bash):
-                raise SystemExit("mcp_policy: Bash is required to check repository identity")
-            if subprocess.run([bash, os.path.join(BIN, "ai-repo-identity"), "accepts", key, url],
-                              capture_output=True).returncode != 0:
+            if not url or not _accepts(key, url):
                 continue
             for line in (_git(clone, "worktree", "list", "--porcelain") or "worktree %s\n" % clone).splitlines():
                 wt = line[len("worktree "):].strip() if line.startswith("worktree ") else ""
