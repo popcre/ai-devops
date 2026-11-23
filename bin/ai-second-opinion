@@ -678,10 +678,13 @@ def start(provider, name, repo, writable, base=None, route=None, billing_id=None
             detail = detail.decode(errors="replace")
         die("could not copy the repository: " + detail[:300])
     agent = "implement" if writable else "second-opinion"
-    spec = (ars.spec_for(provider, route) if route and route in RR.routes()
+    known_routes = RR.routes()
+    initial_route = ("muse-meta" if route == "auto" and provider == "muse"
+                     else route if route in known_routes else None)
+    spec = (ars.spec_for(provider, initial_route) if initial_route
             else ars.PROVIDERS[provider])
-    cache = RR.cache_fields(route, top, name) if route else None
-    affinity_id = billing_id or RR.cache_affinity_id(route or spec.get("route"), top, name)
+    cache = RR.cache_fields(initial_route, top, name) if initial_route else None
+    affinity_id = billing_id or RR.cache_affinity_id(initial_route or spec.get("route"), top, name)
     if spec.get("engine") == "antigravity":
         os.makedirs(os.path.join(sdir, "home"), exist_ok=True)
     else:
@@ -774,7 +777,7 @@ def main(argv):
                 except RR.RouteError as error:
                     die(str(error), 2)
             sdir, meta = start(p, name, args.repo, cmd == "implement", args.base,
-                               route=route if route in RR.routes() else None,
+                               route=route,
                                billing_id=billing_id)
         print(run_opencode(p, sdir, meta, prompt, route=route))
         if meta["mode"] == "implement":
@@ -802,7 +805,7 @@ def main(argv):
         brief = read_prompt(args) if (args.prompt_file or args.text) else "Review this change."
         prompt = brief + REVIEW_SUFFIX.format(base=base, fence=fence, diff=diff)
         sdir, meta = start(p, None, repo, False, base,
-                           route=route if route in RR.routes() else None,
+                           route=route,
                            billing_id=billing_id)
         print(run_opencode(p, sdir, meta, prompt, route=route))
         return 0

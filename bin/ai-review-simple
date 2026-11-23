@@ -819,7 +819,7 @@ def review(args):
     if error and error.startswith("out-of-credit"):
         result["error"] = "out-of-credit"
         result["detail"] = error[len("out-of-credit: "):]
-    if route and RR.cache_enabled():
+    if route and RR.cache_enabled(route):
         result["cache"] = receipts or {"read": None, "write": None}
     if route and not verdict and error and RR.classify(error)[0] == "terminal":
         result["error"] = "refused: " + (result.get("detail") or error)[:300]

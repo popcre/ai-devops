@@ -269,3 +269,13 @@ the six `popcre/designflow-*` repos. The AI may merge `sandbox-albert` →
 evidenced on the PR. Still binding: Uma's prior approval for any change in the
 `designflow` database area; PROD data changes rehearsed on DEV and agreed with
 a second AI reviewer. Supersedes the 2026-10-26 "develop PR simply stays open".
+
+## 2026-11-23 — Muse caching on by default
+
+Verbatim, from Albert's chat: "turn ask-muse caching on by default and fix its
+turn-one automatic routing gap."
+
+Current rule: Muse routes (`muse-meta`, `muse-openrouter`, and `ask-muse`
+default `auto` routing from turn one) enable explicit caching by default unless
+`AI_REVIEW_CACHE=0` is set. DeepSeek and Hy4 remain opt-in (`AI_REVIEW_CACHE=1`).
+Supersedes the 2026-11-18 opt-in-only default for Muse.
