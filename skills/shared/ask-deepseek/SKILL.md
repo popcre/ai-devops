@@ -10,10 +10,10 @@ advice only (owner ruling 2026-10-29, #2104): nothing waits on DeepSeek.
 
 ## Opinions and debates: `ai-deepseek-agent`
 
-A thread-preserving wrapper over the DeepSeek API. Each tool turn runs in a
-fresh remote-less copy of the repository (no network, no credentials); your
-checkout is never touched. Attach anything the tools cannot reach with
-`--file`.
+A thread-preserving wrapper over the DeepSeek API. With `--review` or
+`--repo-tools`, repository tools use a fresh remote-less copy each turn.
+Shell commands in this opinion harness run without network access or
+credentials. Attach anything the tools cannot reach with `--file`.
 
 ```bash
 ai-deepseek-agent send "<brief>" [--file plan.md] [--repo-tools]  # prints SESSION_ID
@@ -22,16 +22,24 @@ ai-deepseek-agent show <session-id> | list
 ai-deepseek-agent send --review "<brief>"                         # must end in a ## Verdict section
 ```
 
-A formal assigned review adds `--governed-verdict <exact-head-sha> --model
-deepseek-flash` and ends in one `VERDICT: <word> <sha>` line; `--system`
-cannot combine with `--review`. Set `AI_DEEPSEEK_CALLER` (`claude` or
-`codex`). A nonzero exit is incomplete evidence, never approval. Missing or
-rejected key: run `ai-deepseek-agent store-key` outside a review.
+A formal assigned review uses `--review --governed-verdict <exact-head-sha>`
+and ends in one `VERDICT: <word> <sha>` line. The harness pins
+`deepseek-flash`. Use `--system` only outside review mode. Set
+`AI_DEEPSEEK_CALLER` to the calling client (`claude` or `codex`) so incident
+records identify which client made the call. A nonzero exit means the review
+is incomplete. If the key is missing or rejected, run
+`ai-deepseek-agent store-key` outside a review.
 
 ## Implementation: `ai-deepseek`
 
-DeepSeek edits, commits and runs shell commands in a private clone with no
-remote; you land and ship it. Never use this harness for a review verdict.
+Use this harness only when the user explicitly authorizes implementation
+delegation to DeepSeek and the environment permits it. DeepSeek edits, commits,
+and runs shell commands in a private remote-less clone. Those commands have
+network access and inherit `DEEPSEEK_API_KEY`. Keep all delegated work inside
+the clone. Removing the Git remote only isolates routine Git operations.
+If the environment requires stronger confinement, use this harness only where
+that confinement is enforced. You verify, land, and ship the result. Never use
+this harness for a review verdict.
 
 ```bash
 ai-deepseek doctor --live                                        # proves harness, key, one real turn
