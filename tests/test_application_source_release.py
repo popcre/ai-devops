@@ -159,6 +159,37 @@ class ReleaseProof(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "read-only source-release proof command failed"):
             release.refresh_context(self.root, repo, refs["sandbox-albert"], self.env)
 
+    def prepare_handoff_refresh(self, repo, note="HANDOFF.d/published.md"):
+        self.g("checkout", "-q", "develop")
+        (self.root / note).parent.mkdir(parents=True, exist_ok=True)
+        (self.root / note).write_text("# Published handoff\n")
+        self.g("add", ".")
+        self.g("commit", "-qm", "published handoff")
+        self.g("checkout", "-q", "-")
+        return self.prepare_refresh(repo, preserve_sandbox=True)
+
+    def test_mirror_refresh_admits_exact_published_handoff(self):
+        repo = release.TRACKING
+        refs = self.prepare_handoff_refresh(repo)
+        with self.refresh_api(refs):
+            proof = release.prove_refresh(self.root, repo, refs["sandbox-albert"], self.env)
+        self.assertEqual(proof["head"], self.g("rev-parse", "HEAD"))
+
+    def test_mirror_refresh_refuses_edited_or_nested_handoff(self):
+        repo = release.TRACKING
+        refs = self.prepare_handoff_refresh(repo)
+        (self.root / "HANDOFF.d/published.md").write_text("# Edited in the merge\n")
+        self.g("add", "-u")
+        self.g("commit", "-q", "--amend", "--no-edit")
+        with self.assertRaisesRegex(ValueError, "read-only source-release proof command failed"):
+            release.refresh_context(self.root, repo, refs["sandbox-albert"], self.env)
+
+    def test_mirror_refresh_refuses_nested_handoff_path(self):
+        repo = release.TRACKING
+        refs = self.prepare_handoff_refresh(repo, note="HANDOFF.d/sub/note.md")
+        with self.assertRaisesRegex(ValueError, "read-only source-release proof command failed"):
+            release.refresh_context(self.root, repo, refs["sandbox-albert"], self.env)
+
     def test_data_syncing_refresh_allows_only_unmodified_published_tree(self):
         repo = release.DATA_SYNCING
         refs = self.prepare_refresh(repo, fast_forward=True)
@@ -266,6 +297,40 @@ class ReleaseProof(unittest.TestCase):
     def test_data_syncing_refresh_refuses_application_owned_structure(self):
         self.verify_native_refresh_refusal(release.DATA_SYNCING, "supabase/application-owned.sql",
                                            b"protected contributor")
+
+    OUTSIDE_MIRROR = b"cannot contribute source outside the read-only mirror"
+
+    def test_mirror_gate_admits_top_level_published_handoff(self):
+        self.assertNotIn(self.OUTSIDE_MIRROR, self.native_refresh_stderr(release.TRACKING, "HANDOFF.d/note.md"))
+
+    def test_mirror_gate_refuses_nested_handoff(self):
+        self.assertIn(self.OUTSIDE_MIRROR, self.native_refresh_stderr(release.TRACKING, "HANDOFF.d/sub/note.md"))
+
+    def test_mirror_gate_refuses_non_markdown_handoff(self):
+        self.assertIn(self.OUTSIDE_MIRROR, self.native_refresh_stderr(release.TRACKING, "HANDOFF.d/note.txt"))
+
+    def native_refresh_stderr(self, repo, path):
+        refs = self.prepare_refresh(repo, preserve_sandbox=True)
+        self.g("checkout", "-q", "develop")
+        (self.root / path).parent.mkdir(parents=True, exist_ok=True)
+        (self.root / path).write_text("# synthetic published handoff\n")
+        self.g("add", ".")
+        self.g("commit", "-qm", "synthetic published handoff")
+        develop = self.g("rev-parse", "HEAD")
+        self.g("update-ref", "refs/remotes/origin/develop", develop)
+        self.g("checkout", "-q", "--detach", refs["sandbox-albert"])
+        toolkit = Path(__file__).resolve().parents[1]
+        env = {**self.env, "AI_TASK_GATES_DIR": str(Path(self.temp.name) / "isolated-state")}
+        command = ["/bin/bash", str(toolkit / "bin/ai-task-gates")]
+        start = subprocess.run(command + ["start", "--class", "deployment", "--base", "HEAD"],
+                               cwd=self.root, env=env, capture_output=True)
+        self.assertEqual(start.returncode, 0, start.stderr.decode())
+        self.g("merge", "-q", "--no-edit", "--no-ff", develop)
+        checked = subprocess.run(command + ["check", "--before", "deploy", "--published-sandbox-refresh",
+                                            "--acknowledge", "synthetic owner instruction"],
+                                 cwd=self.root, env=env, capture_output=True)
+        self.assertEqual(checked.returncode, 3, checked.stderr.decode())
+        return checked.stderr
 
     def verify_native_refresh_refusal(self, repo, path, expected):
         refs = self.prepare_refresh(repo)

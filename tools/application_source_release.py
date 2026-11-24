@@ -291,8 +291,18 @@ def refresh_context(root, repo, base, env):
     else:
         # Preserve sandbox-only application files and take the published mirror
         # byte for byte. A merge cannot author its own change in either half.
-        git(root, env, "diff", "--quiet", sandbox, head, "--", ".", ":(exclude)shared-db")
+        handoffs = ":(glob)HANDOFF.d/*.md"
+        git(root, env, "diff", "--quiet", sandbox, head, "--", ".", ":(exclude)shared-db",
+            ":(exclude,glob)HANDOFF.d/*.md")
         git(root, env, "diff", "--quiet", develop, head, "--", "shared-db")
+        # Handoff notes may only arrive as exact published develop files.
+        notes = [n for n in git(root, env, "diff", "--no-renames", "--name-only", sandbox, head,
+                                "--", handoffs).splitlines() if n]
+        if notes:
+            git(root, env, "diff", "--quiet", develop, head, "--", *notes)
+            listing = git(root, env, "ls-tree", head, "--", *notes).splitlines()
+            require(len(listing) == len(notes) and all(e.startswith("100644 blob ") for e in listing),
+                    "published handoff notes must be regular files")
         require(git(root, env, "diff", "--name-only", sandbox, head, "--", "shared-db").strip(),
                 "published mirror did not change")
         paths = {}
