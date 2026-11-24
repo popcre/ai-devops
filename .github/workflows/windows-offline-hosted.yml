@@ -43,7 +43,7 @@ jobs:
     runs-on: windows-2025
     # The free hosted lane bounds the same work at 40 minutes (verify.yml).
     # GitHub-hosted measured roughly 2x faster per suite on 2026-09-10 evidence
-    # (tests/verification/repo-throughput/issue-210-baseline-20260910.md),
+    # (issue #210 baseline evidence under tests/verification/repo-throughput/),
     # so this keeps headroom without paying for a much longer ceiling.
     timeout-minutes: 20
     steps:

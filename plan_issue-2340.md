@@ -91,7 +91,7 @@ which are correct.
 - `docs/watchdog-duty-pool.md:18`: "Paid runners (GitHub-hosted) were too expensive … $1000 / 2 weeks". That was Blacksmith. Lines 48 and 99 say "paid GitHub-hosted".
 - `docs/self-hosted-windows-runner.md:242`: "GitHub-hosted or GitHub-hosted work".
 - `.github/workflows/windows-offline-hosted.yml:22`: purpose prompt says "Why this paid run is needed right now".
-- Same file, lines 45-48: the comment says GitHub-hosted is "roughly 2x faster", citing the baseline. The baseline (`tests/verification/repo-throughput/issue-210-baseline-20260910.md:80`) says **Blacksmith** was ~1.9-2x faster than windows-2025. `timeout-minutes: 20` was sized on that speed. The job now runs on `windows-2025` (line 42).
+- Same file, lines 45-48: the comment says GitHub-hosted is "roughly 2x faster", citing the baseline. The baseline (`tests/verification/repo-throughput/issue-210-blacksmith-baseline-20260910.md:80`) says **Blacksmith** was ~1.9-2x faster than windows-2025. `timeout-minutes: 20` was sized on that speed. The job now runs on `windows-2025` (line 42).
 - Same file, lines 66-68: compares "GitHub-hosted's" TEMP to "GitHub-hosted's".
 - `tests/test-workflow-policy.sh:296-297`: the check named "names only the GitHub-hosted fallback labels" lost its old negative guard (`! grep -Eq "(windows-20..|ubuntu-..)"` over the routing config). That guard is visible in `git show 5f7e7c82 -- tests/test-workflow-policy.sh`. Another check in that file asserts `timeout-minutes: 20` on the manual workflow; find it with `grep -n "timeout-minutes: 20" tests/test-workflow-policy.sh`.
 
