@@ -66,7 +66,8 @@ function New-Fixture([string]$Name) {
 
 function Get-SkillEntryNames([string]$Path) {
   $config = Get-Content -Raw -LiteralPath $Path | ConvertFrom-Json
-  return @($config.skill.PSObject.Properties | ForEach-Object { $_.Name })
+  # The leading comma keeps one entry an array instead of a bare string.
+  return ,@($config.skill.PSObject.Properties | ForEach-Object { $_.Name })
 }
 
 # Run the writer in a fresh process of the given engine, so the edition is the
@@ -195,6 +196,26 @@ try {
     Assert-True ($r.ExitCode -eq 0) "same-folder roots exit 0"
     Assert-True ($r.Output -match "same file in both skill roots") "same-folder roots are reported"
     Assert-True (-not (Test-Path -LiteralPath $f8.Config)) "same-folder roots wrote no config"
+
+    # -- 9. A folder spelled short (8.3) gives the same key as spelled long ---
+    # A hosted runner's temporary folder reaches the installer spelled short
+    # (RUNNER~1). .NET Framework spells it out and .NET keeps it, so without
+    # the writer's normalization each edition wrote a different key for the
+    # same file, and each alternating install rewrote the entry.
+    $f9 = New-Fixture "$tag-short"
+    $fso = New-Object -ComObject Scripting.FileSystemObject
+    $shortRoot = $fso.GetFolder($f9.Root).ShortPath
+    [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($fso)
+    if ($shortRoot -eq $f9.Root) {
+      Assert-True $true "short-name scenario not available on this volume (no 8.3 names); skipped"
+    } else {
+      $r = Invoke-Writer $engine "$tag-short" @("-ZCodeHome", (Join-Path $shortRoot "zcode-home"), "-AgentsSkillsRoot", (Join-Path $shortRoot "agents\skills"))
+      Assert-True ($r.ExitCode -eq 0) "short-spelled roots exit 0"
+      $names = Get-SkillEntryNames $f9.Config
+      Assert-True ($names.Count -eq 1) "short-spelled roots hide exactly the doubled skill"
+      Assert-True ($names[0].ToLowerInvariant().EndsWith("\agents\skills\alpha\skill.md") -and $names[0] -notmatch "~") `
+        "short-spelled roots still write the key with every folder spelled out"
+    }
   }
 }
 finally {

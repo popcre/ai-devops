@@ -195,9 +195,14 @@ if [ "$cross_rc" -ne 0 ]; then printf '%s\n' "$out" >&2; fail "PowerShell cross-
 if [ "$on_windows" -eq 1 ]; then
   zcode_shadow_config="$(cygpath -w "$TMP_ROOT/bash/zcode/cli/config.json" 2>/dev/null || echo "$TMP_ROOT/bash/zcode/cli/config.json")"
   [[ -f "$zcode_shadow_config" ]] || { printf '%s\n' "$out" >&2; fail 'cross-installer did not write ZCode config for the doubled skill copy'; }
-  # Not `//`: jq treats false through `//` as absent.
-  jq -e --arg key "$(cygpath -w "$TMP_ROOT/agents-skills/shared-one/SKILL.md" 2>/dev/null || echo "$TMP_ROOT/agents-skills/shared-one/SKILL.md")" \
-    '.skill[$key].enable == false' "$zcode_shadow_config" >/dev/null 2>&1 \
+  # Exactly one switch, off, for that copy. Compared by suffix and without
+  # case: a hosted runner's temporary folder reaches this test spelled short
+  # (RUNNER~1) and the entry names it long (runneradmin).
+  jq -e --arg suffix 'agents-skills\shared-one\skill.md' '
+    (.skill | type == "object" and length == 1)
+    and (.skill | to_entries | all(.value.enable == false))
+    and (.skill | keys | all(ascii_downcase | endswith($suffix)))
+  ' "$zcode_shadow_config" >/dev/null 2>&1 \
     || { printf '%s\n' "$out" "$zcode_shadow_config:" "$(cat "$zcode_shadow_config")" >&2; fail 'ZCode config lacks the entry that hides the doubled copy of shared-one'; }
 else
   [[ -e "$TMP_ROOT/bash/zcode/cli/config.json" ]] && fail 'a non-Windows installer wrote a ZCode config'

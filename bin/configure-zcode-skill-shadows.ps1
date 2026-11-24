@@ -57,11 +57,6 @@ if ([System.Environment]::OSVersion.Platform -ne [System.PlatformID]::Win32NT) {
   return
 }
 
-if (-not $ConfigPath) { $ConfigPath = Join-Path $ZCodeHome "cli\config.json" }
-$ConfigPath = [IO.Path]::GetFullPath($ConfigPath)
-$primaryRoot = [IO.Path]::GetFullPath((Join-Path $ZCodeHome "skills"))
-$secondaryRoot = [IO.Path]::GetFullPath($AgentsSkillsRoot)
-$secondaryPrefix = $secondaryRoot.TrimEnd("\") + "\"
 $ManagedMarker = ".ai-devops-managed"
 $ManagedFile = "SKILL.md"
 
@@ -81,7 +76,22 @@ public static extern Microsoft.Win32.SafeHandles.SafeFileHandle CreateFile(strin
 public static extern uint GetFinalPathNameByHandle(Microsoft.Win32.SafeHandles.SafeFileHandle handle, System.Text.StringBuilder path, uint length, uint flags);
 [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
 public static extern bool MoveFileEx(string existingName, string newName, uint flags);
+[DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+public static extern uint GetLongPathName(string shortName, System.Text.StringBuilder buffer, uint bufferLength);
 '@
+}
+
+# Full path with short (8.3) folder names spelled out. .NET Framework, behind
+# Windows PowerShell 5.1, spells them out in Path.GetFullPath; .NET, behind
+# PowerShell 7, keeps them. Both must write the same key, or a machine updated
+# by both editions rewrites the entry (and makes a backup) on every alternation.
+function Get-NormalizedPath([string]$Path) {
+  $full = [IO.Path]::GetFullPath($Path)
+  $capacity = 1024
+  $buffer = New-Object System.Text.StringBuilder $capacity
+  $length = [AiDevOpsSkillShadow.NativeMethods]::GetLongPathName($full, $buffer, [uint32]$capacity)
+  if ($length -eq 0 -or $length -ge $capacity) { return $full }
+  return $buffer.ToString()
 }
 
 function Get-FinalPath([string]$Path) {
@@ -146,7 +156,7 @@ function Get-SkillNames([string]$Root) {
 # (<secondary root>\<name>\SKILL.md); otherwise $null, meaning not ours.
 function Get-ManagedEntryName([string]$Key) {
   if ([string]::IsNullOrWhiteSpace($Key)) { return $null }
-  try { $full = [IO.Path]::GetFullPath($Key) } catch { return $null }
+  try { $full = Get-NormalizedPath $Key } catch { return $null }
   if (-not $full.StartsWith($secondaryPrefix, [StringComparison]::OrdinalIgnoreCase)) { return $null }
   $parts = $full.Substring($secondaryPrefix.Length).Split("\")
   if ($parts.Count -ne 2 -or $parts[1] -ne $ManagedFile) { return $null }
@@ -181,6 +191,12 @@ function Read-ConfigDocument([string]$Path) {
 }
 
 # --- 1. Which toolkit skills does the secondary root shadow? -----------------
+
+if (-not $ConfigPath) { $ConfigPath = Join-Path $ZCodeHome "cli\config.json" }
+$ConfigPath = Get-NormalizedPath $ConfigPath
+$primaryRoot = Get-NormalizedPath (Join-Path $ZCodeHome "skills")
+$secondaryRoot = Get-NormalizedPath $AgentsSkillsRoot
+$secondaryPrefix = $secondaryRoot.TrimEnd("\") + "\"
 
 $toolkitNames = @{}
 foreach ($name in (Get-SkillNames $primaryRoot)) {
