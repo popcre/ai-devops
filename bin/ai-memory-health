@@ -305,9 +305,14 @@ for mem in "${project_glob[@]}"; do
     continue
   fi
 
-  # Cross-links that point at a memory which does not exist.
+  # Cross-links that point at a memory which does not exist. A fact folded into
+  # another note as a "## <name>" section still resolves (#2817): 137 of the 156
+  # links reported in one consolidated project pointed at such a section.
   while IFS= read -r link; do
-    [[ -f "$mem/$link.md" ]] || note "DANGLING LINK: [[$link]] has no matching memory file."
+    [[ -f "$mem/$link.md" ]] && continue
+    folded="${link//./\\.}"
+    grep -qsE "^## +${folded}[[:space:]]*$" -- "$mem"/*.md && continue
+    note "DANGLING LINK: [[$link]] has no matching memory file."
   done < <(grep -rhoE '\[\[[A-Za-z0-9._-]+\]\]' "$mem" 2>/dev/null | tr -d '[]' | sort -u)
 
   # Structural hygiene.
@@ -317,6 +322,13 @@ for mem in "${project_glob[@]}"; do
   done
 
   # Possible duplicates: two memories whose descriptions share a lot of wording.
+  # A word counts for as much as it is rare across this project's descriptions
+  # (#2808). Wording that a template puts in most notes says nothing about two
+  # of them being the same fact: 78 chapter notes whose descriptions all start
+  # "Shared-db chapter (<topic>): N consolidated facts." flagged 2,150 pairs.
+  # Weight = log((n+1)/(df+0.5)), df being the number of descriptions that hold
+  # the word and n the project size. It is never 0, so two identical notes in a
+  # two-note project still compare as fully shared.
   while IFS= read -r dup; do
     note "POSSIBLE DUPLICATE: $dup"
   done < <(
@@ -326,10 +338,21 @@ for mem in "${project_glob[@]}"; do
     done | awk -F'\t' '
       { file[NR]=$1; desc[NR]=$2; n=NR }
       END {
+        for (i=1;i<=n;i++) {
+          k=split(desc[i],a," ")
+          for (x=1;x<=k;x++) if (length(a[x])>5 && a[x] !~ /:$/ && !((i,a[x]) in seen)) {
+            seen[i,a[x]]=1; df[a[x]]++; words[i,++count[i]]=a[x]
+          }
+        }
         for (i=1;i<=n;i++) for (j=i+1;j<=n;j++) {
-          split(desc[i],a," "); split(desc[j],b," "); shared=0; total=0
-          for (k in a) if (length(a[k])>5) { total++; for (m in b) if (a[k]==b[m]) { shared++; break } }
-          if (total>=4 && shared/total>=0.5) printf "%s and %s describe overlapping facts\n", file[i], file[j]
+          total=0; weight=0; shared=0; distinct=0
+          for (x=1;x<=count[i];x++) {
+            w=log((n+1)/(df[words[i,x]]+0.5)); total++; weight+=w
+            for (y=1;y<=count[j];y++) if (words[i,x]==words[j,y]) { shared+=w; distinct++; break }
+          }
+          # One shared word is never an overlap, however rare it is: the topic
+          # of a templated description is that one word for a whole chapter set.
+          if (total>=4 && distinct>=2 && shared/weight>=0.5) printf "%s and %s describe overlapping facts\n", file[i], file[j]
         }
       }')
 

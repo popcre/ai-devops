@@ -62,6 +62,25 @@ printf '\nSee [[nowhere-at-all]].\n' >> "$CLEAN/alpha.md"
 out="$("$SCRIPT" --repo-root "$TMP/nohub" --claude-home "$TMP/home" 2>&1)"
 check "dangling link detected" "printf '%s' \"\$out\" | grep -q 'DANGLING LINK: \[\[nowhere-at-all\]\]'"
 
+# --- a fact folded into a section still resolves (#2817) ------------------------
+FOLD="$(mk_project folded)"
+mk_memory x "$FOLD" chapter-one "a consolidated note holding several older facts" "## older-fact-one
+
+The text of the first older fact, see [[older-fact-two]]."
+mk_memory x "$FOLD" chapter-two "another consolidated note holding one older fact" "## older-fact-two
+
+The text of the second older fact."
+printf '# Memory index\n\n- [c1](chapter-one.md) — hook\n- [c2](chapter-two.md) — hook\n' > "$FOLD/MEMORY.md"
+out="$("$SCRIPT" --repo-root "$TMP/nohub" --claude-home "$TMP/home" 2>&1)"
+check "a link to a fact folded into a section resolves" "! printf '%s' \"\$out\" | grep -q 'DANGLING LINK: \[\[older-fact-two\]\]'"
+# A dot in a link is a literal dot, never "any character"; and a name with
+# neither a file nor a section stays a finding.
+printf '\n## v1x2xrelease-note\n' >> "$FOLD/chapter-one.md"
+printf '\nSee [[older-fact-three]] and [[v1.2.release-note]].\n' >> "$FOLD/chapter-two.md"
+out="$("$SCRIPT" --repo-root "$TMP/nohub" --claude-home "$TMP/home" 2>&1)"
+check "a link with neither a file nor a section is still reported" \
+  "printf '%s' \"\$out\" | grep -q 'DANGLING LINK: \[\[older-fact-three\]\]' && printf '%s' \"\$out\" | grep -q 'DANGLING LINK: \[\[v1.2.release-note\]\]'"
+
 # --- missing frontmatter -----------------------------------------------------
 BARE="$(mk_project bare)"
 printf 'just prose, no frontmatter\n' > "$BARE/loose.md"
@@ -82,6 +101,59 @@ mk_memory x "$DUP" second "the supabase service account token rotated breaking e
 printf '# Memory index\n\n- [First](first.md) — hook\n- [Second](second.md) — hook\n' > "$DUP/MEMORY.md"
 out="$("$SCRIPT" --repo-root "$TMP/nohub" --claude-home "$TMP/home" 2>&1)"
 check "possible duplicate detected" "printf '%s' \"\$out\" | grep -q 'POSSIBLE DUPLICATE'"
+
+# --- two identical notes in a two-note project -------------------------------
+# Every word is in both notes, so the rarity weight must never collapse to 0.
+PAIR="$(mk_project pair)"
+mk_memory x "$PAIR" one "the supabase service account token rotated and every project reference broke"
+mk_memory x "$PAIR" two "the supabase service account token rotated and every project reference broke"
+printf '# Memory index\n\n- [One](one.md) — hook\n- [Two](two.md) — hook\n' > "$PAIR/MEMORY.md"
+out="$("$SCRIPT" --repo-root "$TMP/nohub" --claude-home "$TMP/home" 2>&1)"
+check "two identical notes in a two-note project are a duplicate" "printf '%s' \"\$out\" | grep -q 'POSSIBLE DUPLICATE: one.md and two.md'"
+
+# --- template wording is not a duplicate (#2808) ------------------------------
+# 78 chapter notes whose descriptions share "Shared-db chapter (<topic>): N
+# consolidated facts." flagged 2,150 pairs on hetz. Each holds different facts.
+TPL="$(mk_project chapters)"
+# Plain notes sit beside the chapters, as in the real project: while every note
+# carries the template, template wording weighs almost nothing on its own.
+plain_notes=(
+  "how the payroll calendar handles leap years in the ansible repository"
+  "meeting notes from the quarterly budget review with finance"
+  "keyboard shortcuts that save time in the code editor"
+  "where the office keeps spare monitors and cables"
+)
+printf '# Memory index\n\n' > "$TPL/MEMORY.md"
+n=0
+for text in "${plain_notes[@]}"; do
+  n=$((n + 1))
+  mk_memory x "$TPL" "plain-$n" "$text"
+  printf -- '- [p%s](plain-%s.md) — hook\n' "$n" "$n" >> "$TPL/MEMORY.md"
+done
+for n in 1 2 3 4 5 6 7 8 9 10 11 12; do
+  mk_memory x "$TPL" "chapter-lease-$n" "Shared-db chapter (claim-lease-queue): 2 consolidated facts. mutex-waits-are-not-blockers-$n; ledger-reads-need-a-refresh-$n"
+done
+{ for n in 1 2 3 4 5 6 7 8 9 10 11 12; do printf -- '- [c%s](chapter-lease-%s.md) — hook\n' "$n" "$n"; done; } >> "$TPL/MEMORY.md"
+out="$("$SCRIPT" --repo-root "$TMP/nohub" --claude-home "$TMP/home" 2>&1)"
+check "template wording alone is not a duplicate" "! printf '%s' \"\$out\" | grep -q 'POSSIBLE DUPLICATE: chapter-lease-'"
+
+# A real copy inside such a project must still be reported, and only that pair.
+mk_memory x "$TPL" chapter-lease-13 "Shared-db chapter (claim-lease-queue): 2 consolidated facts. mutex-waits-are-not-blockers-1; ledger-reads-need-a-refresh-1"
+echo '- [c13](chapter-lease-13.md) — hook' >> "$TPL/MEMORY.md"
+out="$("$SCRIPT" --repo-root "$TMP/nohub" --claude-home "$TMP/home" 2>&1)"
+check "an identical note inside a templated project is still a duplicate" \
+  "printf '%s' \"\$out\" | grep -qE 'POSSIBLE DUPLICATE: chapter-lease-(1\\.md and chapter-lease-13|13\\.md and chapter-lease-1)\\.md'"
+check "the templated project reports only that pair" \
+  "[ \"\$(printf '%s' \"\$out\" | grep -c 'POSSIBLE DUPLICATE: chapter-lease-')\" -eq 1 ]"
+
+# Two single-fact chapters of a small topic share exactly one rare word, the
+# topic itself (hetz: chapter-reviewer-pool-01-part1 and chapter-reviewer-pool-02).
+mk_memory x "$TPL" chapter-pool-1 "Shared-db chapter (reviewer-pool): 1 consolidated facts. pool-has-five-and-two-are-dead"
+mk_memory x "$TPL" chapter-pool-2 "Shared-db chapter (reviewer-pool): 1 consolidated facts. throttle-is-account-wide"
+{ echo '- [p1](chapter-pool-1.md) — hook'; echo '- [p2](chapter-pool-2.md) — hook'; } >> "$TPL/MEMORY.md"
+out="$("$SCRIPT" --repo-root "$TMP/nohub" --claude-home "$TMP/home" 2>&1)"
+check "two single-fact chapters of one topic are not duplicates" \
+  "! printf '%s' \"\$out\" | grep -q 'POSSIBLE DUPLICATE: chapter-pool-'"
 
 # --- oversized index ---------------------------------------------------------
 BIG="$(mk_project big)"
