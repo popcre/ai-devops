@@ -531,6 +531,30 @@ grep -Fq 'publicly readable' "$TMP/l2.out" &&
 grep -Fq 'could not verify private hub visibility' "$TMP/l2.out" ||
   fail "insteadOf fixture lost its diagnosis: $(tail -3 "$TMP/l2.out")"
 
+# --- the installed launcher is a symlink (#2818) ------------------------------
+# /usr/local/bin/ai-memory-sync points into the checkout. A root derived from
+# the link itself is /usr/local, with no memory/project-map.tsv beside it, so
+# every alias in the map is ignored and one machine folder lands in two hub
+# projects depending on how the sync was started.
+mkdir -p "$TMP/launcher-bin" "$CLAUDE_A/projects/-/memory"
+if ln -s "$ROOT/bin/ai-memory-sync" "$TMP/launcher-bin/ai-memory-sync" &&
+   [[ -L "$TMP/launcher-bin/ai-memory-sync" ]]; then
+  printf '# Memory index\n\n- [alias](alias.md) - fact under a mapped folder.\n' > "$CLAUDE_A/projects/-/memory/MEMORY.md"
+  printf -- '---\nname: alias\ndescription: a fact in a folder the project map renames\n---\n\nfact\n' > "$CLAUDE_A/projects/-/memory/alias.md"
+  # No AI_MEMORY_TOOL_ROOT here on purpose: the root must come from the link.
+  HOME="$HOME_A" CLAUDE_HOME="$CLAUDE_A" \
+  AI_MEMORY_TEST_MODE=1 AI_MEMORY_TEST_PRIVATE=1 \
+  AI_MEMORY_REMOTE="$REMOTE" AI_MEMORY_HUB="$HUB_A" AI_MEMORY_LOG="$LOG_A" \
+    bash "$TMP/launcher-bin/ai-memory-sync" --dry-run > "$TMP/launcher.out" 2>&1 ||
+    fail "sync through a symlinked launcher failed: $(tail -3 "$TMP/launcher.out")"
+  grep -Fq 'push  -  ->  memory/hetz-root' "$TMP/launcher.out" ||
+    fail "launcher run ignored the project map: $(grep -E '^  (push|pull|skip) +- ' "$TMP/launcher.out" | tr '\n' ';')"
+  ! grep -Eq '^  push  -  ->  memory/-$' "$TMP/launcher.out" ||
+    fail "launcher run wrote a mapped folder under its unmapped name"
+else
+  echo "SKIP: the launcher alias check needs real symlinks"
+fi
+
 bash -n "$ROOT/bin/ai-memory-sync"
 bash -n "$ROOT/bin/ai-sync-memory"
 echo "PASS: private memory sync converges losslessly and preserves every failure state"

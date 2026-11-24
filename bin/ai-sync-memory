@@ -43,7 +43,14 @@ else
   BASE_HOME="$HOME"
 fi
 CLAUDE_HOME="${CLAUDE_HOME:-$BASE_HOME/.claude}"
-TOOL_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Resolve the launcher symlink first: a root derived from the link itself has
+# no memory/project-map.tsv beside it, so every alias would be ignored (#2818).
+_self="${BASH_SOURCE[0]}"
+while [ -L "$_self" ]; do
+  _link="$(readlink "$_self")"
+  case "$_link" in /*) _self="$_link" ;; *) _self="$(dirname "$_self")/$_link" ;; esac
+done
+TOOL_ROOT="$(cd "$(dirname "$_self")/.." && pwd)"
 # Resolve Windows untrusted mount points (see bin/ai-winpath). Interactive
 # Claude can follow ~/.claude/projects when it is a junction; SSH sessions
 # cannot. Physical path is the same memory either way.

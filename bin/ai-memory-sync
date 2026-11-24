@@ -37,7 +37,15 @@ else
 fi
 MACHINE_CLAUDE_HOME="${CLAUDE_HOME:-$BASE_HOME/.claude}"
 
-TOOL_ROOT="${AI_MEMORY_TOOL_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+# Resolve the launcher: /usr/local/bin/ai-memory-sync is a symlink, and a root
+# derived from the link itself is /usr/local, where memory/project-map.tsv does
+# not exist, so every alias in the map would be silently ignored (#2818).
+_self="${BASH_SOURCE[0]}"
+while [ -L "$_self" ]; do
+  _link="$(readlink "$_self")"
+  case "$_link" in /*) _self="$_link" ;; *) _self="$(dirname "$_self")/$_link" ;; esac
+done
+TOOL_ROOT="${AI_MEMORY_TOOL_ROOT:-$(cd "$(dirname "$_self")/.." && pwd)}"
 # Prefer SSH for the private hub when a key exists. Windows Credential Manager
 # is not available in SSH logons, so HTTPS + Git Credential Manager hangs on a
 # credential prompt (wincredman cannot persist). The same key works in both
