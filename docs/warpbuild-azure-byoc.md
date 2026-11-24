@@ -1,11 +1,16 @@
 ---
-summary: Runbook and live state for WarpBuild Azure BYOC Windows CI runners (stacks, runner sets, setup steps), not yet on the required lane (issue 961).
+summary: HISTORICAL. Retired WarpBuild Azure BYOC Windows CI runner runbook; owner ruling 2026-11-24 ended WarpBuild and Blacksmith.
 kind: living
-status: current
+status: historical
 read-when: Working on WarpBuild Azure Windows CI runners
 ---
 
 # WarpBuild Azure BYOC Windows CI
+
+> **Historical.** Owner ruling 2026-11-24 (docs/owner-rulings.md): neither
+> WarpBuild nor Blacksmith is used. CI runs only on the self-hosted runners
+> (edge-runn-envy, edge-runn-xps, edge-dev3) and GitHub-hosted runners. The canary
+> workflow was deleted. Kept only as a record.
 
 WarpBuild BYOC creates a fresh Windows Server 2022 VM in POP Creations' dedicated
 Azure CI subscription (`warpbuild ci runners`) for each GitHub Actions job and

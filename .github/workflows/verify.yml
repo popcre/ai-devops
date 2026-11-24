@@ -285,7 +285,7 @@ jobs:
   # Extra Windows capacity (owner, 2026-09-23: "why are we saving ENVY? WE
   # NEED TO SPEED THINGS UP!!!"). Idle qualified self-hosted hosts take
   # ordinary Windows sections; everything else stays on GitHub-hosted (owner
-  # 2026-10-01: KEEP GitHub-hosted in the pool until WarpBuild is fully up). Any
+  # 2026-10-01: KEEP GitHub-hosted in the pool until further notice). Any
   # lookup failure, or this job failing outright, leaves every section on
   # GitHub-hosted.
   runner-router:
@@ -411,10 +411,8 @@ jobs:
         run: Remove-Item -Recurse -Force -ErrorAction SilentlyContinue (Join-Path 'C:\t' '${{ github.run_id }}-${{ matrix.section }}')
 
   # self-hosted hosts as extra capacity (the paid third-party lane was removed 2026-11-03;
-  # owner request). The WarpBuild BYOC proof lane that queued
-  # run your tests"). The WarpBuild BYOC proof lane that queued
-  # here without a runner was removed; WarpBuild is still proven separately by
-  # warpbuild-win2022-canary.yml.
+  # owner request). A third-party proof lane that queued
+  # here without a runner was removed.
 
   # Scheduled, manual and qualification verification stay complete and
   # unsectioned. Sectioning is a wall-clock lever for the pull-request lane; the
@@ -434,10 +432,10 @@ jobs:
        needs.fast-classifier.outputs.run_long != 'false') &&
       (github.event_name != 'workflow_dispatch' ||
        needs.manual-preflight.outputs.run_expensive_jobs == 'true')
-    # GitHub-hosted stays the fixed lane until WarpBuild is fully proven (owner,
+    # GitHub-hosted stays the fixed lane until further notice (owner,
     # 2026-10-01: KEEP GitHub-hosted in the pool; USE it for runs that would
     # otherwise get stuck). The scheduled/manual complete matrix runs five
-    # 105-minute sections in parallel, beyond the 2-VM WarpBuild quota.
+    # 105-minute sections in parallel, beyond any small self-hosted pool.
     runs-on: windows-2025
     # Run 34856869730 reached the existing 105-minute bound in Bash suite
     # 19/74, before PowerShell started. Partition the complete dynamic inventory

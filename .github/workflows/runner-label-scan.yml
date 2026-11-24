@@ -3,7 +3,7 @@ name: runner-label-scan
 # Step 3.1 (plan_ci-process-repair.md, #2367): flag every runs-on label across
 # all popcre and u2giants workflows that matches no known hosted image, no
 # routing-config label, and no registered runner. This is the check that
-# would have caught the Blacksmith removal leaving dead labels behind: jobs
+# would have caught a third-party runner removal leaving dead labels behind: jobs
 # queued on a label with no runner look like waiting, not broken.
 #
 # This check is advisory. The reporter opens an issue for confirmed dead
