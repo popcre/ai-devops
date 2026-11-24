@@ -699,7 +699,10 @@ published_sandbox_refresh(){
     contributor="$(printf '%b' "$contributor")"
     cls="${contributor%%$'\t'*}"; path="${contributor#*$'\t'}"
     if [ "$IDENTITY" != popcre/designflow-data-syncing ]; then
-      [[ "$cls" = shared-db && "$path" = shared-db/* ]] \
+      # Already-published handoff notes ride along; the release proof requires
+      # each one to equal published develop byte for byte.
+      [[ ( "$cls" = shared-db && "$path" = shared-db/* ) \
+        || ( ( "$cls" = reviewer-safety || "$cls" = prose ) && "$path" = HANDOFF.d/*.md && "$path" != HANDOFF.d/*/* ) ]] \
         || blocked 'ai-task-gates: STOP. Published mirror refresh cannot contribute source outside the read-only mirror.'
     else
       case "$cls:$path" in
@@ -714,6 +717,12 @@ published_sandbox_refresh(){
     if [ "$IDENTITY" = popcre/designflow-data-syncing ]; then
       for cls in code prose reviewer-safety; do merged_gate "$IDENTITY" "$cls" repository; done
     fi)"
+  # Published handoff notes were authored and reviewed on develop; only their
+  # repository deployment prohibition (not authoring proofs) binds the refresh.
+  if [ "$IDENTITY" != popcre/designflow-data-syncing ] \
+    && grep -Fxq $'forbidden\tdeploy' <<<"$(merged_gate "$IDENTITY" reviewer-safety repository)"; then
+    blocked 'ai-task-gates: STOP. Repository-specific deployment prohibition remains binding.'
+  fi
   if grep -Fxq $'forbidden\tdeploy' <<<"$gate"; then
     blocked 'ai-task-gates: STOP. Repository-specific deployment prohibition remains binding.'
   fi
