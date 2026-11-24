@@ -83,6 +83,35 @@ printf '# Memory index\n\n- [First](first.md) — hook\n- [Second](second.md) �
 out="$("$SCRIPT" --repo-root "$TMP/nohub" --claude-home "$TMP/home" 2>&1)"
 check "possible duplicate detected" "printf '%s' \"\$out\" | grep -q 'POSSIBLE DUPLICATE'"
 
+# --- two identical notes in a two-note project -------------------------------
+# Every word is in both notes, so the rarity weight must never collapse to 0.
+PAIR="$(mk_project pair)"
+mk_memory x "$PAIR" one "the supabase service account token rotated and every project reference broke"
+mk_memory x "$PAIR" two "the supabase service account token rotated and every project reference broke"
+printf '# Memory index\n\n- [One](one.md) — hook\n- [Two](two.md) — hook\n' > "$PAIR/MEMORY.md"
+out="$("$SCRIPT" --repo-root "$TMP/nohub" --claude-home "$TMP/home" 2>&1)"
+check "two identical notes in a two-note project are a duplicate" "printf '%s' \"\$out\" | grep -q 'POSSIBLE DUPLICATE: one.md and two.md'"
+
+# --- template wording is not a duplicate (#2808) ------------------------------
+# 78 chapter notes whose descriptions share "Shared-db chapter (<topic>): N
+# consolidated facts." flagged 2,150 pairs on hetz. Each holds different facts.
+TPL="$(mk_project chapters)"
+for n in 1 2 3 4 5 6 7 8 9 10 11 12; do
+  mk_memory x "$TPL" "chapter-lease-$n" "Shared-db chapter (claim-lease-queue): 2 consolidated facts. mutex-waits-are-not-blockers-$n; ledger-reads-need-a-refresh-$n"
+done
+{ printf '# Memory index\n\n'; for n in 1 2 3 4 5 6 7 8 9 10 11 12; do printf -- '- [c%s](chapter-lease-%s.md) — hook\n' "$n" "$n"; done; } > "$TPL/MEMORY.md"
+out="$("$SCRIPT" --repo-root "$TMP/nohub" --claude-home "$TMP/home" 2>&1)"
+check "template wording alone is not a duplicate" "! printf '%s' \"\$out\" | grep -q 'POSSIBLE DUPLICATE: chapter-lease-'"
+
+# A real copy inside such a project must still be reported, and only that pair.
+mk_memory x "$TPL" chapter-lease-13 "Shared-db chapter (claim-lease-queue): 2 consolidated facts. mutex-waits-are-not-blockers-1; ledger-reads-need-a-refresh-1"
+echo '- [c13](chapter-lease-13.md) — hook' >> "$TPL/MEMORY.md"
+out="$("$SCRIPT" --repo-root "$TMP/nohub" --claude-home "$TMP/home" 2>&1)"
+check "an identical note inside a templated project is still a duplicate" \
+  "printf '%s' \"\$out\" | grep -qE 'POSSIBLE DUPLICATE: chapter-lease-(1\\.md and chapter-lease-13|13\\.md and chapter-lease-1)\\.md'"
+check "the templated project reports only that pair" \
+  "[ \"\$(printf '%s' \"\$out\" | grep -c 'POSSIBLE DUPLICATE: chapter-lease-')\" -eq 1 ]"
+
 # --- oversized index ---------------------------------------------------------
 BIG="$(mk_project big)"
 mk_memory x "$BIG" solo "one fact"
