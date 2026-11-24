@@ -34,7 +34,7 @@ metadata:
 
 > **About this copy.** This is the `evaluate` skill of ScaleDown's `slm-agent`
 > package (MIT, as declared in that package's manifest), vendored unchanged
-> apart from this note and the skill name. The ai-devops toolkit installs it
+> apart from this note and the skill name (see [NOTICE.md](NOTICE.md)). The ai-devops toolkit installs it
 > for every client (Claude Code, Codex, ZCode, MiMo, Antigravity) and registers
 > the helper program this skill calls as the MCP server `scaledown-migration-agent`, so
 > the "added by hand" tool names listed above are the ones in use.

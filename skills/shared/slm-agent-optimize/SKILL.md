@@ -30,7 +30,7 @@ metadata:
 
 > **About this copy.** This is the `optimize` skill of ScaleDown's `slm-agent`
 > package (MIT, as declared in that package's manifest), vendored unchanged
-> apart from this note and the skill name. The ai-devops toolkit installs it
+> apart from this note and the skill name (see [NOTICE.md](NOTICE.md)). The ai-devops toolkit installs it
 > for every client (Claude Code, Codex, ZCode, MiMo, Antigravity) .
 > This skill needs
 > no helper program, only the `SCALEDOWN_API_KEY` environment variable.
