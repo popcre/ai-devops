@@ -2,7 +2,7 @@
 
 Plan: [`plan_edge-dev-reviewer-repair-no-review.md`](../../../plan_edge-dev-reviewer-repair-no-review.md)
 Issue: [#1678](https://github.com/popcre/ai-devops/issues/1678)
-Handoff: [`2026-10-16T0148Z-edge-dev-mimo-reviewer-no-review-plan.md`](../../../HANDOFF.d/2026-10-16T0148Z-edge-dev-mimo-reviewer-no-review-plan.md)
+Handoff: [`2026-10-16T0148Z-edge-dev-mimo-reviewer-no-review-plan.md`](https://github.com/popcre/ai-devops/blob/0f4c4226/HANDOFF.d/2026-10-16T0148Z-edge-dev-mimo-reviewer-no-review-plan.md)
 Machine: `edge-dev` (Windows, MINGW64)
 Recorded: 2026-10-16 (implementation session, after plan publication)
 

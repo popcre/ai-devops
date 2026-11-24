@@ -21,7 +21,7 @@ Second SECURITY REJECT at509b63a2ba781454d69ac06da004fe8d722c773d is also preser
 | D own-output recovery and pinned fixture | source prepared; final-head proof open | actual pinned isolated fixture reconstructs all nine pages byte-exact and denies another session; no provider or production origin |
 | E review, shipping, installation, original capability | open | #1791 live-proof checklist remains unchecked |
 
-Next: freeze candidate, run final exact-head relevant suites when the same-host CI collision gate clears, then obtain assigned non-GLM SECURITY review. Existing shared service and old sessions remain untouched. [Coordination baton](HANDOFF.d/2026-10-16T0234Z-edge-dev3-codex-glm-own-output.md) links back here. Root HANDOFF.md stays unchanged.
+Next: freeze candidate, run final exact-head relevant suites when the same-host CI collision gate clears, then obtain assigned non-GLM SECURITY review. Existing shared service and old sessions remain untouched. [Coordination baton](https://github.com/popcre/ai-devops/blob/0f4c4226/HANDOFF.d/2026-10-16T0234Z-edge-dev3-codex-glm-own-output.md) links back here. Root HANDOFF.md stays unchanged.
 
 ### Provider-success readiness before protected activation
 

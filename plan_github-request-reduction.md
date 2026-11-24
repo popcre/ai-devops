@@ -409,7 +409,7 @@ no-op using PowerShell 7 and returned REJECT. The second native action is only
 prepared. Later memory-seed PASS supersedes the old current-memory failure below;
 secrets SKIP still does not establish required-secrets acceptance. Preserve
 accepted #914/#925/#868/#1008. Start with the
-[closeout continuation](HANDOFF.d/2026-10-08T1719Z-edge-dev3-codex-request-reduction-closeout.md).
+[closeout continuation](https://github.com/popcre/ai-devops/blob/0f4c4226/HANDOFF.d/2026-10-08T1719Z-edge-dev3-codex-request-reduction-closeout.md).
 
 Historical snapshot follows; its pending PRs and manifest are not current.
 
@@ -474,7 +474,7 @@ repair received exact-head independent APPROVE, but subsequent commits invalidat
 that verdict. Historical GraphQL cost and quota snapshots cannot be
 joined to one credential context.
 The current phase states are below and in the
-[active handoff](HANDOFF.d/2026-09-28T1149Z-edge-dev3-codex-github-request-reduction.md).
+[active handoff](https://github.com/popcre/ai-devops/blob/0f4c4226/HANDOFF.d/2026-09-28T1149Z-edge-dev3-codex-github-request-reduction.md).
 
 Stop-state update 2026-09-28 3:40 PM EDT: Albert explicitly stopped this
 session and requested handover. Parent #658 was reopened because nine acceptance
@@ -578,7 +578,7 @@ most one extra candidate startup spike. Evidence:
 install; section 13 remains open.
 
 **Start:** reconcile current upstream, read this STATUS and the
-[active handoff](HANDOFF.d/2026-09-28T1149Z-edge-dev3-codex-github-request-reduction.md),
+[active handoff](https://github.com/popcre/ai-devops/blob/0f4c4226/HANDOFF.d/2026-09-28T1149Z-edge-dev3-codex-github-request-reduction.md),
 then finish the first actionable unproved outcome under #658. The original
 the discovery handoff (retired; see git history)
 remains historical context.

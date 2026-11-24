@@ -31,7 +31,7 @@ EST; stop remains November 12, 2026, 5:58 AM EST. No extension is authorized.
 
 Current evidence and full continuity:
 [investigation receipt](https://github.com/popcre/ai-devops/issues/2022#issuecomment-6550148920)
-and [new execution handoff](HANDOFF.d/2026-10-31T2353Z-edge-dev3-codex-entire-control-trial.md).
+and [new execution handoff](https://github.com/popcre/ai-devops/blob/0f4c4226/HANDOFF.d/2026-10-31T2353Z-edge-dev3-codex-entire-control-trial.md).
 Native CI and an isolated merge/publication now have receipts below. Full
 replacement, latency benefit and 16-cell app acceptance remain unmet.
 The original R1–R8 work remains, with updates below.
@@ -39,7 +39,7 @@ The original R1–R8 work remains, with updates below.
 ### Trial sequence, dependencies and completion gates
 
 November1 operational wrap-up: the coordinator's
-[complete continuation handoff](HANDOFF.d/2026-11-01T1442Z-edge-dev3-codex-entire-trial-continuation.md)
+[complete continuation handoff](https://github.com/popcre/ai-devops/blob/0f4c4226/HANDOFF.d/2026-11-01T1442Z-edge-dev3-codex-entire-trial-continuation.md)
 preserves completed XPS/Linux proof, exact merged repairs, both subagents,
 failed approaches, literal0/16 native cells, unfixed hosted cancellation and
 all remaining T/R gates. Fresh native closeout verification for this coordinator
@@ -267,7 +267,7 @@ Executing coordinator: Codex chat `01a18e41-40fb-76f2-90a6-cad01b186b8e` on
 edge-dev3, claimed in the [execution receipt](https://github.com/popcre/ai-devops/issues/2022#issuecomment-6531589539).
 The coordinator owns the same issue through live acceptance or an evidenced
 blocked disposition. Planning is already merged.
-[Fresh-session handoff](HANDOFF.d/2026-10-30T1847Z-edge-dev3-codex-entire-fleet-plan.md).
+[Fresh-session handoff](https://github.com/popcre/ai-devops/blob/0f4c4226/HANDOFF.d/2026-10-30T1847Z-edge-dev3-codex-entire-fleet-plan.md).
 
 | Step | Status, reconciled October 31, 2026 EDT | Evidence / gate still required |
 |---|---|---|
@@ -765,7 +765,7 @@ documentation are complete. There is no active support wait. Retention and old
 issued-access behavior remain disclosed unknowns, not additional rollout work.
 The unchanged trial deadline remains recorded; no background worker runs.
 For a later authorized continuation, start with the
-[session closeout](HANDOFF.d/2026-10-30T1757Z-edge-dev3-codex-entire-live-wrap.md).
+[session closeout](https://github.com/popcre/ai-devops/blob/0f4c4226/HANDOFF.d/2026-10-30T1757Z-edge-dev3-codex-entire-live-wrap.md).
 
 October 30 support disposition: Albert supplied Entire support's answer that
 Trails cannot be deleted. Trail113 therefore cannot be removed; the same product
@@ -813,7 +813,7 @@ Discovery November 2, 2026, 5:00 PM EST and stop November 12, 2026, 5:58 AM EST
 are unchanged. The closeout status below describes the earlier full-feature scope.
 
 Closeout update, October 29, 2026: start with the
-[fresh continuation handoff](HANDOFF.d/2026-10-30T0345Z-edge-dev3-codex-entire-trial-wrap.md).
+[fresh continuation handoff](https://github.com/popcre/ai-devops/blob/0f4c4226/HANDOFF.d/2026-10-30T0345Z-edge-dev3-codex-entire-trial-wrap.md).
 Do not restart the experiment or reset either deadline. Cost attribution and
 billing investigation were removed from scope by Albert; historical observations
 below are not pending deliverables. This does not authorize purchases.
@@ -950,9 +950,9 @@ At the end of **every** phase, re-read all remaining downstream phases through
 step 7 and report any drift on #2022. Update affected assumptions, identifiers,
 dependencies and gates before transferring work; never hand forward an implicit
 change learned only in chat.
-Session handoff: [execution continuation](HANDOFF.d/2026-10-29T1428Z-edge-dev3-codex-entire-trial-continuation.md).
-Earlier execution-unstarted record: [planning closeout](HANDOFF.d/2026-10-27T1822Z-edge-dev3-codex-entire-trial-closeout.md).
-Earlier planning context: [planning handoff](HANDOFF.d/2026-10-27T1403Z-edge-dev3-codex-entire-trial-plan.md).
+Session handoff: [execution continuation](https://github.com/popcre/ai-devops/blob/0f4c4226/HANDOFF.d/2026-10-29T1428Z-edge-dev3-codex-entire-trial-continuation.md).
+Earlier execution-unstarted record: [planning closeout](https://github.com/popcre/ai-devops/blob/0f4c4226/HANDOFF.d/2026-10-27T1822Z-edge-dev3-codex-entire-trial-closeout.md).
+Earlier planning context: [planning handoff](https://github.com/popcre/ai-devops/blob/0f4c4226/HANDOFF.d/2026-10-27T1403Z-edge-dev3-codex-entire-trial-plan.md).
 Historical planning closeout, October 27, 2026, 2:22 PM EDT: original planning PR #2023
 and revised planning PR #2024 are MERGED. The latter landed at
 `79848d666c055bc3c38bdeb47f102b01c8fa8b59`; all runtime steps below remain open.

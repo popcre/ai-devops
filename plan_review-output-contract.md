@@ -8,7 +8,7 @@ read-when: working on review report format validation or the repair turn
 # Plan — review OUTPUT contract rebuild (one validator, one repair turn, smaller roster)
 
 Issue: [popcre/ai-devops#1783](https://github.com/popcre/ai-devops/issues/1783).
-Handoff: [HANDOFF.d/2026-10-19T2000Z-hetz-claude-review-output-contract-plan.md](HANDOFF.d/2026-10-19T2000Z-hetz-claude-review-output-contract-plan.md).
+Handoff: [HANDOFF.d/2026-10-19T2000Z-hetz-claude-review-output-contract-plan.md](https://github.com/popcre/ai-devops/blob/0f4c4226/HANDOFF.d/2026-10-19T2000Z-hetz-claude-review-output-contract-plan.md).
 Written 2026-10-19 (4:00 PM EDT) on hetz by Claude Code. Base: `main` at `0b46c7a9`; shared-db read at `a7b32d7e8`.
 
 ## STATUS (read first — do not re-derive or re-plan)

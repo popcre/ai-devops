@@ -12,7 +12,7 @@ Purpose: retain the corrected independent assessment and small-pilot consensus,
 without confusing plans with running software. Maintain this as a decision
 record; the two implementation plans remain the execution authorities.
 
-Continuation: [small-trials handoff](../HANDOFF.d/2026-11-01T0208Z-edge-dev3-codex-small-trials-handoff.md).
+Continuation: [small-trials handoff](https://github.com/popcre/ai-devops/blob/0f4c4226/HANDOFF.d/2026-11-01T0208Z-edge-dev3-codex-small-trials-handoff.md).
 Children: [TokenEconomizer #2220](https://github.com/popcre/ai-devops/issues/2220)
 and [fresh reader #2222](https://github.com/popcre/ai-devops/issues/2222).
 Plans: [optimizer](../plan_tokeneconomizer-desktops.md),

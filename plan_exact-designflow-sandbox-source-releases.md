@@ -20,7 +20,7 @@ codex/exact-sandbox-release.
 | Consumer adoption and live proof | open | Same issue retains live-proof checklist |
 
 Fresh session starts at final implementation checks/review. Registered handoff: [design
-handoff](HANDOFF.d/2026-10-16T0419Z-edge-dev3-codex-exact-sandbox-release.md).
+handoff](https://github.com/popcre/ai-devops/blob/0f4c4226/HANDOFF.d/2026-10-16T0419Z-edge-dev3-codex-exact-sandbox-release.md).
 
 ## 1. Ultimate goal
 

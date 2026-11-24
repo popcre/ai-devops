@@ -68,7 +68,7 @@ need fresh approval. The second native action is only prepared. Later 958
 memory-seed PASS supersedes the old failure, but secrets SKIP does not establish
 required installation. S3 installed proofs and S4/P8 acceptance remain OPEN.
 Read the parent plan's superseding STATUS and the
-[closeout continuation](HANDOFF.d/2026-10-08T1719Z-edge-dev3-codex-request-reduction-closeout.md).
+[closeout continuation](https://github.com/popcre/ai-devops/blob/0f4c4226/HANDOFF.d/2026-10-08T1719Z-edge-dev3-codex-request-reduction-closeout.md).
 Preserve accepted S1/S2 outcomes.
 
 October 8, 2026, 10:16 AM EDT: existing #658 coordinator owns installation,
@@ -110,7 +110,7 @@ latency; unsupported network paths remain unknown. Detailed current ownership
 and limitations are in the parent plan's STATUS.
 
 **Start here:** read this STATUS and the
-[active programme handoff](HANDOFF.d/2026-09-28T1149Z-edge-dev3-codex-github-request-reduction.md)
+[active programme handoff](https://github.com/popcre/ai-devops/blob/0f4c4226/HANDOFF.d/2026-09-28T1149Z-edge-dev3-codex-github-request-reduction.md)
 before touching code. S2 is landed; finish the first actionable unproved outcome.
 Keep one live proof per owner and update this STATUS when a step lands.
 
