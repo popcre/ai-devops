@@ -122,6 +122,11 @@ expect_sig "session env supplies the id without --id" \
   "Posted by MiMo chat \"Tracing 'AI' sessions\" (ses_ffe5e2d8)"
 unset MIMO_SESSION_ID
 
+export ZCODE_SESSION_ID="$ZCODE_ID" CLAUDE_CODE_SESSION_ID="$ZCODE_ID"
+out="$(run)"
+check "zcode wins when ZCode also sets the Claude id" 'printf %s "$out" | grep -q "^Posted by ZCode chat "'
+unset ZCODE_SESSION_ID CLAUDE_CODE_SESSION_ID
+
 out="$(run)"
 check "no app and no id falls back to a stub" 'printf %s "$out" | grep -q "^Posted by chat (unknown) on [A-Za-z0-9._-][A-Za-z0-9._-]*$"'
 out="$(run --app claude)"

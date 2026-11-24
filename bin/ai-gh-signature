@@ -211,7 +211,7 @@ LOOKUP = {
 
 
 def detect_app():
-    for app in ("antigravity", "mimo", "claude", "codex", "zcode"):
+    for app in ("antigravity", "mimo", "zcode", "claude", "codex"):
         for var in ID_ENV[app]:
             if os.environ.get(var):
                 return app
