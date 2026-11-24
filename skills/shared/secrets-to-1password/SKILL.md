@@ -212,6 +212,10 @@ same change. Never add a value, address, or project identifier.
 - DesignFlow sandbox test logins: `DesignFlow PLM vendor account test login 1 -
   alsand sandbox (users.level=vendor)`, `DesignFlow PLM vendor account test
   login 2 - alsand sandbox (users.level=vendor)`
+- Storage and internal tools (added 2026-11-24; both were exposed in synced
+  memory notes and wait for rotation, popcre/ai-devops#2816): `Linode Object
+  Storage keys - Seafile on hetz (production)`, `bizanalysis interview admin
+  token - Cloudflare Worker (production)`
 
 ## Title format
 
