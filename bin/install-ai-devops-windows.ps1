@@ -8,7 +8,9 @@ What this does:
 - Installs Claude skills to $HOME\.claude\skills.
 - Installs Codex skills to $HOME\.codex\skills.
 - Installs ZCode skills to $HOME\.zcode\skills (migrating the hand-made
-  junction to ~/.claude/skills away first, non-recursively).
+  junction to ~/.claude/skills away first, non-recursively), and hides from
+  ZCode the same-named copies that ~/.agents/skills holds (subagents could
+  not load a doubled skill by name, #2795).
 - Seeds $HOME\.claude\CLAUDE.md, $HOME\.codex\AGENTS.md, and
   $HOME\.zcode\AGENTS.md only if missing.
 - Schedules the blocker watch so waiting sessions on this computer get woken.
@@ -31,6 +33,9 @@ param(
     [string]$ZCodeHome = (Join-Path $HOME ".zcode"),
     [string]$MimoHome = (Join-Path $HOME ".config\mimocode"),
     [string]$AntigravityHome = (Join-Path $HOME ".gemini\config"),
+    # The other skill root ZCode scans. Read only; tests pin it to a scratch
+    # folder so a result never depends on what this machine holds there.
+    [string]$AgentsSkillsRoot = (Join-Path $HOME ".agents\skills"),
     [switch]$SkillsDryRun,
     # Replace an installed global that differs from the repo copy. Without this
     # switch a differing global is reported and left alone. The old file is
@@ -1175,6 +1180,27 @@ $sharedZCodeCount = Install-SkillFolder `
 Write-Note "$sharedZCodeCount shared skills installed for ZCode."
 Invoke-OrphanSkillPruning -ClientHome $ZCodeHome -Label "ZCode" -Root $RepoPath -SourceRoots @(
     (Join-Path $RepoPath "skills\zcode"), (Join-Path $RepoPath "skills\shared"))
+
+# ZCode scans ~/.agents/skills as well as ~/.zcode/skills, and where that root
+# holds a same-named copy of a managed skill every ZCode subagent refuses the
+# bare name (#2795). The writer hides the second copy from ZCode through
+# ZCode's own per-skill switch. Nothing is doubled where that root is absent.
+# A failure here leaves ZCode working as before (main session loads skills;
+# subagents do not), so it is reported, never fatal to the install.
+if (-not (Test-Path -LiteralPath $AgentsSkillsRoot -PathType Container)) {
+    Write-Note "No $AgentsSkillsRoot root - ZCode sees each skill once; nothing to hide."
+} elseif ([System.Environment]::OSVersion.Platform -ne [System.PlatformID]::Win32NT) {
+    # ZCode runs on Windows only, and so does the writer.
+    Write-Note "Not Windows - ZCode runs on Windows only; nothing to hide."
+} else {
+    Write-Note "Hiding same-named copies under $AgentsSkillsRoot from ZCode"
+    try {
+        & (Join-Path $PSScriptRoot 'configure-zcode-skill-shadows.ps1') `
+            -ZCodeHome $ZCodeHome -AgentsSkillsRoot $AgentsSkillsRoot -DryRun:$SkillsDryRun
+    } catch {
+        Write-Warning "! ZCode skill shadows were not written ($($_.Exception.Message)). ZCode subagents keep refusing a doubled skill by name; rerun the installer once that is fixed."
+    }
+}
 
 Write-Step "Installing MiMo skills"
 # MiMoCode write root is ~/.config/mimocode/skills only (Desktop installs/imports

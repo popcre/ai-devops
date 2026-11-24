@@ -85,10 +85,17 @@ AI_DEVOPS_INSTALL_TEST_MODE=1 AI_DEVOPS_SKIP_MACHINE_TOOLS_GATE=1 AI_DEVOPS_TEST
   -CodexHome "$(cygpath -w "$TMP_ROOT/ps/codex" 2>/dev/null || echo "$TMP_ROOT/ps/codex")" \
   -ZCodeHome "$(cygpath -w "$TMP_ROOT/ps/zcode" 2>/dev/null || echo "$TMP_ROOT/ps/zcode")" \
   -MimoHome "$(cygpath -w "$TMP_ROOT/ps/mimo" 2>/dev/null || echo "$TMP_ROOT/ps/mimo")" \
+  -AgentsSkillsRoot "$(cygpath -w "$TMP_ROOT/agents-skills" 2>/dev/null || echo "$TMP_ROOT/agents-skills")" \
   >"$TMP_ROOT/powershell-install.log" 2>&1 || {
     cat "$TMP_ROOT/powershell-install.log" >&2
     fail 'PowerShell fixture install failed'
   }
+# No skill is doubled (the second ZCode skill root does not exist here), so
+# the installer must leave ZCode's config alone: not even create it.
+grep -Fq 'sees each skill once' "$TMP_ROOT/powershell-install.log" \
+  || { cat "$TMP_ROOT/powershell-install.log" >&2; fail 'installer did not report that no ZCode skill is doubled'; }
+[[ -e "$TMP_ROOT/ps/zcode/cli/config.json" ]] \
+  && fail 'installer wrote a ZCode config although no skill is doubled'
 
 listing() { (cd "$1" && find skills -type f | LC_ALL=C sort); }
 for client in claude codex; do
@@ -123,6 +130,16 @@ grep -Fq '= shared-one (shared) up to date' <<<"$out" || fail "Bash did not acce
 gh_config_dir="$TMP_ROOT/empty-gh-config"
 mkdir -p "$gh_config_dir"
 gh_config_native="$(cygpath -w "$gh_config_dir" 2>/dev/null || echo "$gh_config_dir")"
+# A same-named copy of a toolkit skill in ZCode's second skill root makes every
+# ZCode subagent refuse the bare name (#2795); the installer must hide it from
+# ZCode in ZCode's own config. ZCode runs on Windows only, so that is proved on
+# Windows. This refresh is also the one that runs under Windows PowerShell 5.1
+# wherever Windows provides it, so it proves that edition too. Elsewhere the
+# installer must report the stage as not applicable and write nothing.
+mkdir -p "$TMP_ROOT/agents-skills/shared-one"
+printf '%s\n' '---' 'name: shared-one' 'description: test' '---' > "$TMP_ROOT/agents-skills/shared-one/SKILL.md"
+on_windows=0
+case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) on_windows=1 ;; esac
 # Prove the real native-probe helper and the real optional-login decision with
 # deterministic native exits. Shared-runner admission can legitimately return
 # 75 without attempting authentication; that is deferral, never login success.
@@ -170,10 +187,28 @@ out="$(GH_CONFIG_DIR="$gh_config_native" GH_TOKEN= GITHUB_TOKEN= \
   -CodexHome "$(cygpath -w "$TMP_ROOT/bash/codex" 2>/dev/null || echo "$TMP_ROOT/bash/codex")" \
   -ZCodeHome "$(cygpath -w "$TMP_ROOT/bash/zcode" 2>/dev/null || echo "$TMP_ROOT/bash/zcode")" \
   -MimoHome "$(cygpath -w "$TMP_ROOT/bash/mimo" 2>/dev/null || echo "$TMP_ROOT/bash/mimo")" \
+  -AgentsSkillsRoot "$(cygpath -w "$TMP_ROOT/agents-skills" 2>/dev/null || echo "$TMP_ROOT/agents-skills")" \
   2>&1)"
 cross_rc=$?
 set -e
 if [ "$cross_rc" -ne 0 ]; then printf '%s\n' "$out" >&2; fail "PowerShell cross-installer refresh exited $cross_rc"; fi
+if [ "$on_windows" -eq 1 ]; then
+  zcode_shadow_config="$(cygpath -w "$TMP_ROOT/bash/zcode/cli/config.json" 2>/dev/null || echo "$TMP_ROOT/bash/zcode/cli/config.json")"
+  [[ -f "$zcode_shadow_config" ]] || { printf '%s\n' "$out" >&2; fail 'cross-installer did not write ZCode config for the doubled skill copy'; }
+  # Exactly one switch, off, for that copy. Compared by suffix and without
+  # case: a hosted runner's temporary folder reaches this test spelled short
+  # (RUNNER~1) and the entry names it long (runneradmin).
+  jq -e --arg suffix 'agents-skills\shared-one\skill.md' '
+    (.skill | type == "object" and length == 1)
+    and (.skill | to_entries | all(.value.enable == false))
+    and (.skill | keys | all(ascii_downcase | endswith($suffix)))
+  ' "$zcode_shadow_config" >/dev/null 2>&1 \
+    || { printf '%s\n' "$out" "$zcode_shadow_config:" "$(cat "$zcode_shadow_config")" >&2; fail 'ZCode config lacks the entry that hides the doubled copy of shared-one'; }
+else
+  [[ -e "$TMP_ROOT/bash/zcode/cli/config.json" ]] && fail 'a non-Windows installer wrote a ZCode config'
+  grep -Fq 'Not Windows - ZCode runs on Windows only; nothing to hide.' <<<"$out" \
+    || { printf '%s\n' "$out" >&2; fail 'a non-Windows installer did not report the ZCode skill-shadow stage as not applicable'; }
+fi
 # The installer reports one of a few honest probe outcomes depending on what
 # the host actually offers: gh logged out, gh logged in (a self-hosted host can
 # still see a login through a keyring or helper the forced env does not cover),

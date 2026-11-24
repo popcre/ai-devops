@@ -70,6 +70,7 @@ function Invoke-Installer {
         [string]$CodexHome,
         [string]$ZCodeHome = "",
         [string]$MimoHome = "",
+        [string]$AgentsSkillsRoot = "",
         [switch]$SkillsDryRun,
         [switch]$MigrateObsolete,
         [switch]$AdoptGlobals
@@ -82,6 +83,8 @@ function Invoke-Installer {
         SkipGitInstall = $true
         ZCodeHome = $(if ($ZCodeHome) { $ZCodeHome } else { Join-Path $TempRoot "no-zcode-home" })
         MimoHome = $(if ($MimoHome) { $MimoHome } else { Join-Path $TempRoot "no-mimo-home" })
+        # Never the real ~/.agents/skills: a result must not depend on it.
+        AgentsSkillsRoot = $(if ($AgentsSkillsRoot) { $AgentsSkillsRoot } else { Join-Path $TempRoot "no-agents-skills" })
         SkillsDryRun = [bool]$SkillsDryRun
         MigrateObsolete = [bool]$MigrateObsolete
         AdoptGlobals = [bool]$AdoptGlobals
@@ -298,6 +301,10 @@ try {
     Assert-True (@(Get-ChildItem -LiteralPath $junctionTarget -Directory).Count -eq $claudeSkillCount) `
         "junction target (Claude skills) was modified by the migration"
     Assert-True ($output -match "ZCode-specific skills installed") "ZCode install count missing"
+    # Nothing is doubled here (the second ZCode skill root is absent), so the
+    # installer must not create or touch ZCode's config.
+    Assert-True ($output -match "sees each skill once") "installer did not report that no ZCode skill is doubled"
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $zcode "cli\config.json"))) "installer created a ZCode config although no skill is doubled"
 
     # ZCode global: seeded when absent, protected when locally edited.
     $zcodeGlobal = Join-Path $zcode "AGENTS.md"
@@ -345,6 +352,39 @@ try {
     # (seen on 916-alien): the schedule step must prefer Git's bundled bash.
     Assert-True ($installerText.Contains("'bin\bash.exe'")) "schedule step no longer prefers Git for Windows bash"
     Assert-True ($output -match "not touching this computer's scheduled tasks") "schedule step did not honour test mode"
+
+    # ZCode scans ~/.agents/skills as well as ~/.zcode/skills. A same-named copy
+    # there of a managed ZCode skill made every ZCode subagent refuse the bare
+    # name (#2795), so the installer hides that copy from ZCode in ZCode's own
+    # config. Somebody else's doubled skill, and every other key, stay as they are.
+    $fixture = New-Fixture "zcode-shadows"
+    $claude = Join-Path $TempRoot "zcode-shadows\claude"
+    $codex = Join-Path $TempRoot "zcode-shadows\codex"
+    $zcode = Join-Path $TempRoot "zcode-shadows\zcode-home"
+    $agents = Join-Path $TempRoot "zcode-shadows\agents"
+    $config = Join-Path $zcode "cli\config.json"
+    New-TestSkill $agents "" "shared-one"
+    New-TestSkill $agents "" "not-a-toolkit-skill"
+    New-Item -ItemType Directory -Force -Path (Join-Path $zcode "cli") | Out-Null
+    '{"mcp": {"servers": {"mine": {"command": "my-exe"}}}, "skill": {"C:\\elsewhere\\SKILL.md": {"enable": false}}}' |
+        Set-Content -LiteralPath $config
+    $output = Invoke-Installer $fixture $claude $codex -ZCodeHome $zcode -AgentsSkillsRoot (Join-Path $agents "skills")
+    Assert-True ($output -match 'skill shadows configured: \+1; 1 hidden') "installer did not report the hidden ZCode copy"
+    $parsed = Get-Content -Raw -LiteralPath $config | ConvertFrom-Json
+    $names = @($parsed.skill.PSObject.Properties | ForEach-Object { $_.Name })
+    Assert-True ($names -contains (Join-Path $agents "skills\shared-one\SKILL.md")) "doubled ZCode skill not hidden by its SKILL.md path"
+    Assert-True ($names -notcontains (Join-Path $agents "skills\not-a-toolkit-skill\SKILL.md")) "a doubled skill the toolkit did not install was hidden"
+    Assert-True ($names -contains "C:\elsewhere\SKILL.md") "an existing skill switch was not preserved"
+    Assert-True ($parsed.mcp.servers.mine.command -eq "my-exe") "ZCode MCP servers not preserved"
+    $written = Get-Content -Raw -LiteralPath $config
+    $output = Invoke-Installer $fixture $claude $codex -ZCodeHome $zcode -AgentsSkillsRoot (Join-Path $agents "skills")
+    Assert-True ($output -match 'skill shadows already current: 1 hidden') "second install did not find the hidden copy current"
+    Assert-True ((Get-Content -Raw -LiteralPath $config) -ceq $written) "second install rewrote the ZCode config"
+    # A newly doubled copy is previewed, never written, by a skills dry run.
+    New-TestSkill $agents "" "synology-sharesync-triage"
+    $output = Invoke-Installer $fixture $claude $codex -ZCodeHome $zcode -AgentsSkillsRoot (Join-Path $agents "skills") -SkillsDryRun
+    Assert-True ($output -match '\[skills-dry-run\] \+ hide .*synology-sharesync-triage') "skills dry run did not preview the newly doubled copy"
+    Assert-True ((Get-Content -Raw -LiteralPath $config) -ceq $written) "skills dry run changed the ZCode config"
 
     # The managed post-merge reviewer hook (#804): a skills dry run must not
     # install it, a real run must, and test mode must never run a live
