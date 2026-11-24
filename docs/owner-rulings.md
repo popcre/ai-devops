@@ -279,3 +279,13 @@ Current rule: Muse routes (`muse-meta`, `muse-openrouter`, and `ask-muse`
 default `auto` routing from turn one) enable explicit caching by default unless
 `AI_REVIEW_CACHE=0` is set. DeepSeek and Hy4 remain opt-in (`AI_REVIEW_CACHE=1`).
 Supersedes the 2026-11-18 opt-in-only default for Muse.
+
+## 2026-11-24 — No Blacksmith or WarpBuild
+
+Verbatim, from Albert's chat: "we are using neither Blacksmith nor WarpBuild.
+we are using our runners (edge-runn-envy, edge-runn-xps, edge-dev3) and github
+runners"
+
+Current rule: CI runs only on the self-hosted runners edge-runn-envy,
+edge-runn-xps and edge-dev3, plus GitHub-hosted runners. The open
+Blacksmith-versus-WarpBuild cost choice is settled: neither is used.
