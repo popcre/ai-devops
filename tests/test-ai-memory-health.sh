@@ -62,6 +62,25 @@ printf '\nSee [[nowhere-at-all]].\n' >> "$CLEAN/alpha.md"
 out="$("$SCRIPT" --repo-root "$TMP/nohub" --claude-home "$TMP/home" 2>&1)"
 check "dangling link detected" "printf '%s' \"\$out\" | grep -q 'DANGLING LINK: \[\[nowhere-at-all\]\]'"
 
+# --- a fact folded into a section still resolves (#2817) ------------------------
+FOLD="$(mk_project folded)"
+mk_memory x "$FOLD" chapter-one "a consolidated note holding several older facts" "## older-fact-one
+
+The text of the first older fact, see [[older-fact-two]]."
+mk_memory x "$FOLD" chapter-two "another consolidated note holding one older fact" "## older-fact-two
+
+The text of the second older fact."
+printf '# Memory index\n\n- [c1](chapter-one.md) — hook\n- [c2](chapter-two.md) — hook\n' > "$FOLD/MEMORY.md"
+out="$("$SCRIPT" --repo-root "$TMP/nohub" --claude-home "$TMP/home" 2>&1)"
+check "a link to a fact folded into a section resolves" "! printf '%s' \"\$out\" | grep -q 'DANGLING LINK: \[\[older-fact-two\]\]'"
+# A dot in a link is a literal dot, never "any character"; and a name with
+# neither a file nor a section stays a finding.
+printf '\n## v1x2xrelease-note\n' >> "$FOLD/chapter-one.md"
+printf '\nSee [[older-fact-three]] and [[v1.2.release-note]].\n' >> "$FOLD/chapter-two.md"
+out="$("$SCRIPT" --repo-root "$TMP/nohub" --claude-home "$TMP/home" 2>&1)"
+check "a link with neither a file nor a section is still reported" \
+  "printf '%s' \"\$out\" | grep -q 'DANGLING LINK: \[\[older-fact-three\]\]' && printf '%s' \"\$out\" | grep -q 'DANGLING LINK: \[\[v1.2.release-note\]\]'"
+
 # --- missing frontmatter -----------------------------------------------------
 BARE="$(mk_project bare)"
 printf 'just prose, no frontmatter\n' > "$BARE/loose.md"

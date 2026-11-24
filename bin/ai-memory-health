@@ -305,9 +305,14 @@ for mem in "${project_glob[@]}"; do
     continue
   fi
 
-  # Cross-links that point at a memory which does not exist.
+  # Cross-links that point at a memory which does not exist. A fact folded into
+  # another note as a "## <name>" section still resolves (#2817): 137 of the 156
+  # links reported in one consolidated project pointed at such a section.
   while IFS= read -r link; do
-    [[ -f "$mem/$link.md" ]] || note "DANGLING LINK: [[$link]] has no matching memory file."
+    [[ -f "$mem/$link.md" ]] && continue
+    folded="${link//./\\.}"
+    grep -qsE "^## +${folded}[[:space:]]*$" -- "$mem"/*.md && continue
+    note "DANGLING LINK: [[$link]] has no matching memory file."
   done < <(grep -rhoE '\[\[[A-Za-z0-9._-]+\]\]' "$mem" 2>/dev/null | tr -d '[]' | sort -u)
 
   # Structural hygiene.
