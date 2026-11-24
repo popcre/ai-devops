@@ -100,6 +100,15 @@ preservation), MCP servers in `~/.zcode/cli/config.json` via
 `bin/configure-zcode-mcps.ps1`, and the completion-check hook via
 `bin/ai-install-completion-check-hook --client zcode`.
 
+- **Doubled skills:** ZCode scans `~/.agents/skills` as well as
+  `~/.zcode/skills`, and a skill found in both is listed twice; every ZCode
+  subagent then refuses its bare name ("ambiguous for subagent"). Where that
+  first folder holds a same-named copy of a toolkit skill, the installer hides
+  the copy from ZCode with ZCode's own per-skill switch in
+  `~/.zcode/cli/config.json` (`bin/configure-zcode-skill-shadows.ps1`,
+  [#2795](https://github.com/popcre/ai-devops/issues/2795)). Only the copy
+  under `~/.agents/skills` is switched off, and only for ZCode.
+
 - **Headless driving:** `ai-zcode ask "<prompt>"` — the governed wrapper
   (`bin/ai-zcode`). Never call the zcode.cjs bundle directly: without the
   provider-env assembly every headless run dies before the model call, and

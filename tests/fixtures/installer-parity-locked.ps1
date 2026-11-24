@@ -5,6 +5,9 @@ param(
     [string]$CodexHome,
     [string]$ZCodeHome,
     [string]$MimoHome,
+    # Pins the second ZCode skill root to scratch, so the installer's result
+    # never depends on what this machine holds in the real ~/.agents/skills.
+    [string]$AgentsSkillsRoot = '',
     [switch]$TestLockContract
 )
 $ErrorActionPreference = 'Stop'
@@ -61,8 +64,13 @@ if ($TestLockContract) {
 $mutex = [Threading.Mutex]::new($false, 'Global\AiDevOpsToolkitInstall')
 try {
     Invoke-ParityLockedAction $mutex {
-        & $Installer -RepoPath $RepoPath -ClaudeHome $ClaudeHome -CodexHome $CodexHome `
-            -ZCodeHome $ZCodeHome -MimoHome $MimoHome -SkipGitInstall
+        if ($AgentsSkillsRoot) {
+            & $Installer -RepoPath $RepoPath -ClaudeHome $ClaudeHome -CodexHome $CodexHome `
+                -ZCodeHome $ZCodeHome -MimoHome $MimoHome -AgentsSkillsRoot $AgentsSkillsRoot -SkipGitInstall
+        } else {
+            & $Installer -RepoPath $RepoPath -ClaudeHome $ClaudeHome -CodexHome $CodexHome `
+                -ZCodeHome $ZCodeHome -MimoHome $MimoHome -SkipGitInstall
+        }
         if (-not $?) { throw 'Fixture installer failed' }
     }
 } finally {
