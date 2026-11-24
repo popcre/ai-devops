@@ -35,7 +35,8 @@ What it does (idempotent - safe to re-run):
      entries instead of silently restoring them.
      - stdio via the op launcher : supabase (--read-only), trigger, 1password
        - remote via mcp-remote shim: devops-mcp, synology-monitor
-       - no secret, pinned runtime : playwright, chrome-devtools, ag-grid
+       - no secret, pinned runtime : playwright, chrome-devtools, ag-grid,
+                                  scaledown-migration-agent
        - native HTTP, Oracle-only  : vercel (browser OAuth; Claude Code project
                                       entry + Oracle .codex/config.toml, never global)
        - codex-cli                 : native `codex mcp-server`, absolute exe

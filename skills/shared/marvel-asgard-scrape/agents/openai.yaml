@@ -1,4 +1,0 @@
-interface:
-  display_name: "Marvel ASGARD Scrape"
-  short_description: "Capture and load Marvel creative metadata"
-  default_prompt: "Use $marvel-asgard-scrape to resume and verify the authorized ASGARD metadata capture."
