@@ -322,11 +322,20 @@ win unschedule >/dev/null 2>&1; rc=$?
 check "Windows unschedule asks the task script to remove the task" \
   "[ $rc -eq 0 ] && [ \"\$(tail -n +6 \"$PWSH_ARGS_FILE\" | tr '\n' ' ')\" = '-Remove ' ]"
 
-mv "$WINBIN/pwsh" "$WINBIN/pwsh.off"
-out="$(win schedule 2>&1)"; rc=$?
+# "No pwsh" must be built, never assumed: CI images and Windows hosts ship a real
+# pwsh, and reaching it would run the real task script on that machine. This PATH
+# holds only the stub schtasks.exe and the three core utilities the script needs
+# before it looks for pwsh.
+NOPWSH="$TMP/win-bin-nopwsh"; mkdir -p "$NOPWSH"
+printf '#!/bin/sh\nexit 0\n' > "$NOPWSH/schtasks.exe"; chmod +x "$NOPWSH/schtasks.exe"
+for util in dirname basename readlink; do
+  printf '#!/bin/sh\nexec "%s" "$@"\n' "$(command -v "$util")" > "$NOPWSH/$util"; chmod +x "$NOPWSH/$util"
+done
+# bash is addressed by path on purpose: with PATH replaced, "bash" is not found.
+check "the no-pwsh test PATH really has no pwsh" "! PATH=\"$NOPWSH\" \"\$BASH\" -c 'command -v pwsh'"
+out="$(PATH="$NOPWSH" "$BASH" "$SCRIPT" schedule 2>&1)"; rc=$?
 check "Windows schedule without pwsh 7 fails with the reason" \
   "[ $rc -eq 2 ] && printf '%s' \"\$out\" | grep -q 'PowerShell 7'"
-mv "$WINBIN/pwsh.off" "$WINBIN/pwsh"
 
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
