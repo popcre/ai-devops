@@ -267,7 +267,17 @@ mapfile -d '' changed < <(git -C "$HUB" diff --name-only -z -- memory)
 mapfile -d '' untracked < <(git -C "$HUB" ls-files --others --exclude-standard -z -- memory)
 changed+=("${untracked[@]}")
 
+# Shapes that never belong in a memory note (#2819). Provider-prefixed keys and
+# tokens came first. Two notes holding a bare hex token after `token=`, a
+# `Secret Key:` value and a provider token this list did not name then passed
+# the gate and reached the hub (2026-11-24), so a labelled value and a
+# "<short prefix>_<32 or more characters with a capital>" token are refused too.
+# A reference (`op://...`, `$VARIABLE`, a placeholder) and prose never match: a
+# labelled value has to be 24 or more characters of letters, digits, /, + and =.
 SECRET_RE='ops_[A-Za-z0-9]{20}|gh[pousr]_[A-Za-z0-9]{20}|github_pat_[A-Za-z0-9_]{20}|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY|xox[baprs]-[A-Za-z0-9-]{10}|sk-[A-Za-z0-9]{20}|eyJ[A-Za-z0-9_-]{18,}\.[A-Za-z0-9_-]{18,}\.'
+SECRET_RE+='|(^|[^A-Za-z0-9])([Aa]dmin[_-]?[Tt]oken|[Tt][Oo][Kk][Ee][Nn]|[Ss]ecret([_ -]?[Kk]ey)?|[Pp]assword|[Pp]asswd|[Aa][Pp][Ii][_ -]?[Kk]ey|[Aa][Pp][Ii][_ -]?[Tt]oken)[[:space:]]*[:=][[:space:]]*[*`"]*[[:space:]]*[A-Za-z0-9+/=]{24,}'
+# A prefix followed by plain lower-case hex is a commit or an id; a token has capitals in it.
+SECRET_RE+='|(^|[^A-Za-z0-9])[a-z]{3,8}_[a-z0-9]*[A-Z][A-Za-z0-9]{31,}([^A-Za-z0-9]|$)'
 hits=()
 for relative in "${changed[@]}"; do
   [[ -n "$relative" && -f "$HUB/$relative" ]] || continue
