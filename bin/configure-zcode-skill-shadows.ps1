@@ -54,7 +54,10 @@ if (-not $ConfigPath) { $ConfigPath = Join-Path $ZCodeHome "cli\config.json" }
 $ConfigPath = [IO.Path]::GetFullPath($ConfigPath)
 $primaryRoot = [IO.Path]::GetFullPath((Join-Path $ZCodeHome "skills"))
 $secondaryRoot = [IO.Path]::GetFullPath($AgentsSkillsRoot)
-$secondaryPrefix = $secondaryRoot.TrimEnd("\") + "\"
+$separator = [IO.Path]::DirectorySeparatorChar
+$secondaryPrefix = $secondaryRoot.TrimEnd($separator) + $separator
+$onWindows = [Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT
+$pathComparison = if ($onWindows) { [StringComparison]::OrdinalIgnoreCase } else { [StringComparison]::Ordinal }
 $ManagedMarker = ".ai-devops-managed"
 $ManagedFile = "SKILL.md"
 
@@ -66,7 +69,7 @@ $SkippedNames = @("node_modules", "dist", "build", "out", "target", "vendor",
 # Win32 calls that exist in every PowerShell edition: the final path of a file
 # (every link resolved) and an atomic replace. .NET Framework has neither
 # File.ResolveLinkTarget nor the overwrite overload of File.Move.
-if (-not ("AiDevOpsSkillShadow.NativeMethods" -as [type])) {
+if ($onWindows -and -not ("AiDevOpsSkillShadow.NativeMethods" -as [type])) {
   Add-Type -ErrorAction Stop -Namespace "AiDevOpsSkillShadow" -Name "NativeMethods" -MemberDefinition @'
 [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
 public static extern Microsoft.Win32.SafeHandles.SafeFileHandle CreateFile(string name, uint access, uint share, System.IntPtr security, uint creation, uint flags, System.IntPtr template);
@@ -78,6 +81,12 @@ public static extern bool MoveFileEx(string existingName, string newName, uint f
 }
 
 function Get-FinalPath([string]$Path) {
+  if (-not $onWindows) {
+    # Resolve links in parent directories as well as links to SKILL.md itself.
+    $resolved = & realpath -e -- $Path 2>$null
+    if ($LASTEXITCODE -eq 0 -and $resolved -is [string]) { return $resolved }
+    return $null
+  }
   # FILE_READ_ATTRIBUTES, share all, OPEN_EXISTING.
   $handle = [AiDevOpsSkillShadow.NativeMethods]::CreateFile(
     $Path, [uint32]0x80, [uint32]7, [IntPtr]::Zero, [uint32]3, [uint32]0, [IntPtr]::Zero)
@@ -140,21 +149,14 @@ function Get-SkillNames([string]$Root) {
 function Get-ManagedEntryName([string]$Key) {
   if ([string]::IsNullOrWhiteSpace($Key)) { return $null }
   try { $full = [IO.Path]::GetFullPath($Key) } catch { return $null }
-  if (-not $full.StartsWith($secondaryPrefix, [StringComparison]::OrdinalIgnoreCase)) { return $null }
-  $parts = $full.Substring($secondaryPrefix.Length).Split("\")
+  if (-not $full.StartsWith($secondaryPrefix, $pathComparison)) { return $null }
+  $parts = $full.Substring($secondaryPrefix.Length).Split($separator)
   if ($parts.Count -ne 2 -or $parts[1] -ne $ManagedFile) { return $null }
   return $parts[0]
 }
 
 function New-DisabledValue {
   return [pscustomobject]@{ enable = $false }
-}
-
-function Test-IsDisabledValue($Value) {
-  if ($null -eq $Value) { return $false }
-  $properties = @($Value.PSObject.Properties)
-  if ($properties.Count -ne 1) { return $false }
-  return ($properties[0].Name -eq "enable" -and $properties[0].Value -is [bool] -and -not $properties[0].Value)
 }
 
 function Read-ConfigDocument([string]$Path) {
@@ -197,7 +199,7 @@ foreach ($name in (@(Get-SkillNames $secondaryRoot) | Sort-Object)) {
   $secondaryFinal = Get-FinalPath $secondaryFile
   $primaryFinal = Get-FinalPath $primaryFile
   if (-not $secondaryFinal -or -not $primaryFinal) { $unreadable += $name; continue }
-  if ([string]::Equals($secondaryFinal, $primaryFinal, [StringComparison]::OrdinalIgnoreCase)) {
+  if ([string]::Equals($secondaryFinal, $primaryFinal, $pathComparison)) {
     $sameFile += $name
     continue
   }
@@ -233,10 +235,21 @@ if ($null -ne $skillProperty) {
       $removed += $property.Name
       continue
     }
-    if ($property.Name -cne $desired[$entryName] -or -not (Test-IsDisabledValue $property.Value)) {
+    $value = $property.Value
+    $enable = $null
+    if ($value -is [pscustomobject]) { $enable = $value.PSObject.Properties["enable"] }
+    $alreadyDisabled = $null -ne $enable -and $enable.Value -is [bool] -and -not $enable.Value
+    if ($property.Name -cne $desired[$entryName] -or -not $alreadyDisabled) {
       $rewritten += $desired[$entryName]
     }
-    $next[$desired[$entryName]] = New-DisabledValue
+    if ($value -isnot [pscustomobject]) {
+      $value = New-DisabledValue
+    } elseif ($null -eq $enable) {
+      Add-Member -InputObject $value -NotePropertyName "enable" -NotePropertyValue $false
+    } else {
+      $enable.Value = $false
+    }
+    $next[$desired[$entryName]] = $value
     $present[$entryName] = $true
   }
 }
@@ -299,8 +312,11 @@ try {
       throw "Backup verification failed for $ConfigPath; the live file is unchanged."
     }
   }
-  # MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH.
-  if (-not [AiDevOpsSkillShadow.NativeMethods]::MoveFileEx($candidate, $ConfigPath, [uint32]9)) {
+  # The candidate shares the config's directory, so the Unix move is a rename.
+  # Windows uses MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH.
+  if (-not $onWindows) {
+    [IO.File]::Move($candidate, $ConfigPath, $true)
+  } elseif (-not [AiDevOpsSkillShadow.NativeMethods]::MoveFileEx($candidate, $ConfigPath, [uint32]9)) {
     $code = [System.Runtime.InteropServices.Marshal]::GetLastWin32Error()
     throw "Replacing $ConfigPath failed (Windows error $code); the live file is unchanged."
   }

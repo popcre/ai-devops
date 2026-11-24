@@ -27,10 +27,7 @@ $scriptPath = Join-Path $repoRoot "bin\configure-zcode-skill-shadows.ps1"
 $testRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("zcode-skill-shadows-" + [guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Force -Path $testRoot | Out-Null
 
-if ([System.Environment]::OSVersion.Platform -ne [System.PlatformID]::Win32NT) {
-  Write-Host "SKIP: ZCode and its installer are Windows-only."
-  exit 0
-}
+$onWindows = [Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT
 
 $engines = @()
 if (Get-Command powershell.exe -ErrorAction SilentlyContinue) { $engines += "powershell.exe" }
@@ -152,6 +149,17 @@ try {
     Assert-True ([IO.File]::ReadAllText($f.Config) -ceq $written) "second run is a byte-identical no-op"
     Assert-True (@(Get-ChildItem -LiteralPath (Split-Path -Parent $f.Config) -Filter "*.bak").Count -eq 1) "second run made no extra backup"
 
+    # Existing ZCode fields survive both a rewrite and a subsequent no-op.
+    Add-Member -InputObject $alpha -NotePropertyName "metadata" -NotePropertyValue ([pscustomobject]@{ source = "user" })
+    $alpha.enable = $true
+    $config | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $f.Config -Encoding utf8
+    $r = Invoke-Writer $engine "$tag-metadata" @("-ZCodeHome", $f.Home, "-AgentsSkillsRoot", $f.Agents)
+    $withMetadata = [IO.File]::ReadAllText($f.Config)
+    $entry = ($withMetadata | ConvertFrom-Json).skill.PSObject.Properties[$alphaKey].Value
+    Assert-True ($r.ExitCode -eq 0 -and $entry.enable -eq $false -and $entry.metadata.source -ceq "user") "disabling the entry preserves its other fields"
+    $r = Invoke-Writer $engine "$tag-metadata-again" @("-ZCodeHome", $f.Home, "-AgentsSkillsRoot", $f.Agents)
+    Assert-True ($r.Output -match "already current: 1 hidden" -and [IO.File]::ReadAllText($f.Config) -ceq $withMetadata) "disabled entry with other fields is already current"
+
     # -- 4. The second copy disappears: our entry goes with it -----------------
     Remove-Item -LiteralPath (Join-Path $f.Agents "alpha") -Recurse -Force
     $r = Invoke-Writer $engine "$tag-unpaired" @("-ZCodeHome", $f.Home, "-AgentsSkillsRoot", $f.Agents)
@@ -189,8 +197,13 @@ try {
     $f8 = New-Fixture "$tag-same"
     $junctionRoot = Join-Path $f8.Root "linked\skills"
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $junctionRoot) | Out-Null
-    & cmd.exe /c mklink /J ("`"$junctionRoot`"") ("`"$(Join-Path $f8.Home 'skills')`"") | Out-Null
-    $fixturesWithJunction += $junctionRoot
+    $target = Join-Path $f8.Home "skills"
+    if ($onWindows) {
+      & cmd.exe /c mklink /J ("`"$junctionRoot`"") ("`"$target`"") | Out-Null
+      $fixturesWithJunction += $junctionRoot
+    } else {
+      New-Item -ItemType SymbolicLink -Path $junctionRoot -Target $target | Out-Null
+    }
     $r = Invoke-Writer $engine "$tag-same" @("-ZCodeHome", $f8.Home, "-AgentsSkillsRoot", $junctionRoot)
     Assert-True ($r.ExitCode -eq 0) "same-folder roots exit 0"
     Assert-True ($r.Output -match "same file in both skill roots") "same-folder roots are reported"
