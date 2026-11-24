@@ -36,3 +36,17 @@ Evaluated across 42 matched live reviews plus multi-turn recall checks on 2026-1
 
 - **Switching default review/second-opinion route from OpenRouter to Direct DeepSeek API (`api.deepseek.com/anthropic`) (rejected):**
   Wave 3 (6 pairs, `title_off`): Direct API achieved `5/6` usable (timed out at `413.4s` on `real-711d33da`) vs `6/6` on `deepseek-openrouter` (`30/30` usable across Waves 1–3), ran 5.7x slower (`582.3s` vs `102.9s`), and cost `$0.021649` off-peak / `$0.043298` peak vs `$0.009883` on OpenRouter across the 5 completed small cases (plus `$0.001052` off-peak / `$0.002104` peak vs `$0.000521` on the 3-turn recall test).
+
+## Rollout
+
+The decision is live on every host that runs the reviewer. `edge-dev` (Windows)
+was installed at `5817f83d` and checked on 2026-11-23 by the session that wrote
+the pull request. `hetz` and `edge-dev3` (Ubuntu) were advanced by the protected
+updater to `21369419`, which contains it. On 2026-11-23 each installed host
+passed the same live checks on a seeded SQL injection: `ai-review-simple --route
+deepseek-openrouter` returned REJECT, OpenRouter's analytics showed one request
+per finished step and only `deepseek/deepseek-v4.1-flash-*`, `ai-deepseek-agent
+send` then `reply` recalled its token and the bug, and `ai-deepseek doctor --live`
+printed `PASS live turn`. The measurements are in
+[#2783](https://github.com/popcre/ai-devops/pull/2783), which retired the
+rollout handoff.

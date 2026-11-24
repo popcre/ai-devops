@@ -332,6 +332,22 @@ the lead retains all design, merge and release decisions.
    qualification session. Omit the probe ID to continue existing sessions
    with their original state and settings.
 
+   The reconciliation call is
+   `POST https://openrouter.ai/api/v1/analytics/query` with the management key
+   in its header and this body: `metrics` of `request_count`,
+   `tokens_prompt`, `tokens_completion`, `cached_tokens` and `total_usage`;
+   `dimensions` of `["session_id", "model"]`; one filter of `{"field":
+   "session_id", "operator": "eq", "value": "<billing id>"}`; and a
+   `time_range` of `start` and `end` in ISO 8601 UTC. Keep the dimensions to
+   those two while filtering on a session: `endpoint`, `finish_reason`, or a
+   third dimension next to a `session_id` filter returned HTTP 400 on
+   2026-11-23. A review is reconciled when `request_count` equals
+   `step_finishes`, every row is `deepseek/deepseek-v4.1-flash-*` (no
+   title-model call), `tokens_prompt` equals `input_uncached` plus
+   `cache_read`, `tokens_completion` equals `output_visible`, and
+   `cached_tokens` equals `cache.read`. Both Ubuntu hosts matched exactly at
+   `21369419` ([#2783](https://github.com/popcre/ai-devops/pull/2783)).
+
    With `AI_REVIEW_CACHE=1`, all three OpenRouter routes can keep affinity
    independently of Muse's cache key. DeepSeek uses the pinned Harness route's
    deployment header, and Hy4 and Muse use the OpenCode request body. Only Muse
