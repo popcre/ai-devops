@@ -1,0 +1,4 @@
+interface:
+  display_name: "Reviewer Problem Solving"
+  short_description: "Escalate a genuinely stuck diagnosis safely"
+  default_prompt: "Use $two-failed-attempts-diagnosis after the same symptom survives two distinct evidence-based attempts or leaves an unresolved evidence contradiction. Obtain one bounded read-only diagnosis, then independently verify it."

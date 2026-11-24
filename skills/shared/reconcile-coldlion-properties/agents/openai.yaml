@@ -1,0 +1,4 @@
+interface:
+  display_name: "Reconcile ColdLion Properties"
+  short_description: "Match ColdLion properties to licensed source scrapes safely"
+  default_prompt: "Reconcile ColdLion properties for scrape-covered licensors using the verified DesignFlow Item Library relationships and media-aware title rules."

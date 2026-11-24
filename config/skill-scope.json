@@ -7,6 +7,8 @@
     "nbcu-creative-assets-scrape": ["licensor-source-data"],
     "paramount-creative-library-scrape": ["licensor-source-data"],
     "peanuts-scrape": ["licensor-source-data"],
+    "reconcile-coldlion-properties": ["licensor-source-data"],
+    "sega-source-data-scrape": ["licensor-source-data"],
     "sesame-workshop-scrape": ["licensor-source-data"],
     "strawberry-shortcake-scrape": ["licensor-source-data"],
     "wb-starlabs-scrape": ["licensor-source-data"]

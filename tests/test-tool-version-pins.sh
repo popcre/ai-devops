@@ -29,6 +29,7 @@ declare -A npm_files=(
   [@supabase/mcp-server-supabase]="bin/setup-secrets.sh"
   [@playwright/mcp]="bin/setup-secrets.sh"
   [chrome-devtools-mcp]="bin/configure-claude-desktop-chrome-devtools.ps1 bin/configure-codex-chrome-devtools.ps1"
+  [@scaledown/migration-agent]="bin/setup-secrets.sh"
 )
 while IFS=$'\t' read -r package version; do
   version="${version%$'\r'}"
@@ -41,14 +42,14 @@ while IFS=$'\t' read -r package version; do
   else bad "npm pin $package@$version is missing from:$missing"; fi
 done < <(jq -r '.npm | to_entries[] | [.key,.value] | @tsv' "$CATALOG")
 
-for package in trigger.dev @supabase/mcp-server-supabase @playwright/mcp chrome-devtools-mcp @u2giants/1password-mcp ag-mcp mcp-remote; do
+for package in trigger.dev @supabase/mcp-server-supabase @playwright/mcp chrome-devtools-mcp @u2giants/1password-mcp ag-mcp mcp-remote @scaledown/migration-agent; do
   expected="$(jq -r --arg package "$package" '.npm[$package]' "$CATALOG")"
   actual="$(jq -r --arg package "$package" '.dependencies[$package]' "$ROOT/config/mcp-runtime/package.json")"
   if [ "$actual" = "$expected" ]; then ok "MCP runtime pins $package@$expected"
   else bad "MCP runtime pin for $package is $actual, expected $expected"; fi
 done
 
-if ! grep -R --exclude-dir=node_modules -n -E '(vercel|trigger\.dev|@railway/cli|@supabase/mcp-server-supabase|@playwright/mcp|chrome-devtools-mcp)@latest' \
+if ! grep -R --exclude-dir=node_modules -n -E '(vercel|trigger\.dev|@railway/cli|@supabase/mcp-server-supabase|@playwright/mcp|chrome-devtools-mcp|@scaledown/migration-agent)@latest' \
   "$ROOT/bin" "$ROOT/config" "$ROOT/.config" >/dev/null; then
   ok "recovery paths contain no mutable npm latest specifiers"
 else

@@ -538,6 +538,11 @@ servers = {
     "ag-grid":    {"command": node_bin, "args": [guard_js, "npx", "-y", "ag-mcp"]},
     "railway":    {"command": node_bin, "args": [guard_js, "npx", "-y", "mcp-remote@0.1.38",
                                               "https://mcp.railway.com"]},
+    # ScaleDown migration helper (#2791): no secret and no network call; it
+    # answers the slm-agent-evaluate skill and only writes scaledown-report.md.
+    # Pinned to the same version as config/mcp-runtime/package.json (Windows).
+    "scaledown-migration-agent": {"command": node_bin, "args": [
+        guard_js, "npx", "-y", "@scaledown/migration-agent@0.1.9"]},
 }
 
 # Headless machines (hetz): mcp-remote's OAuth callback is http://localhost:<port>,

@@ -30,7 +30,7 @@ defaults, **and the secret/MCP/SSH plumbing** (Phase 2 of
 | Claude/Codex skills | repo → machine (repo is source of truth) | `bin/ai-adopt-globals` → `bin/ai-install-skills` |
 | Global instructions (`CLAUDE.md`, Codex `AGENTS.md`) | repo → machine; shared body replaced, machine section preserved and verified | `bin/ai-adopt-globals` |
 | Claude tool permissions (`~/.claude/settings.json` allow list) | repo → machine, **checked every run (step 5b)**; merged in when missing, never removed | `bin/ai-claude-permissions` (list: `config/claude-permissions.allow`) |
-| Claude plugins (`/slm-agent:evaluate` and other plugin skills) | repo → machine, **checked every run (step 5c)**; installed when missing, never removed | `bin/ai-claude-plugins` (list: `config/claude-plugins.tsv`) |
+| Claude plugins (none today: a plugin reaches Claude Code only) | repo → machine, **checked every run (step 5c)**; installed when missing, never removed | `bin/ai-claude-plugins` (list: `config/claude-plugins.tsv`) |
 | Blocker-watch timer (re-surfaces stuck state; registration is OUT) | repo → machine, **checked every run (step 1c)** | `bin/ai-blocker-watch schedule` |
 | Auto-memory | machine ↔ private memory hub (lossless transaction) | `bin/ai-memory-sync` |
 | gcloud dflow defaults | apply on machine | `bin/ai-gcloud-dflow` |
@@ -286,7 +286,9 @@ clone + `./install.sh` (Ubuntu) first.
    (new sessions pick them up), or `SKIP` when the machine has no `claude`
    command. A `FAIL` line is a network or plugin-manager error — rerun once,
    then report it `Blocked —` with the line. To add a plugin for every
-   machine, add its line to `config/claude-plugins.tsv` and commit.
+   machine, add its line to `config/claude-plugins.tsv` and commit — but only
+   for Claude Code's sake: a skill the other clients also need belongs under
+   `skills/shared/` (#2791).
 6. **Set gcloud defaults** (when this machine uses gcloud): `bin/ai-gcloud-dflow`.
    Skips cleanly if gcloud isn't installed.
 6b. **Pin the Git commit identity:** `bin/ai-git-identity`. Idempotent; prints

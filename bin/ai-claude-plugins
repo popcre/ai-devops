@@ -4,11 +4,15 @@
 #
 # WHY THIS EXISTS
 # ---------------
-# Plugin skills (`/slm-agent:evaluate`, ...) are installed per machine by the
-# Claude Code plugin manager; nothing else in the toolkit carries them, so a
-# skill used on one computer was simply absent on the next (2026-11-18). The
-# plugins live in ONE place, `config/claude-plugins.tsv`, and this script
-# installs the missing ones at USER scope so they cover every project.
+# Claude Code plugins are per-machine state under the Claude profile, and
+# nothing else in the toolkit installed them, so a plugin present on one
+# computer was simply absent on the next (2026-11-18). The plugins live in ONE
+# place, `config/claude-plugins.tsv`, and this script installs the missing ones
+# at USER scope so they cover every project.
+#
+# A plugin reaches Claude Code ONLY. A skill that Codex, ZCode, MiMo or
+# Antigravity also need belongs under `skills/shared/` (#2791); that is where
+# ScaleDown's slm-agent skills went, which is why the list is empty today.
 #
 # Additive and idempotent:
 #   - a plugin already recorded in ~/.claude/plugins/installed_plugins.json is

@@ -42,6 +42,14 @@ $ClaudeDesktopMcpNames = @("1password", "trigger")
   Assert-True ($LASTEXITCODE -eq 0) "matching sets pass the drift check"
 
   $realSetup = Join-Path $repoRoot "bin\setup-machine.ps1"
+  # The real script declares two Claude Code servers (the ScaleDown helper
+  # joined 1password in #2791). A profile that lacks it is drift, and one that
+  # carries both proves the real lists still parse.
+  $out = & $shell -NoProfile -File $drift -SetupScript $realSetup -DesktopConfigPaths (Join-Path $testRoot "absent.json") -ClaudeCodeConfigPath $code -SkipProjectScope
+  Assert-True ($LASTEXITCODE -eq 1) "a Claude Code profile without the ScaleDown helper reports drift"
+  Assert-True (($out -join "`n") -match "declared but not installed: scaledown-migration-agent") "the drift report names the missing ScaleDown helper"
+
+  Write-Json $code @{ mcpServers = @{ "1password" = @{ command = "x" }; "scaledown-migration-agent" = @{ command = "x" } } }
   $null = & $shell -NoProfile -File $drift -SetupScript $realSetup -DesktopConfigPaths (Join-Path $testRoot "absent.json") -ClaudeCodeConfigPath $code -SkipProjectScope
   Assert-True ($LASTEXITCODE -eq 0) "declared lists parse from the real setup-machine.ps1"
 

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Sega Source Data Scrape"
+  short_description: "Capture Sega submission and asset metadata"
+  default_prompt: "Use $sega-source-data-scrape to capture and reconcile Sega's canonical Product Approval vocabulary and secondary portal metadata safely."
