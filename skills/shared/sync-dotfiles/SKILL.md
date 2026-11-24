@@ -103,13 +103,22 @@ clone + `./install.sh` (Ubuntu) first.
    Preserve capacity holds; installation does not prove
    provider credit availability. On failure, STOP and report — never force or reset.
    **Ubuntu sudo password (edge-dev3 and any host where `sudo -n true` fails):**
-   AI never has or resets the login password. Write the candidate-worktree
-   `update.sh` steps to a script (log to an absolute path; the terminal shell may
-   lack `$TMPDIR`), open a shared terminal tab in the Claude app
+   AI never has or resets the login password. Run `sudo -n true` first; ask for
+   the password only if it fails. Write the candidate-worktree
+   `update.sh` steps to a script, then dry-check it (`bash -n`, `set -u` with
+   every variable defined, log to an absolute path; the terminal shell may
+   lack `$TMPDIR`) so Albert types the password once. Open a shared terminal tab in the Claude app
    (`run_in_terminal`) that runs it, and tell Albert in one line: "I opened a
    terminal tab — type your password there." Read the tab for the result, then
    verify the installed HEAD yourself. Hetz needs no password: use
-   `ssh -i ~/.ssh/916-alien -o IdentitiesOnly=yes ai@hetz` (passwordless sudo).
+   `ssh -i ~/.ssh/916-alien -o IdentitiesOnly=yes ai@hetz` (passwordless sudo;
+   installed checkout `/worksp/ai-devops`).
+   **All hosts:** when Albert asks to update "everywhere", "all machines", or
+   names more than one host, update every development host (edge-dev, edge-dev3,
+   hetz, 4837) in one run: this machine locally, the others over SSH, each by its
+   own OS route, then prove each installed HEAD. Never touch the networking-only
+   hosts (edge-alien, edge-runn-envy, edge-runn-xps). Report any host you could
+   not reach as `Blocked —` with the reason.
 1b. **Reconcile local AI commands before installing skills.** Run
    `bin/ai-machine-tools-doctor`. If it fails for Grok, Kimi, or DeepSeek, run
    Windows `pwsh -NoProfile -ExecutionPolicy Bypass -File <repo>\bin\install-machine-tools.ps1 -RepoPath <repo>`
