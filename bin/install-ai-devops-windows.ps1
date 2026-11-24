@@ -1189,6 +1189,9 @@ Invoke-OrphanSkillPruning -ClientHome $ZCodeHome -Label "ZCode" -Root $RepoPath 
 # subagents do not), so it is reported, never fatal to the install.
 if (-not (Test-Path -LiteralPath $AgentsSkillsRoot -PathType Container)) {
     Write-Note "No $AgentsSkillsRoot root - ZCode sees each skill once; nothing to hide."
+} elseif ([System.Environment]::OSVersion.Platform -ne [System.PlatformID]::Win32NT) {
+    # ZCode runs on Windows only, and so does the writer.
+    Write-Note "Not Windows - ZCode runs on Windows only; nothing to hide."
 } else {
     Write-Note "Hiding same-named copies under $AgentsSkillsRoot from ZCode"
     try {

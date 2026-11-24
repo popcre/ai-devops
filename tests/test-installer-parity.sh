@@ -132,10 +132,14 @@ mkdir -p "$gh_config_dir"
 gh_config_native="$(cygpath -w "$gh_config_dir" 2>/dev/null || echo "$gh_config_dir")"
 # A same-named copy of a toolkit skill in ZCode's second skill root makes every
 # ZCode subagent refuse the bare name (#2795); the installer must hide it from
-# ZCode in ZCode's own config. This refresh is the one that runs under Windows
-# PowerShell 5.1 wherever Windows provides it, so it proves that edition too.
+# ZCode in ZCode's own config. ZCode runs on Windows only, so that is proved on
+# Windows. This refresh is also the one that runs under Windows PowerShell 5.1
+# wherever Windows provides it, so it proves that edition too. Elsewhere the
+# installer must report the stage as not applicable and write nothing.
 mkdir -p "$TMP_ROOT/agents-skills/shared-one"
 printf '%s\n' '---' 'name: shared-one' 'description: test' '---' > "$TMP_ROOT/agents-skills/shared-one/SKILL.md"
+on_windows=0
+case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) on_windows=1 ;; esac
 # Prove the real native-probe helper and the real optional-login decision with
 # deterministic native exits. Shared-runner admission can legitimately return
 # 75 without attempting authentication; that is deferral, never login success.
@@ -188,12 +192,18 @@ out="$(GH_CONFIG_DIR="$gh_config_native" GH_TOKEN= GITHUB_TOKEN= \
 cross_rc=$?
 set -e
 if [ "$cross_rc" -ne 0 ]; then printf '%s\n' "$out" >&2; fail "PowerShell cross-installer refresh exited $cross_rc"; fi
-zcode_shadow_config="$(cygpath -w "$TMP_ROOT/bash/zcode/cli/config.json" 2>/dev/null || echo "$TMP_ROOT/bash/zcode/cli/config.json")"
-[[ -f "$zcode_shadow_config" ]] || { printf '%s\n' "$out" >&2; fail 'cross-installer did not write ZCode config for the doubled skill copy'; }
-# Not `//`: jq treats false through `//` as absent.
-jq -e --arg key "$(cygpath -w "$TMP_ROOT/agents-skills/shared-one/SKILL.md" 2>/dev/null || echo "$TMP_ROOT/agents-skills/shared-one/SKILL.md")" \
-  '.skill[$key].enable == false' "$zcode_shadow_config" >/dev/null 2>&1 \
-  || { printf '%s\n' "$out" "$zcode_shadow_config:" "$(cat "$zcode_shadow_config")" >&2; fail 'ZCode config lacks the entry that hides the doubled copy of shared-one'; }
+if [ "$on_windows" -eq 1 ]; then
+  zcode_shadow_config="$(cygpath -w "$TMP_ROOT/bash/zcode/cli/config.json" 2>/dev/null || echo "$TMP_ROOT/bash/zcode/cli/config.json")"
+  [[ -f "$zcode_shadow_config" ]] || { printf '%s\n' "$out" >&2; fail 'cross-installer did not write ZCode config for the doubled skill copy'; }
+  # Not `//`: jq treats false through `//` as absent.
+  jq -e --arg key "$(cygpath -w "$TMP_ROOT/agents-skills/shared-one/SKILL.md" 2>/dev/null || echo "$TMP_ROOT/agents-skills/shared-one/SKILL.md")" \
+    '.skill[$key].enable == false' "$zcode_shadow_config" >/dev/null 2>&1 \
+    || { printf '%s\n' "$out" "$zcode_shadow_config:" "$(cat "$zcode_shadow_config")" >&2; fail 'ZCode config lacks the entry that hides the doubled copy of shared-one'; }
+else
+  [[ -e "$TMP_ROOT/bash/zcode/cli/config.json" ]] && fail 'a non-Windows installer wrote a ZCode config'
+  grep -Fq 'Not Windows - ZCode runs on Windows only; nothing to hide.' <<<"$out" \
+    || { printf '%s\n' "$out" >&2; fail 'a non-Windows installer did not report the ZCode skill-shadow stage as not applicable'; }
+fi
 # The installer reports one of a few honest probe outcomes depending on what
 # the host actually offers: gh logged out, gh logged in (a self-hosted host can
 # still see a login through a keyring or helper the forced env does not cover),

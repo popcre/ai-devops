@@ -50,6 +50,13 @@ param(
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
+# ZCode runs on Windows only, and so do the Win32 calls below. The installer
+# that calls this writer is also exercised on Linux runners.
+if ([System.Environment]::OSVersion.Platform -ne [System.PlatformID]::Win32NT) {
+  Write-Host "ok ZCode skill shadows: skipped (ZCode runs on Windows only)"
+  return
+}
+
 if (-not $ConfigPath) { $ConfigPath = Join-Path $ZCodeHome "cli\config.json" }
 $ConfigPath = [IO.Path]::GetFullPath($ConfigPath)
 $primaryRoot = [IO.Path]::GetFullPath((Join-Path $ZCodeHome "skills"))
