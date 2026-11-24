@@ -7,6 +7,11 @@
 # `plugin@marketplace` at USER scope, so its skills appear in every project as
 # `/<plugin>:<skill>`.
 #
+# A plugin reaches Claude Code ONLY. Codex, ZCode, MiMo and Antigravity never
+# see its skills (#2791). A skill every client needs belongs under
+# `skills/shared/`, and a helper program it calls belongs in the MCP catalog
+# (`bin/setup-machine.ps1` on Windows, `bin/setup-secrets.sh` on Ubuntu).
+#
 # Additive only: deleting a line stops the install on new machines; machines
 # that already have the plugin keep it (`claude plugin uninstall` removes it).
 #
@@ -15,9 +20,9 @@
 # plan_tool-and-skill-scoping.md, #707). Third-party plugins track their
 # publisher's default branch; read the source before adding one here.
 #
-# ScaleDown SLM Agent (owner request 2026-11-18): `/slm-agent:evaluate` scans a
-# codebase for LLM calls that a cheaper task-specific ScaleDown model can
-# replace, `/slm-agent:optimize` tunes the replacement prompt. Ships one local
-# stdio MCP server (`npx -y @scaledown/migration-agent`); source read at commit
-# ec2df3cfe1bf: it makes no network calls and only writes scaledown-report.md.
-slm-agent	scaledown	scaledown-team/SLM_Agent
+# Currently empty. ScaleDown's `slm-agent` was listed from 2026-11-18 (#2654)
+# until 2026-11-23 (#2791), when the owner asked for its skills in every
+# client. They are now the shared skills `slm-agent-evaluate` and
+# `slm-agent-optimize`, and the helper they need is the catalog server
+# `scaledown-migration-agent`. A machine that installed the plugin keeps both
+# copies until `claude plugin uninstall slm-agent@scaledown` is run there.

@@ -228,7 +228,7 @@ fi
 
 echo "== MCP catalog has explicit per-client membership =="
 if grep -q '\$McpServerCatalog\["chrome-devtools"\]' bin/setup-machine.ps1 &&
-   grep -Fq '$ClaudeCodeMcpNames = @("1password")' bin/setup-machine.ps1 &&
+   grep -Fq '$ClaudeCodeMcpNames = @("1password", "scaledown-migration-agent")' bin/setup-machine.ps1 &&
    grep -Fq '$ClaudeDesktopMcpNames = @("1password", "playwright")' bin/setup-machine.ps1 &&
    grep -Fq 'if (-not $ClaudeCodeMcpServers.Contains($name))' bin/setup-machine.ps1 &&
    grep -Fq '@{ servers = $ClaudeDesktopMcpServers; managed = $ManagedMcpServerNames }' bin/setup-machine.ps1 &&
@@ -244,13 +244,25 @@ if grep -Fq "\$CodexProjectMcpServers['railway']" bin/setup-machine.ps1 &&
    grep -Fq '@railway/cli@5.43.1' bin/reconcile-windows-package-exceptions.ps1; then
   ok "Windows setup installs Railway CLI and configures Railway MCP for Codex"
 else bad "Windows setup does not fully manage Railway"; fi
-for server in ag-grid playwright codex-cli synology-monitor devops-mcp railway trigger 1password supabase; do
+for server in ag-grid playwright codex-cli synology-monitor devops-mcp railway trigger 1password supabase scaledown-migration-agent; do
   if grep -Fq "\$McpServerCatalog[\"$server\"]" bin/setup-machine.ps1; then
     ok "MCP catalog includes $server"
   else
     bad "MCP catalog is missing $server"
   fi
 done
+# ScaleDown's slm-agent skills are shared skills, so every coding client needs
+# their helper (#2791). Codex takes the whole catalog, so it needs no list row.
+for list in ClaudeCode ZCode Mimo Antigravity; do
+  if grep -Fq "\$${list}McpNames = @(\"1password\", \"scaledown-migration-agent\")" bin/setup-machine.ps1; then
+    ok "$list registers the ScaleDown helper"
+  else bad "$list does not register the ScaleDown helper"; fi
+done
+if grep -Fq 'scaledown = Join-Path $mcpBinRoot "scaledown-agent.cmd"' bin/setup-machine.ps1 &&
+   grep -A3 -F '$McpServerCatalog["scaledown-migration-agent"]' bin/setup-machine.ps1 | grep -Fq '$McpCommands.scaledown' &&
+   grep -Fq '@scaledown/migration-agent@0.1.9' bin/setup-secrets.sh; then
+  ok "ScaleDown helper is a pinned local server on Windows and Ubuntu"
+else bad "ScaleDown helper wiring is incomplete"; fi
 if ! grep -Fq '$McpServerCatalog["recall-ai"]' bin/setup-machine.ps1 &&
    grep -Fq '$RetiredMcpServerNames = @("recall-ai")' bin/setup-machine.ps1 &&
    ! grep -Fq 'recall' config/mcp.env.example &&

@@ -87,11 +87,22 @@ BADLIST="$TMP/bad.tsv"; printf 'onlyname\n' > "$BADLIST"
 out="$(LIST_OVERRIDE="$BADLIST" run "$H4")"; check "malformed line: exit 2" "$?" "2"
 out="$(run "$H4" --bogus)"; check "unknown argument: exit 2" "$?" "2"
 
-# 8. The shipped list parses and every line has three fields.
+# 8. The shipped list parses and every line has three fields. It is empty on
+#    purpose (#2791): a plugin reaches Claude Code only, so a skill every client
+#    needs lives under skills/shared/ instead.
 out="$(BIN="$TMP/does-not-exist" LIST_OVERRIDE="$REPO_ROOT/config/claude-plugins.tsv" run "$TMP/shipped" --check)"
 rc=$?
-check "shipped list: parses (missing on a bare home, exit 1)" "$rc" "1"
-has "shipped list: carries the ScaleDown plugin" "$out" "MISSING slm-agent@scaledown"
+check "shipped list: empty, so nothing is missing (exit 0)" "$rc" "0"
+has "shipped list: requires no plugin" "$out" "OK all 0 required Claude plugin(s) already present"
+if grep -v '^[[:space:]]*#' "$REPO_ROOT/config/claude-plugins.tsv" | grep -qv '^[[:space:]]*$'; then
+  bad "shipped list: carries a plugin row, which no other client would receive"
+else
+  ok "shipped list: carries no plugin row"
+fi
+for client in skills/shared/slm-agent-evaluate/SKILL.md skills/shared/slm-agent-optimize/SKILL.md; do
+  if [ -f "$REPO_ROOT/$client" ]; then ok "ScaleDown skills are shared skills ($client)"
+  else bad "ScaleDown skills are missing from skills/shared ($client)"; fi
+done
 
 echo
 echo "passed: $PASS   failed: $FAIL"

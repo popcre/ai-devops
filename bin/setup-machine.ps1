@@ -278,6 +278,7 @@ $McpCommands = [ordered]@{
   chrome = Join-Path $mcpBinRoot "chrome-devtools-mcp.cmd"
   aggrid = Join-Path $mcpBinRoot "ag-mcp.cmd"
   remote = Join-Path $mcpBinRoot "mcp-remote.cmd"
+  scaledown = Join-Path $mcpBinRoot "scaledown-agent.cmd"
 }
 foreach ($commandPath in $McpCommands.Values) {
   if (-not (Test-Path -LiteralPath $commandPath)) { throw "Pinned MCP command is missing: $commandPath" }
@@ -584,6 +585,13 @@ $McpServerCatalog["railway"] = @{
   command = $nodeExe
   args = @($guardJsPath, $McpCommands.remote, "https://mcp.railway.com")
 }
+# ScaleDown migration helper (#2791). No secret and no network call: it answers
+# the slm-agent-evaluate skill and only writes scaledown-report.md. Pinned in the
+# runtime above, so nothing downloads while a session is starting.
+$McpServerCatalog["scaledown-migration-agent"] = @{
+  command = $nodeExe
+  args = @($guardJsPath, $McpCommands.scaledown)
+}
 
 # codex-cli (stdio). Deliberately NOT wrapped in the op launcher: Codex carries
 # its own `codex login` session, so there is no token to inject.
@@ -644,20 +652,24 @@ $ManagedMcpServerNames = @(@($McpServerCatalog.Keys) + $RetiredMcpServerNames)
 # sessions and none after 2026-09-10, while every session still paid the
 # server's startup. The catalog definition is retained; restoring the entry
 # here re-wires both clients on the next setup run.
-$ClaudeCodeMcpNames = @("1password")
+#
+# scaledown-migration-agent is global in every coding client by owner request
+# (2026-11-23, #2791): the slm-agent skills are installed for all of them, and
+# the helper has no startup cost beyond one local node process.
+$ClaudeCodeMcpNames = @("1password", "scaledown-migration-agent")
 $ClaudeDesktopMcpNames = @("1password", "playwright")
 # ZCode gets the same minimal default as Claude Code. The plan's illustrative
 # "@("1password","codex-cli")" predates PR #573 (2026-09-17), which suspended
 # the dormant codex-cli server from both Claude clients after transcript mining
 # found no meaningful use; by D10's own criterion (exclude servers whose value
-# is unproven), ZCode starts with 1password only. Expanding later is a one-line
-# membership change here.
-$ZCodeMcpNames = @("1password")
-# MiMo (Xiaomi MiMo Desktop / MiMoCode) gets the same minimal default as
-# Claude Code and ZCode: 1password only, through the shared launcher.
+# is unproven), ZCode starts with 1password plus the ScaleDown helper (#2791).
 # Expanding later is a one-line membership change here.
-$MimoMcpNames = @("1password")
-$AntigravityMcpNames = @("1password")
+$ZCodeMcpNames = @("1password", "scaledown-migration-agent")
+# MiMo (Xiaomi MiMo Desktop / MiMoCode) gets the same default as Claude Code
+# and ZCode: 1password through the shared launcher, plus the ScaleDown helper
+# (#2791). Expanding later is a one-line membership change here.
+$MimoMcpNames = @("1password", "scaledown-migration-agent")
+$AntigravityMcpNames = @("1password", "scaledown-migration-agent")
 
 # Phase 3 (#705): single-project servers start only in sessions opened in the
 # owning repository. Keys are repository identities from

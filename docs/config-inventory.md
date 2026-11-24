@@ -320,12 +320,15 @@ without stopping to ask. The entries the toolkit requires live in
 only — it never removes an entry and never touches the rest of the file, so
 per-machine hand additions survive.
 
-Claude Code plugins (third-party skill bundles such as ScaleDown's `slm-agent`,
-which provides `/slm-agent:evaluate`) are a separate per-machine install owned
-by the plugin manager under `~/.claude/plugins/`. The toolkit's list is
-`config/claude-plugins.tsv`; `bin/ai-claude-plugins` (run by `install.sh` and
+Claude Code plugins (third-party skill bundles) are a separate per-machine
+install owned by the plugin manager under `~/.claude/plugins/`. The toolkit's
+list is `config/claude-plugins.tsv`; `bin/ai-claude-plugins` (run by `install.sh` and
 by every `sync my dotfiles`) installs the missing ones at user scope and never
-removes one. Everything else in the file stays
+removes one. The list is currently empty, because a plugin reaches Claude Code
+only. ScaleDown's `slm-agent` was the last entry: its two skills are now the
+shared skills `slm-agent-evaluate` and `slm-agent-optimize`, and the helper
+they need is the MCP catalog server `scaledown-migration-agent` (#2791).
+Everything else in the file stays
 machine-local; only the required-permissions list is synced.
 
 ### 5. `~/.codex/config.toml`

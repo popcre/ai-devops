@@ -637,11 +637,11 @@ run_stage required "Claude closeout hook" "$REPO_ROOT/bin/ai-install-completion-
 run_stage required "Claude PR-poll guard hook" "$REPO_ROOT/bin/ai-install-pr-poll-guard-hook"
 
 # --------------------------------------------------------------------------
-# 4.8b Claude plugins. Plugin skills (`/slm-agent:evaluate`, ...) are installed
-#     per machine by the Claude Code plugin manager, so the list lives in
-#     config/claude-plugins.tsv and the missing ones are installed at USER
-#     scope here. Optional: it needs the network and the `claude` command, and
-#     a machine without the command is reported SKIP.
+# 4.8b Claude plugins. Claude Code plugins are per-machine state, so the list
+#     lives in config/claude-plugins.tsv and the missing ones are installed at
+#     USER scope here. A plugin reaches Claude Code only: a skill every client
+#     needs belongs under skills/shared/ (#2791). Optional: it needs the network
+#     and the `claude` command, and a machine without the command is SKIP.
 # --------------------------------------------------------------------------
 run_stage optional "Claude plugins" "$REPO_ROOT/bin/ai-claude-plugins"
 
