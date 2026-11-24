@@ -7,6 +7,10 @@
 # propagates to every machine through ai-sync-memory's tombstones and cannot be
 # undone by a later pull, so unattended pruning is not an acceptable design.
 #
+#   ai-memory-health schedule    # register the weekly report (Scheduled Task on
+#                                # Windows, user crontab on Linux/macOS)
+#   ai-memory-health unschedule  # remove that timer
+#
 # Exit status: 0 = nothing to act on, 1 = findings to review, 2 = usage/setup error.
 set -u
 
@@ -19,6 +23,106 @@ while [ -L "$_ai_self" ]; do
   esac
 done
 repo_root="$(cd "$(dirname "$_ai_self")/.." && pwd)"
+# Absolute from here on: the crontab line must survive a scheduled shell that
+# starts in no particular directory.
+_ai_self="$repo_root/bin/$(basename "$_ai_self")"
+
+# --- weekly timer (#2799) ----------------------------------------------------
+# `schedule` / `unschedule` only manage this report's own weekly timer and
+# never audit or touch memory. Windows keeps the Scheduled Task that
+# bin/install-memory-health-task.ps1 registers; Linux/macOS get one marked,
+# idempotent USER crontab line, the same shape as `ai-housekeeping schedule`.
+# The scheduled run is the same read-only audit plus --out, so a server with no
+# desktop notification still gets the report file.
+WEEKDAY="${AI_MEMORY_HEALTH_WEEKDAY:-Monday}"
+WEEKLY_AT="${AI_MEMORY_HEALTH_WEEKLY_AT:-09:00}"
+CRON_MARKER='# ai-devops memory-health (managed by ai-memory-health schedule; unschedule removes)'
+
+timer_fail() { echo "ai-memory-health: $1" >&2; exit 2; }
+
+cron_weekday() { # cron_weekday -> 0..6 for WEEKDAY
+  case "$WEEKDAY" in
+    Sunday) printf '0' ;; Monday) printf '1' ;; Tuesday) printf '2' ;; Wednesday) printf '3' ;;
+    Thursday) printf '4' ;; Friday) printf '5' ;; Saturday) printf '6' ;;
+    *) return 1 ;;
+  esac
+}
+
+cron_job_line() {
+  printf '%s %s * * %s cd "%s" && %s --repo-root "%s" --out "%s" >/dev/null 2>&1' \
+    "${WEEKLY_AT#*:}" "${WEEKLY_AT%%:*}" "$(cron_weekday)" \
+    "$repo_root" "'$_ai_self'" "$repo_root" "$report_path"
+}
+
+crontab_swap() { # crontab_swap schedule|unschedule — rewrite only this tool's own lines
+  local mode="$1" tmp rc=0 existing read_rc=0 spool
+  tmp="$(mktemp)" || timer_fail 'mktemp failed'
+  # Expand the path now: $tmp is function-local and unbound under set -u by the
+  # time an EXIT trap runs after this function returns.
+  # shellcheck disable=SC2064
+  trap "rm -f -- $(printf '%q' "$tmp")" EXIT
+  existing="$(crontab -l 2>/dev/null)" || read_rc=$?
+  if [ "$read_rc" -ne 0 ] && [ -z "$existing" ]; then
+    # "no crontab for user" is normal. An installed crontab that cannot be read
+    # is not, and must never be replaced with an empty one.
+    for spool in /var/spool/cron/crontabs /var/spool/cron /var/spool/cron/tabs; do
+      if [ -f "$spool/$(id -un 2>/dev/null || whoami)" ]; then
+        echo "ai-memory-health: crontab exists but cannot be read; refusing to replace it" >&2
+        return 2
+      fi
+    done
+  fi
+  if [ "$mode" = schedule ]; then
+    { printf '%s\n' "$existing" | grep -vF "$CRON_MARKER" | grep -vF -- "--out \"$report_path\"" || :; } >> "$tmp"
+    printf '%s\n%s\n' "$CRON_MARKER" "$(cron_job_line)" >> "$tmp"
+  else
+    { printf '%s\n' "$existing" | grep -vF "$CRON_MARKER" | grep -vF -- "--out \"$report_path\"" || :; } > "$tmp"
+  fi
+  crontab "$tmp" || rc=$?
+  rm -f -- "$tmp"
+  [ "$rc" -eq 0 ] || { echo "ai-memory-health: crontab refused the $mode of the weekly entry" >&2; return 2; }
+}
+
+cmd_timer() { # cmd_timer schedule|unschedule
+  local mode="$1" base_home report_dir ps1 ps1_win
+  cron_weekday >/dev/null || timer_fail "AI_MEMORY_HEALTH_WEEKDAY must be a day name (Monday..Sunday), got '$WEEKDAY'"
+  [[ "$WEEKLY_AT" =~ ^([01]?[0-9]|2[0-3]):[0-5][0-9]$ ]] \
+    || timer_fail "AI_MEMORY_HEALTH_WEEKLY_AT must be HH:MM (00:00..23:59), got '$WEEKLY_AT'"
+  if [[ -n "${USERPROFILE:-}" ]]; then
+    if command -v cygpath >/dev/null 2>&1; then base_home="$(cygpath -u "$USERPROFILE")"
+    else base_home="/$(printf '%s' "$USERPROFILE" | sed -e 's#\\#/#g' -e 's#^\([A-Za-z]\):#\L\1#')"; fi
+  else
+    base_home="$HOME"
+  fi
+  report_dir="$base_home/.config/ai-devops"
+  report_path="$report_dir/memory-health-latest.md"
+  if command -v schtasks.exe >/dev/null 2>&1; then
+    ps1="$repo_root/bin/install-memory-health-task.ps1"
+    [ -f "$ps1" ] || timer_fail "missing $ps1"
+    command -v pwsh >/dev/null 2>&1 || timer_fail 'the Windows task needs PowerShell 7 (pwsh), which was not found on PATH'
+    ps1_win="$ps1"
+    command -v cygpath >/dev/null 2>&1 && ps1_win="$(cygpath -w "$ps1")"
+    if [ "$mode" = unschedule ]; then set -- -File "$ps1_win" -Remove
+    else set -- -File "$ps1_win" -DayOfWeek "$WEEKDAY" -At "$WEEKLY_AT"; fi
+    exec pwsh -NoProfile -ExecutionPolicy Bypass "$@"
+  fi
+  command -v crontab >/dev/null 2>&1 || timer_fail 'schedule needs schtasks (Windows) or crontab (Linux/macOS); neither is available'
+  if [ "$mode" = schedule ]; then
+    mkdir -p "$report_dir" 2>/dev/null || timer_fail "could not create $report_dir"
+    crontab_swap schedule || exit 2
+    echo "ai-memory-health: scheduled weekly on $WEEKDAY at $WEEKLY_AT in the user crontab"
+    echo "ai-memory-health: report file: $report_path"
+  else
+    crontab_swap unschedule || exit 2
+    echo "ai-memory-health: removed the weekly memory-health crontab entry"
+  fi
+  exit 0
+}
+
+case "${1:-}" in
+  schedule|unschedule) cmd_timer "$1" ;;
+esac
+
 claude_home=""
 out=""
 stale_days=180
@@ -32,6 +136,13 @@ coverage_only=0
 usage() {
   cat <<'USAGE'
 usage: ai-memory-health [--claude-home DIR] [--repo-root DIR] [--out FILE] [--stale-days N]
+       ai-memory-health schedule | unschedule
+
+  schedule           Register the weekly read-only report: the Scheduled Task on
+                     Windows, one marked user-crontab line on Linux/macOS. Day and
+                     time come from AI_MEMORY_HEALTH_WEEKDAY (Monday) and
+                     AI_MEMORY_HEALTH_WEEKLY_AT (09:00).
+  unschedule         Remove that timer.
 
   --claude-home DIR  Claude home to audit (default: $USERPROFILE/.claude on Windows,
                      $HOME/.claude elsewhere).

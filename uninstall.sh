@@ -95,6 +95,11 @@ if [ -x "$rl_tool" ]; then
   if [ "$DRY_RUN" -eq 1 ]; then echo "Would unschedule the hourly reviewer-logs sync"; else "$rl_tool" unschedule || echo "WARNING: could not unschedule the reviewer-logs sync; remove it manually if present"; fi
 fi
 
+mh_tool="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/bin/ai-memory-health"
+if [ -x "$mh_tool" ]; then
+  if [ "$DRY_RUN" -eq 1 ]; then echo "Would unschedule the weekly memory-health report"; else "$mh_tool" unschedule || echo "WARNING: could not unschedule the weekly memory-health report; remove it manually if present"; fi
+fi
+
 if [ "$PURGE" -eq 1 ]; then
   echo "ARCHIVE config $resolved_etc -> $archive/etc-ai-devops.tar.gz"
   if [ "$DRY_RUN" -eq 0 ]; then

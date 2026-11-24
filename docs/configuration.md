@@ -98,6 +98,8 @@ overrides for controlled tests or machine migration. They are not secrets.
 | `AI_MEMORY_STAMP` | Last successful round trip, used by `sync-if-stale` | `~/.cache/ai-memory-sync.last-success` |
 | `AI_MEMORY_MAX_AGE_HOURS` | Maximum age before `sync-if-stale` runs a full round trip | `24` |
 | `AI_MEMORY_HEALTH_STATE` | Prior health report used to show the next audit trend | `~/.cache/ai-memory-health.trend` |
+| `AI_MEMORY_HEALTH_WEEKDAY` | Weekday of the weekly report registered by `ai-memory-health schedule` (Monday..Sunday) | `Monday` |
+| `AI_MEMORY_HEALTH_WEEKLY_AT` | Time of that weekly report (HH:MM); the report lands in `~/.config/ai-devops/memory-health-latest.md` | `09:00` |
 | `AI_MEMORY_CLAUDE_PROJECTS` | Physical `projects` path (set automatically after resolving a Windows junction) | `$CLAUDE_HOME/projects` via `bin/ai-winpath` |
 
 Production runs reject any remote other than the canonical private repository

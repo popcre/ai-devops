@@ -199,5 +199,114 @@ else
   echo "SKIP: linked health fixtures require actual symlink support"
 fi
 
+# --- weekly timer (#2799) -----------------------------------------------------
+# `schedule` / `unschedule` manage only the report's own timer. Linux/macOS get
+# one marked user-crontab line; a stub crontab keeps the real one untouched.
+if command -v schtasks.exe >/dev/null 2>&1; then
+  echo "SKIP: crontab timer checks need a host without schtasks.exe"
+else
+  CRON="$TMP/cron-bin"; mkdir -p "$CRON" "$TMP/timer-home"
+  cat > "$CRON/crontab" <<'CRON_STUB'
+#!/bin/sh
+# -l prints the installed crontab; any other form installs $1.
+[ "$1" = -l ] && { [ -f "$CRONTAB_FILE" ] && cat "$CRONTAB_FILE"; exit 0; }
+[ -n "${CRONTAB_REFUSE:-}" ] && { echo "crontab: not allowed" >&2; exit 1; }
+cat "$1" > "$CRONTAB_FILE"; exit 0
+CRON_STUB
+  chmod +x "$CRON/crontab"
+  export CRONTAB_FILE="$TMP/installed-crontab"
+  timer() { PATH="$CRON:$PATH" HOME="$TMP/timer-home" env LC_ALL=C "$@"; }
+  FOREIGN='17 3 * * * /home/ai/bin/keep-me.sh'
+  MARKER='# ai-devops memory-health (managed by ai-memory-health schedule; unschedule removes)'
+  JOB="00 09 * * 1 cd \"$ROOT\" && '$SCRIPT' --repo-root \"$ROOT\" --out \"$TMP/timer-home/.config/ai-devops/memory-health-latest.md\" >/dev/null 2>&1"
+  markers() { grep -cF "$MARKER" "$CRONTAB_FILE"; }
+  printf '%s\n' "$FOREIGN" > "$CRONTAB_FILE"
+
+  out="$(timer "$SCRIPT" schedule 2>&1)"; rc=$?
+  check "schedule exits 0" "[ $rc -eq 0 ]"
+  check "schedule states day, time and crontab" "printf '%s' \"\$out\" | grep -q 'scheduled weekly on Monday at 09:00 in the user crontab'"
+  check "schedule writes the report file path" "[ -d \"$TMP/timer-home/.config/ai-devops\" ] && printf '%s' \"\$out\" | grep -qF \"report file: $TMP/timer-home/.config/ai-devops/memory-health-latest.md\""
+  check "schedule adds exactly one marked line" "[ \"\$(markers)\" -eq 1 ]"
+  check "schedule keeps a foreign entry" "grep -qF \"$FOREIGN\" \"$CRONTAB_FILE\""
+  check "the job runs the read-only audit with absolute paths" "[ \"\$(tail -n 1 \"$CRONTAB_FILE\")\" = \"\$JOB\" ]"
+
+  timer "$SCRIPT" schedule >/dev/null 2>&1; rc=$?
+  check "schedule is idempotent" "[ $rc -eq 0 ] && [ \"\$(markers)\" -eq 1 ]"
+
+  out="$(timer AI_MEMORY_HEALTH_WEEKDAY=Sunday AI_MEMORY_HEALTH_WEEKLY_AT=18:05 "$SCRIPT" schedule 2>&1)"; rc=$?
+  check "day and time come from the environment" \
+    "[ $rc -eq 0 ] && tail -n 1 \"$CRONTAB_FILE\" | grep -q '^05 18 \\* \\* 0 ' && printf '%s' \"\$out\" | grep -q 'Sunday at 18:05'"
+
+  before_timer="$(sha256sum < "$CRONTAB_FILE")"
+  for bad_env in AI_MEMORY_HEALTH_WEEKDAY=Funday AI_MEMORY_HEALTH_WEEKDAY=1 \
+                 AI_MEMORY_HEALTH_WEEKLY_AT=24:00 AI_MEMORY_HEALTH_WEEKLY_AT=09:60 \
+                 AI_MEMORY_HEALTH_WEEKLY_AT=9am 'AI_MEMORY_HEALTH_WEEKLY_AT=09:00; rm -rf /'; do
+    out="$(timer "$bad_env" "$SCRIPT" schedule 2>&1)"; rc=$?
+    check "an invalid $bad_env is refused before the crontab" \
+      "[ $rc -eq 2 ] && printf '%s' \"\$out\" | grep -q 'AI_MEMORY_HEALTH_'"
+  done
+  check "invalid settings leave the crontab unchanged" "[ \"\$before_timer\" = \"\$(sha256sum < \"$CRONTAB_FILE\")\" ]"
+
+  out="$(CRONTAB_REFUSE=1 timer "$SCRIPT" schedule 2>&1)"; rc=$?
+  check "a crontab refusal fails schedule truthfully" \
+    "[ $rc -eq 2 ] && printf '%s' \"\$out\" | grep -q 'crontab refused the schedule of the weekly entry'"
+
+  out="$(timer "$SCRIPT" unschedule 2>&1)"; rc=$?
+  check "unschedule exits 0 and says so" "[ $rc -eq 0 ] && printf '%s' \"\$out\" | grep -q 'removed the weekly memory-health crontab entry'"
+  check "unschedule removes only its own lines" "[ \"\$(markers)\" -eq 0 ] && grep -qF \"$FOREIGN\" \"$CRONTAB_FILE\""
+
+  # Timer subcommands never audit: no report, no trend line, no memory change.
+  before_timer="$(find "$TMP/home" "$TMP/timer-home" -type f -printf '%p %s %T@\n' | sort | md5sum)"
+  out="$(timer AI_MEMORY_HEALTH_STATE="$TMP/timer-trend" "$SCRIPT" schedule 2>&1; timer AI_MEMORY_HEALTH_STATE="$TMP/timer-trend" "$SCRIPT" unschedule 2>&1)"
+  check "timer subcommands print no audit" "! printf '%s' \"\$out\" | grep -q 'Memory health report'"
+  check "timer subcommands change no memory and write no trend" \
+    "[ \"\$before_timer\" = \"\$(find \"$TMP/home\" \"$TMP/timer-home\" -type f -printf '%p %s %T@\\n' | sort | md5sum)\" ] && [ ! -e \"$TMP/timer-trend\" ]"
+fi
+
+# --- Windows route: schedule delegates to the existing task script -------------
+# A stub schtasks.exe selects the Windows route and a stub pwsh records the call,
+# so a real Scheduled Task is never touched on any host.
+WINBIN="$TMP/win-bin"; mkdir -p "$WINBIN"
+printf '#!/bin/sh\nexit 0\n' > "$WINBIN/schtasks.exe"
+cat > "$WINBIN/pwsh" <<'PWSH_STUB'
+#!/bin/sh
+printf '%s\n' "$@" > "$PWSH_ARGS_FILE"
+PWSH_STUB
+chmod +x "$WINBIN/schtasks.exe" "$WINBIN/pwsh"
+export PWSH_ARGS_FILE="$TMP/pwsh-args"
+win() { PATH="$WINBIN:$PATH" HOME="$TMP/timer-home" "$SCRIPT" "$@"; }
+# Argument lines: 1-4 the pwsh flags, 5 the task script (platform-shaped:
+# cygpath on Git Bash), then the day and time.
+win_args_shape() { printf '%s' "$(head -n 4 "$PWSH_ARGS_FILE" | tr '\n' ' ')"; }
+
+win schedule >/dev/null 2>&1; rc=$?
+check "Windows schedule delegates to the task script" \
+  "[ $rc -eq 0 ] && [ \"\$(win_args_shape)\" = '-NoProfile -ExecutionPolicy Bypass -File ' ] && sed -n '5p' \"$PWSH_ARGS_FILE\" | grep -q 'install-memory-health-task\.ps1\$'"
+check "Windows schedule passes the default day and time" "[ \"\$(tail -n +6 \"$PWSH_ARGS_FILE\" | tr '\n' ' ')\" = '-DayOfWeek Monday -At 09:00 ' ]"
+check "Windows schedule stays out of the crontab" "[ ! -e \"\${CRONTAB_FILE:-}\" ] || ! grep -qF 'ai-memory-health' \"\$CRONTAB_FILE\""
+
+AI_MEMORY_HEALTH_WEEKDAY=Friday AI_MEMORY_HEALTH_WEEKLY_AT=07:41 win schedule >/dev/null 2>&1; rc=$?
+check "Windows schedule passes environment day and time" \
+  "[ $rc -eq 0 ] && [ \"\$(tail -n +6 \"$PWSH_ARGS_FILE\" | tr '\n' ' ')\" = '-DayOfWeek Friday -At 07:41 ' ]"
+
+win unschedule >/dev/null 2>&1; rc=$?
+check "Windows unschedule asks the task script to remove the task" \
+  "[ $rc -eq 0 ] && [ \"\$(tail -n +6 \"$PWSH_ARGS_FILE\" | tr '\n' ' ')\" = '-Remove ' ]"
+
+# "No pwsh" must be built, never assumed: CI images and Windows hosts ship a real
+# pwsh, and reaching it would run the real task script on that machine. This PATH
+# holds only the stub schtasks.exe and the three core utilities the script needs
+# before it looks for pwsh.
+NOPWSH="$TMP/win-bin-nopwsh"; mkdir -p "$NOPWSH"
+printf '#!/bin/sh\nexit 0\n' > "$NOPWSH/schtasks.exe"; chmod +x "$NOPWSH/schtasks.exe"
+for util in dirname basename readlink; do
+  printf '#!/bin/sh\nexec "%s" "$@"\n' "$(command -v "$util")" > "$NOPWSH/$util"; chmod +x "$NOPWSH/$util"
+done
+# bash is addressed by path on purpose: with PATH replaced, "bash" is not found.
+check "the no-pwsh test PATH really has no pwsh" "! PATH=\"$NOPWSH\" \"\$BASH\" -c 'command -v pwsh'"
+out="$(PATH="$NOPWSH" "$BASH" "$SCRIPT" schedule 2>&1)"; rc=$?
+check "Windows schedule without pwsh 7 fails with the reason" \
+  "[ $rc -eq 2 ] && printf '%s' \"\$out\" | grep -q 'PowerShell 7'"
+
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
