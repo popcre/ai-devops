@@ -315,16 +315,19 @@ restore_install_crontab() {
     awk -v bw="$REPO_ROOT/bin/ai-blocker-watch" \
         -v reap="$REPO_ROOT/bin/ai-reap-shared-db-worktrees" \
         -v lw="$REPO_ROOT/bin/ai-local-watch" \
-        -v rl="$REPO_ROOT/bin/ai-reviewer-logs-sync" '
+        -v rl="$REPO_ROOT/bin/ai-reviewer-logs-sync" \
+        -v mh="$REPO_ROOT/bin/ai-memory-health" '
       index($0,"# ai-devops blocker-watch (managed by ai-blocker-watch schedule") == 0 &&
       index($0,"# ai-devops worktree-reap (managed by ai-reap-shared-db-worktrees schedule") == 0 &&
       index($0,"# ai-devops ai-local-watch (managed by ai-local-watch schedule") == 0 &&
       index($0,"# ai-devops housekeeping (managed by ai-housekeeping schedule") == 0 &&
       index($0,"# ai-devops ai-reviewer-logs-sync (managed by ai-reviewer-logs-sync schedule") == 0 &&
+      index($0,"# ai-devops memory-health (managed by ai-memory-health schedule") == 0 &&
       index($0,"\047" rl "\047") == 0 &&
       index($0,"\047" bw "\047 tick") == 0 &&
       index($0,"\047" reap "\047 run") == 0 &&
       index($0,"\047" lw "\047") == 0 &&
+      index($0,"\047" mh "\047 --repo-root") == 0 &&
       index($0,"ai-housekeeping\047 --log") == 0 { print }
     '
   }
@@ -339,13 +342,14 @@ restore_install_crontab() {
     rm -f -- "$tmp"
     return "$rc"
   elif $SUDO test -f "$BACKUP_DIR/crontab.absent"; then
-    # Remove only the two installer-owned entries; retain anything another
+    # Remove only the installer-owned entries; retain anything another
     # actor added during this attempt.
     [ -z "$(crontab -l 2>/dev/null | strip_managed_cron)" ] || return 1
     "$REPO_ROOT/bin/ai-blocker-watch" unschedule &&
       "$REPO_ROOT/bin/ai-reap-shared-db-worktrees" unschedule &&
       "$REPO_ROOT/bin/ai-local-watch" unschedule &&
-      "$REPO_ROOT/bin/ai-housekeeping" unschedule
+      "$REPO_ROOT/bin/ai-housekeeping" unschedule &&
+      "$REPO_ROOT/bin/ai-memory-health" unschedule
   else
     return 1
   fi
@@ -744,6 +748,13 @@ run_stage required "Retire reviewer jobs and freeze window" retire_reviewer_jobs
 # AiDevOps-Housekeeping Scheduled Task there; this stage covers Ubuntu/macOS
 # user crontab and any Windows box that only runs install.sh.
 run_stage optional "Housekeeping schedule" "$REPO_ROOT/bin/ai-housekeeping" schedule
+
+# Optional: weekly read-only memory-health report (#2799). Same shape as the
+# stages above - one marked, idempotent `schedule` command per platform. On
+# Windows `schedule` registers the same Scheduled Task that
+# bin/install-memory-health-task.ps1 does; here it is the Ubuntu/macOS user
+# crontab line, so a server also gets the report file every week.
+run_stage optional "Memory health scheduling" "$REPO_ROOT/bin/ai-memory-health" schedule
 
 # Optional: daily transcript upload (plan_transcript-store.md step 1). SKIP on a
 # host with no Dropbox; the Windows installer has the same stage.

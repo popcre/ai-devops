@@ -39,7 +39,7 @@ defaults, **and the secret/MCP/SSH plumbing** (Phase 2 of
 | Memory-index hook (blocks a memory from going unindexed) | installed on machine, **checked every run (step 6c2)** | `bin/ai-install-memory-hook` |
 | Claude closeout hook (keeps a turn from closing while work is still named) | installed on machine, **checked every run (step 6c2b)** | `bin/ai-install-completion-check-hook` |
 | ZCode skills, globals, and completion-check hook | repo → machine (Windows only), **checked every run (step 6c3)** | `bin/install-ai-devops-windows.ps1` (skills/globals), `bin/ai-install-completion-check-hook --client zcode` |
-| Weekly read-only memory-health report | per-machine task, **checked every run (step 6d)** | `bin/install-memory-health-task.ps1` → `bin/ai-memory-health` |
+| Weekly read-only memory-health report | per-machine timer, **checked every run (step 6d)** | `bin/ai-memory-health schedule` (Scheduled Task on Windows through `bin/install-memory-health-task.ps1`, one user-crontab line on Ubuntu/macOS) → `bin/ai-memory-health` |
 | Secret plumbing (1Password token file, `mcp.env`), MCP launchers + token-free MCP wiring, SSH aliases, 916-alien key, Codex PATH | repo → machine, **checked every run (step 2)**; installed by the per-OS script when missing | `bin/setup-machine.ps1` (Windows) / `bin/setup-secrets.sh` (Ubuntu) |
 | GLM server (pinned OpenCode, agents, service, `ai-glm` on PATH) | repo → machine, **checked every run (step 2b)** via `ai-glm doctor`; installed/repaired when it fails | `bin/setup-opencode-glm.ps1` (Windows) / `bin/setup-opencode-glm.sh` (Ubuntu) |
 | Dropbox scripts | **retired — not a config source.** Never send anyone there | — |
@@ -352,10 +352,16 @@ clone + `./install.sh` (Ubuntu) first.
    fire in headless `-p` runs at all, so verification is structural
    (`--check`), not a firing proof. Skip with a spoken note on a machine
    without ZCode.
-6d. **Check and register the memory-health task yourself:** the weekly read-only audit
-   (`bin/ai-memory-health`) is registered by
-   `bin/install-memory-health-task.ps1` and is per-machine. Check for it with
-   `Get-ScheduledTask -TaskName ai-memory-health` on Windows; if it is absent, register it yourself. Never register an unattended job that EDITS
+6d. **Register the weekly memory-health report:** `bin/ai-memory-health schedule`.
+   It is idempotent on both platforms (Windows re-points the existing
+   `ai-memory-health` Scheduled Task through
+   `bin/install-memory-health-task.ps1`, which needs pwsh 7; Ubuntu/macOS
+   rewrite one marked user-crontab line), so run it every sync rather than
+   probing first — a pull cannot start a timer, and until #2799 an Ubuntu host
+   had no route at all. Say its verdict out loud. Then relay what the latest
+   report says: `~/.config/ai-devops/memory-health-latest.md` is the last
+   scheduled run (summary at the end); when it lists findings, name the count
+   and the projects. Never register an unattended job that EDITS
    memory: `ai-sync-memory` tombstones make a deletion propagate everywhere and
    survive a later pull, so a wrong automated delete is unrecoverable. The audit
    reports; every memory edit is applied as an exact, recorded edit
