@@ -555,6 +555,54 @@ else
   echo "SKIP: the launcher alias check needs real symlinks"
 fi
 
+# --- shapes the secret gate must refuse (#2819) -------------------------------
+# Two notes holding a bare hex token after `token=`, a `Secret Key:` value and
+# a provider token the list did not name passed the gate on 2026-11-24.
+secret_lines="$(grep -E '^SECRET_RE\+?=' "$ROOT/bin/ai-memory-sync")"
+secret_re="$(bash -c "$secret_lines"'; printf "%s" "$SECRET_RE"')"
+[[ ${#secret_re} -gt 400 && "$secret_re" == *'ops_[A-Za-z0-9]{20}'* && "$secret_re" == *'[Aa]dmin[_-]?[Tt]oken'* && "$secret_re" == *'[A-Z][A-Za-z0-9]{31,}'* ]] ||
+  fail "could not read the whole secret pattern list from bin/ai-memory-sync"
+must_refuse=(
+  'Admin token: 0123456789abcdef0123456789abcdef0123456789abcdef'
+  'https://example.invalid/admin?admin_token=0123456789abcdef0123456789abcdef'
+  '- Pat: token=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
+  '- Secret Key: `AbCdEf0123456789AbCdEf0123456789AbCd0123`'
+  '**Admin token:** 0123456789abcdef0123456789abcdef0123456789abcdef'
+  '- API Token: `prfx_0123456789abcdefABCDEF0123456789AbCd0123456789Ef`'
+  'CLOUDFLARE_API_TOKEN=Z0123456789abcdef0123456789abcdefZ'
+)
+must_allow=(
+  'ADMIN_TOKEN=$(op read "op://vibe_coding/an item/credential")'
+  'The admin token is in 1Password; read it through a pipe.'
+  'password: use a long passphrase and keep it in the vault'
+  'API key: stored-in-the-vibe_coding-vault-under-its-own-item-name'
+  'ADMIN_TOKEN=your-admin-token-here'
+  'token=<the value from the vault>'
+  'CLOUDFLARE_API_TOKEN="$CF_TOKEN" wrangler deploy'
+  'see handoff_20261124T0216Z and commit_838267b7c3c33f6f0a99d21cf4d6b4e7a2d41a0c'
+)
+for line in "${must_refuse[@]}"; do
+  printf '%s\n' "$line" | grep -Eq "$secret_re" ||
+    fail "the secret gate would let through: $line"
+done
+for line in "${must_allow[@]}"; do
+  if printf '%s\n' "$line" | grep -Eq "$secret_re"; then
+    fail "the secret gate would refuse: $line"
+  fi
+done
+# And through the real transaction: a note with a bare token never reaches the hub.
+printf -- '---\nname: leaky\ndescription: a note that must never reach the hub\n---\n\nadmin_token=0123456789abcdef0123456789abcdef0123456789abcdef\n' \
+  > "$CLAUDE_A/projects/C--repos-sample/memory/leaky.md"
+if sync_a sync > "$TMP/leak.out" 2>&1; then
+  fail "the secret gate let a bare token through"
+fi
+grep -Fq 'secret-pattern detector rejected' "$TMP/leak.out" ||
+  fail "the sync failed for another reason: $(tail -3 "$TMP/leak.out")"
+if git -C "$HUB_A" cat-file -e origin/main:memory/sample/leaky.md 2>/dev/null; then
+  fail "the note with a bare token reached the remote hub"
+fi
+rm -f "$CLAUDE_A/projects/C--repos-sample/memory/leaky.md"
+
 bash -n "$ROOT/bin/ai-memory-sync"
 bash -n "$ROOT/bin/ai-sync-memory"
 echo "PASS: private memory sync converges losslessly and preserves every failure state"
