@@ -13,7 +13,7 @@ Step IDs below match §9 exactly. Do not invent parallel numbering.
 
 | Step | Status | Evidence / where a fresh session starts |
 |---|---|---|
-| 0. Register issue + this plan + handoff | ✅ done 2026-10-16 | [#1822](https://github.com/popcre/ai-devops/issues/1822); this file; [handoff](HANDOFF.d/2026-10-16T1835Z-edge-dev-mimo-reviewer-stability-24h.md) |
+| 0. Register issue + this plan + handoff | ✅ done 2026-10-16 | [#1822](https://github.com/popcre/ai-devops/issues/1822); this file; [handoff](https://github.com/popcre/ai-devops/blob/0f4c4226/HANDOFF.d/2026-10-16T1835Z-edge-dev-mimo-reviewer-stability-24h.md) |
 | 1. Freeze requalification storms (pin-digest identity) | ⬜ open | Start here if implementing |
 | 2. Single terminal-verdict contract + parser proofs | ⬜ open | |
 | 3. Wire contract into doors + registry | ⬜ open | |
@@ -30,7 +30,7 @@ Step IDs below match §9 exactly. Do not invent parallel numbering.
 
 **Fresh session starts at** the first ⬜ row, after reading §4.3 (ownership) and §5–§8.
 
-**Handoff:** [execution brief](HANDOFF.d/2026-10-16T1835Z-edge-dev-mimo-reviewer-stability-24h.md).
+**Handoff:** [execution brief](https://github.com/popcre/ai-devops/blob/0f4c4226/HANDOFF.d/2026-10-16T1835Z-edge-dev-mimo-reviewer-stability-24h.md).
 
 **Muse critique (2026-10-16):** ACCEPT WITH CHANGES — those changes are integrated in this revision (numbering, ownership matrix, runnable gates, no temp-file evidence, concrete requal default).
 

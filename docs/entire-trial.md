@@ -142,7 +142,7 @@ Discovery November2,2026,5:00PM EST and stop November12,2026,5:58AM EST remain.
 Albert authorized: “let's test Entire controlling testing and merging, with
 GitHub retaining the official code.” The
 [controlling plan amendment](../plan_entire-reversible-trial.md#october-31-controlling-amendment--entire-testing-and-merge-trial)
-and [fresh execution handoff](../HANDOFF.d/2026-10-31T2353Z-edge-dev3-codex-entire-control-trial.md)
+and [fresh execution handoff](https://github.com/popcre/ai-devops/blob/0f4c4226/HANDOFF.d/2026-10-31T2353Z-edge-dev3-codex-entire-control-trial.md)
 govern this bounded test. Older browser-only/shadow-only instructions below
 describe the previous operating scope, not a veto on this authorization.
 GitHub remains the official code record; a permanent protected-main cutover
@@ -163,7 +163,7 @@ Albert's October 30 clarification adds Codex, Claude, MiMo and ZCode across
 edge-dev, edge-dev3, al8960ofc and 916, plus the whole CI process, to the
 requested implementation outcome. Read the existing
 [plan STATUS and fleet specification](../plan_entire-reversible-trial.md#status--fleet-and-ci-implementation-read-first)
-and its [handoff](../HANDOFF.d/2026-10-30T1847Z-edge-dev3-codex-entire-fleet-plan.md).
+and its [handoff](https://github.com/popcre/ai-devops/blob/0f4c4226/HANDOFF.d/2026-10-30T1847Z-edge-dev3-codex-entire-fleet-plan.md).
 All 16 client-machine live cells and CI execution integration remain open.
 The mirror and repository workflow below are delivered narrower capabilities;
 they do not establish installation, fresh-session adoption or CI changeover.
@@ -217,7 +217,7 @@ Session closeout: the authorized live public companion is complete. Unanswered
 retention/access questions are recorded limitations, not an active support wait
 or a task Albert must unblock. No monitoring or repeated support request is
 running. The original trial boundary still applies; use the
-[closeout handoff](../HANDOFF.d/2026-10-30T1757Z-edge-dev3-codex-entire-live-wrap.md)
+[closeout handoff](https://github.com/popcre/ai-devops/blob/0f4c4226/HANDOFF.d/2026-10-30T1757Z-edge-dev3-codex-entire-live-wrap.md)
 only if continuing the bounded trial or reconciling actual new evidence.
 
 Authenticated Entire access as `u2giants` displayed main commit
@@ -358,7 +358,7 @@ remain the continuity system; the excluded captured-memory features are not
 silently replaced or presented as qualified. The original stop date still applies.
 
 Closeout continuation: read the
-[new handoff](../HANDOFF.d/2026-10-30T0345Z-edge-dev3-codex-entire-trial-wrap.md)
+[new handoff](https://github.com/popcre/ai-devops/blob/0f4c4226/HANDOFF.d/2026-10-30T0345Z-edge-dev3-codex-entire-trial-wrap.md)
 and [final independent recovery results](../tests/verification/entire-trial/report.md#final-independent-recovery-and-closeout)
 first. Cost/billing work was dropped by Albert. Scoped support follow-up was
 submitted at 7:19 PM EDT October 29; no reply/deletion proof established.
@@ -537,7 +537,7 @@ limited local GitHub-only prose delivery proof, not hosted trial acceptance.
 All 61 retained synthetic/public recovery files still match the manifest;
 private raw-evidence custody remains unqualified. No trial process is running.
 
-Continue with the [whole-plan handoff](https://github.com/popcre/ai-devops/blob/main/HANDOFF.d/2026-10-29T1428Z-edge-dev3-codex-entire-trial-continuation.md).
+Continue with the [whole-plan handoff](https://github.com/popcre/ai-devops/blob/0f4c4226/HANDOFF.d/2026-10-29T1428Z-edge-dev3-codex-entire-trial-continuation.md).
 Re-read all downstream phases through step 7 and report drift at every phase
 end. New context or later hosted activation does not reset the original clock.
 

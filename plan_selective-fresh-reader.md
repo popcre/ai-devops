@@ -37,7 +37,7 @@ and active-optimizer exclusion remain unverified; no accepted shared mode exists
 October 31 closeout: Muse's corrected static source/plan review approved narrow
 qualification pilots, not a running implementation. Read the
 [decision record](docs/muse-egm-tokeneconomizer-review-2026-10-31.md) and
-[small-trials handoff](HANDOFF.d/2026-11-01T0208Z-edge-dev3-codex-small-trials-handoff.md)
+[small-trials handoff](https://github.com/popcre/ai-devops/blob/0f4c4226/HANDOFF.d/2026-11-01T0208Z-edge-dev3-codex-small-trials-handoff.md)
 before step 1. The single-pass, three-artifact trial and exact native evidence
 instructions are in handoff §6; implementation rows below remain open.
 

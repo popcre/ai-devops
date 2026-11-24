@@ -449,7 +449,7 @@ remain explicit unmet prerequisites, not substituted passes.
 The owner now authorizes testing Entire controlling testing and merging, with
 GitHub retaining official code. Read the
 [controlling amendment](../../../plan_entire-reversible-trial.md#october-31-controlling-amendment--entire-testing-and-merge-trial)
-and [full continuity handoff](../../../HANDOFF.d/2026-10-31T2353Z-edge-dev3-codex-entire-control-trial.md).
+and [full continuity handoff](https://github.com/popcre/ai-devops/blob/0f4c4226/HANDOFF.d/2026-10-31T2353Z-edge-dev3-codex-entire-control-trial.md).
 This is a change in test authority, not a replacement result. The
 [feasibility receipt](https://github.com/popcre/ai-devops/issues/2022#issuecomment-6550148920)
 distinguishes documented Buildkite self-hosted support, unqualified actual
@@ -689,7 +689,7 @@ score was not changed. The current full feature set remains **no adoption**.
 
 For exact cold continuation, ownership, failed attempts, access boundaries and
 verification gates, use the
-[closeout handoff](../../../HANDOFF.d/2026-10-30T0345Z-edge-dev3-codex-entire-trial-wrap.md).
+[closeout handoff](https://github.com/popcre/ai-devops/blob/0f4c4226/HANDOFF.d/2026-10-30T0345Z-edge-dev3-codex-entire-trial-wrap.md).
 Keep full live proof unchecked on #2022.
 
 Coordinator: Codex chat `01a18710-9230-7801-95f9-aebc53f9c409`, edge-dev3.
@@ -926,7 +926,7 @@ completed SUCCESS; individual executable lanes were skipped for prose. Entire
 Gates completed NEUTRAL. Together with the preserved restore receipts, this
 passes the limited local GitHub-only prose route. It supersedes the earlier
 pending-check observation; hosted trial acceptance and full live proof remain
-open. The [continuation handoff](https://github.com/popcre/ai-devops/blob/main/HANDOFF.d/2026-10-29T1428Z-edge-dev3-codex-entire-trial-continuation.md)
+open. The [continuation handoff](https://github.com/popcre/ai-devops/blob/0f4c4226/HANDOFF.d/2026-10-29T1428Z-edge-dev3-codex-entire-trial-continuation.md)
 audits every remaining phase through plan-end.
 
 ## Costs, stop and ownership

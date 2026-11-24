@@ -29,7 +29,7 @@ read-when: looking up the 2026-10 observation week history
 | 9. Closeout: decide what to keep, what to revert | ⬜ open | |
 
 **Owner issue:** [#1948](https://github.com/popcre/ai-devops/issues/1948).
-**Handoff:** [HANDOFF.d/2026-10-21T2020Z-edge-dev3-claude-reviewer-observation-week.md](HANDOFF.d/2026-10-21T2020Z-edge-dev3-claude-reviewer-observation-week.md).
+**Handoff:** [HANDOFF.d/2026-10-21T2020Z-edge-dev3-claude-reviewer-observation-week.md](https://github.com/popcre/ai-devops/blob/0f4c4226/HANDOFF.d/2026-10-21T2020Z-edge-dev3-claude-reviewer-observation-week.md).
 **Fresh session starts at** the first ⬜ row after reading §1, §4, §8 and §11.
 
 ---

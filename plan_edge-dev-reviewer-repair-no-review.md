@@ -17,7 +17,7 @@ reuse its shared lifecycle/packet work; do **not** rewrite it here.
 
 Planning snapshot: October 15, 2026, 9:48 PM EDT (2026-10-16T01:48Z).
 Implementation has **not started**.
-Handoff: [execution brief](HANDOFF.d/2026-10-16T0148Z-edge-dev-mimo-reviewer-no-review-plan.md).
+Handoff: [execution brief](https://github.com/popcre/ai-devops/blob/0f4c4226/HANDOFF.d/2026-10-16T0148Z-edge-dev-mimo-reviewer-no-review-plan.md).
 
 | Step | Work | State / date | Evidence required to advance |
 |---|---|---|---|

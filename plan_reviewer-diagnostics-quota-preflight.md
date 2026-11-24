@@ -49,7 +49,7 @@ Albert requested this plan after September 7 reviewer repairs exposed three
 unexplained failures and a quota block. Toolkit repair PR #310 merged at
 `6ac22eb8b286a64d5198b18117ed005d412c6018`; coordination PR #2532 merged at
 `ba2d5b38257f43040b486956e464f0b44d797097`. These are completed prerequisites,
-not work to reimplement. See the [residual incident handoff](HANDOFF.d/2026-09-07T1800Z-edge-dev-codex-reviewer-residual-failures.md).
+not work to reimplement. See the [residual incident handoff](https://github.com/popcre/ai-devops/blob/0f4c4226/HANDOFF.d/2026-09-07T1800Z-edge-dev-codex-reviewer-residual-failures.md).
 
 The private ledger under the installed toolkit's `.ai/reviewer-issues` includes:
 
