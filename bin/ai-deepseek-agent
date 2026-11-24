@@ -462,6 +462,12 @@ if [ "$SUBCMD" != doctor ] && [ "$SUBCMD" != balance ]; then
 
   # Refuse a linked storage folder. Otherwise even a perfectly validated name can
   # read outside this repository through a directory link chosen by the caller.
+  # The shell test comes first: Windows Python cannot resolve Git Bash paths
+  # such as /tmp/..., so its realpath comparison alone misses the link there.
+  if [ -L "$EXPECTED_SESS_DIR" ]; then
+    echo "Error: DeepSeek session storage must not be a symlink: $EXPECTED_SESS_DIR" >&2
+    exit 1
+  fi
   SESS_DIR="$($PYTHON - "$EXPECTED_SESS_DIR" <<'PY'
 import os, sys
 p = os.path.abspath(sys.argv[1])
