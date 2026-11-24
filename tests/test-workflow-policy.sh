@@ -415,15 +415,14 @@ sed -n '/^  windows-offline-complete:/,/^  windows-offline:/p' "$workflow" | gre
   printf 'FAIL: ordinary Windows selection and complete scheduled/manual fallback must both remain\n' >&2
   exit 1
 }
-# Pull-request Windows tests run only on GitHub-hosted (owner 2026-10-02: "use
-# blacksmith to run your tests"). verify.yml never routes to the WarpBuild
-# label; WarpBuild is proven only by its own canary workflow (issue #961).
+# Pull-request Windows tests run only on GitHub-hosted. No WarpBuild label or
+# canary workflow remains (owner ruling 2026-11-24).
 proof_ok() {
   ! grep -qF 'windows-offline-warpbuild-proof' "$workflow" || return 1
   ! grep -qF 'warp-custom-warpbuild-win2022-canary' "$workflow" || return 1
-  grep -qE 'runs-on:.*warp-custom-warpbuild|warp_label:.*warp-custom-warpbuild' "$ROOT/.github/workflows/warpbuild-win2022-canary.yml" || return 1
+  [ ! -e "$ROOT/.github/workflows/warpbuild-win2022-canary.yml" ] || return 1
 }
-check 'pull-request Windows tests run only on GitHub-hosted; WarpBuild stays in its own canary' proof_ok
+check 'pull-request Windows tests run only on GitHub-hosted; no WarpBuild canary' proof_ok
 # The fork-isolation guard on the required section matrix is security-critical:
 # a foreign head must always get the all-GitHub-hosted literal regardless of what
 # the router reports. This test reads the matrix expression itself and fails if

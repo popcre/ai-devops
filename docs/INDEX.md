@@ -28,7 +28,7 @@ Read the summary; open a document only when it matches your task.
 | [docs/skills-map.md](skills-map.md) | current | One-page map of every skill, what it does and the phrase that triggers it. | Looking up which skill to use |
 | [docs/task-router.md](task-router.md) | current | Router of low-frequency specialized tasks to the plan or doc to read first. | Routing a specialized task to its plan |
 | [docs/transcripts.md](transcripts.md) | current | Explains that session transcripts live in the private transcripts repo and Dropbox, how to fetch them, and the rule never to commit them here. | Locating, backing up or fetching session transcripts |
-| [docs/warpbuild-azure-byoc.md](warpbuild-azure-byoc.md) | current | Runbook and live state for WarpBuild Azure BYOC Windows CI runners (stacks, runner sets, setup steps), not yet on the required lane (issue 961). | Working on WarpBuild Azure Windows CI runners |
+| [docs/warpbuild-azure-byoc.md](warpbuild-azure-byoc.md) | historical | Runbook and live state for WarpBuild Azure BYOC Windows CI runners (stacks, runner sets, setup steps), not yet on the required lane (issue 961). | Working on WarpBuild Azure Windows CI runners |
 | [mcp/README.md](../mcp/README.md) | current | Placeholder README for a future MCP wrapper exposing toolkit scripts as typed tools; nothing implemented yet. | Considering an MCP server wrapper for the toolkit |
 | [memory/README.md](../memory/README.md) | current | Describes the portable memory architecture, with public schema and tooling here, private facts in the private memory repo, union sync. | Working on portable memory sync or memory file layout |
 

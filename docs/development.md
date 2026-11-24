@@ -266,10 +266,7 @@ success. The verify test jobs (Linux and Windows) run on GitHub-hosted
 2026-10-02: "use blacksmith to run your tests", superseded 2026-11-03: Blacksmith removed). Exceptions: idle qualified
 self-hosted hosts take Windows sections as extra capacity (`runner-router`,
 below) and run the preferred reviewer lane; the free `push-settle` quiet
-window and the watchdog/drift workflows run on GitHub-hosted `ubuntu-24.04`. A non-required WarpBuild
-Azure BYOC Windows canary also exists (`warp-custom-warpbuild-win2022-canary`,
-`warpbuild-win2022-canary.yml`);
-required CI is not migrated there (see [`warpbuild-azure-byoc.md`](warpbuild-azure-byoc.md)). Required check names
+window and the watchdog/drift workflows run on GitHub-hosted `ubuntu-24.04`. WarpBuild and Blacksmith are retired (owner ruling 2026-11-24; history in [`warpbuild-azure-byoc.md`](warpbuild-azure-byoc.md)). Required check names
 are unchanged, so a green GitHub-hosted run is the required `verification-closure`
 merge check (Albert, 2026-09-23). One addition: on pull requests the
 `runner-router` job gives ordinary Windows sections to idle qualified self-hosted

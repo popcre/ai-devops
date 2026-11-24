@@ -2,7 +2,7 @@ name: windows-offline-hosted
 
 # Manual GitHub-hosted re-run of the windows-offline sections for one ref
 # (issue #210). Albert's 2026-09-10 "manual-only" ruling is replaced: on
-# 2026-09-23 he wrote "send everything to blacksmith" and "a GitHub-hosted run
+# 2026-09-23 he ruled that "a GitHub-hosted run
 # produces a main check". Every required verify.yml job now runs on GitHub-hosted
 # runners under its unchanged check name, so the required merge checks are
 # themselves GitHub-hosted runs. This dispatch-only workflow stays as a way to
@@ -43,7 +43,7 @@ jobs:
     runs-on: windows-2025
     # The free hosted lane bounds the same work at 40 minutes (verify.yml).
     # GitHub-hosted measured roughly 2x faster per suite on 2026-09-10 evidence
-    # (tests/verification/repo-throughput/issue-210-blacksmith-baseline-20260910.md),
+    # (issue #210 baseline evidence under tests/verification/repo-throughput/),
     # so this keeps headroom without paying for a much longer ceiling.
     timeout-minutes: 20
     steps:
