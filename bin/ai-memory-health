@@ -335,17 +335,19 @@ for mem in "${project_glob[@]}"; do
       END {
         for (i=1;i<=n;i++) {
           k=split(desc[i],a," ")
-          for (x=1;x<=k;x++) if (length(a[x])>5 && !((i,a[x]) in seen)) {
+          for (x=1;x<=k;x++) if (length(a[x])>5 && a[x] !~ /:$/ && !((i,a[x]) in seen)) {
             seen[i,a[x]]=1; df[a[x]]++; words[i,++count[i]]=a[x]
           }
         }
         for (i=1;i<=n;i++) for (j=i+1;j<=n;j++) {
-          total=0; weight=0; shared=0
+          total=0; weight=0; shared=0; distinct=0
           for (x=1;x<=count[i];x++) {
             w=log((n+1)/(df[words[i,x]]+0.5)); total++; weight+=w
-            for (y=1;y<=count[j];y++) if (words[i,x]==words[j,y]) { shared+=w; break }
+            for (y=1;y<=count[j];y++) if (words[i,x]==words[j,y]) { shared+=w; distinct++; break }
           }
-          if (total>=4 && shared/weight>=0.5) printf "%s and %s describe overlapping facts\n", file[i], file[j]
+          # One shared word is never an overlap, however rare it is: the topic
+          # of a templated description is that one word for a whole chapter set.
+          if (total>=4 && distinct>=2 && shared/weight>=0.5) printf "%s and %s describe overlapping facts\n", file[i], file[j]
         }
       }')
 

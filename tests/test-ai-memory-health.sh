@@ -96,10 +96,25 @@ check "two identical notes in a two-note project are a duplicate" "printf '%s' \
 # 78 chapter notes whose descriptions share "Shared-db chapter (<topic>): N
 # consolidated facts." flagged 2,150 pairs on hetz. Each holds different facts.
 TPL="$(mk_project chapters)"
+# Plain notes sit beside the chapters, as in the real project: while every note
+# carries the template, template wording weighs almost nothing on its own.
+plain_notes=(
+  "how the payroll calendar handles leap years in the ansible repository"
+  "meeting notes from the quarterly budget review with finance"
+  "keyboard shortcuts that save time in the code editor"
+  "where the office keeps spare monitors and cables"
+)
+printf '# Memory index\n\n' > "$TPL/MEMORY.md"
+n=0
+for text in "${plain_notes[@]}"; do
+  n=$((n + 1))
+  mk_memory x "$TPL" "plain-$n" "$text"
+  printf -- '- [p%s](plain-%s.md) — hook\n' "$n" "$n" >> "$TPL/MEMORY.md"
+done
 for n in 1 2 3 4 5 6 7 8 9 10 11 12; do
   mk_memory x "$TPL" "chapter-lease-$n" "Shared-db chapter (claim-lease-queue): 2 consolidated facts. mutex-waits-are-not-blockers-$n; ledger-reads-need-a-refresh-$n"
 done
-{ printf '# Memory index\n\n'; for n in 1 2 3 4 5 6 7 8 9 10 11 12; do printf -- '- [c%s](chapter-lease-%s.md) — hook\n' "$n" "$n"; done; } > "$TPL/MEMORY.md"
+{ for n in 1 2 3 4 5 6 7 8 9 10 11 12; do printf -- '- [c%s](chapter-lease-%s.md) — hook\n' "$n" "$n"; done; } >> "$TPL/MEMORY.md"
 out="$("$SCRIPT" --repo-root "$TMP/nohub" --claude-home "$TMP/home" 2>&1)"
 check "template wording alone is not a duplicate" "! printf '%s' \"\$out\" | grep -q 'POSSIBLE DUPLICATE: chapter-lease-'"
 
@@ -111,6 +126,15 @@ check "an identical note inside a templated project is still a duplicate" \
   "printf '%s' \"\$out\" | grep -qE 'POSSIBLE DUPLICATE: chapter-lease-(1\\.md and chapter-lease-13|13\\.md and chapter-lease-1)\\.md'"
 check "the templated project reports only that pair" \
   "[ \"\$(printf '%s' \"\$out\" | grep -c 'POSSIBLE DUPLICATE: chapter-lease-')\" -eq 1 ]"
+
+# Two single-fact chapters of a small topic share exactly one rare word, the
+# topic itself (hetz: chapter-reviewer-pool-01-part1 and chapter-reviewer-pool-02).
+mk_memory x "$TPL" chapter-pool-1 "Shared-db chapter (reviewer-pool): 1 consolidated facts. pool-has-five-and-two-are-dead"
+mk_memory x "$TPL" chapter-pool-2 "Shared-db chapter (reviewer-pool): 1 consolidated facts. throttle-is-account-wide"
+{ echo '- [p1](chapter-pool-1.md) — hook'; echo '- [p2](chapter-pool-2.md) — hook'; } >> "$TPL/MEMORY.md"
+out="$("$SCRIPT" --repo-root "$TMP/nohub" --claude-home "$TMP/home" 2>&1)"
+check "two single-fact chapters of one topic are not duplicates" \
+  "! printf '%s' \"\$out\" | grep -q 'POSSIBLE DUPLICATE: chapter-pool-'"
 
 # --- oversized index ---------------------------------------------------------
 BIG="$(mk_project big)"
