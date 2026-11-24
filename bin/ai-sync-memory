@@ -47,7 +47,10 @@ CLAUDE_HOME="${CLAUDE_HOME:-$BASE_HOME/.claude}"
 # no memory/project-map.tsv beside it, so every alias would be ignored (#2818).
 _self="${BASH_SOURCE[0]}"
 while [ -L "$_self" ]; do
-  _link="$(readlink "$_self")"
+  if ! _link="$(readlink "$_self")" || [[ -z "$_link" ]]; then
+    printf 'ai-sync-memory: could not read launcher symlink: %s\n' "$_self" >&2
+    exit 1
+  fi
   case "$_link" in /*) _self="$_link" ;; *) _self="$(dirname "$_self")/$_link" ;; esac
 done
 TOOL_ROOT="$(cd "$(dirname "$_self")/.." && pwd)"

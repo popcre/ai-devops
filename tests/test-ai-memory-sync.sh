@@ -531,28 +531,53 @@ grep -Fq 'publicly readable' "$TMP/l2.out" &&
 grep -Fq 'could not verify private hub visibility' "$TMP/l2.out" ||
   fail "insteadOf fixture lost its diagnosis: $(tail -3 "$TMP/l2.out")"
 
-# --- the installed launcher is a symlink (#2818) ------------------------------
-# /usr/local/bin/ai-memory-sync points into the checkout. A root derived from
-# the link itself is /usr/local, with no memory/project-map.tsv beside it, so
-# every alias in the map is ignored and one machine folder lands in two hub
-# projects depending on how the sync was started.
-mkdir -p "$TMP/launcher-bin" "$CLAUDE_A/projects/-/memory"
-if ln -s "$ROOT/bin/ai-memory-sync" "$TMP/launcher-bin/ai-memory-sync" &&
-   [[ -L "$TMP/launcher-bin/ai-memory-sync" ]]; then
+# --- the installed launchers are symlinks (#2818) -----------------------------
+# Both entry points need the checkout root to find their companion tools.
+# The push preview also confirms that the checkout's project map is used.
+mkdir -p "$TMP/launcher-bin" "$TMP/relative-bin" "$CLAUDE_A/projects/-/memory"
+launcher_link() {
+  # Git Bash may otherwise copy the target. Strict mode asks for a real link.
+  MSYS=winsymlinks:nativestrict ln -s "$1" "$2" && [[ -L "$2" ]]
+}
+if launcher_link "$ROOT/bin/ai-memory-sync" "$TMP/launcher-bin/ai-memory-sync" &&
+   launcher_link "$ROOT/bin/ai-sync-memory" "$TMP/launcher-bin/ai-sync-memory" &&
+   launcher_link ../launcher-bin/ai-memory-sync "$TMP/relative-bin/ai-memory-sync" &&
+   launcher_link ../launcher-bin/ai-sync-memory "$TMP/relative-bin/ai-sync-memory"; then
   printf '# Memory index\n\n- [alias](alias.md) - fact under a mapped folder.\n' > "$CLAUDE_A/projects/-/memory/MEMORY.md"
   printf -- '---\nname: alias\ndescription: a fact in a folder the project map renames\n---\n\nfact\n' > "$CLAUDE_A/projects/-/memory/alias.md"
-  # No AI_MEMORY_TOOL_ROOT here on purpose: the root must come from the link.
-  HOME="$HOME_A" CLAUDE_HOME="$CLAUDE_A" \
-  AI_MEMORY_TEST_MODE=1 AI_MEMORY_TEST_PRIVATE=1 \
-  AI_MEMORY_REMOTE="$REMOTE" AI_MEMORY_HUB="$HUB_A" AI_MEMORY_LOG="$LOG_A" \
-    bash "$TMP/launcher-bin/ai-memory-sync" --dry-run > "$TMP/launcher.out" 2>&1 ||
-    fail "sync through a symlinked launcher failed: $(tail -3 "$TMP/launcher.out")"
-  grep -Fq 'push  -  ->  memory/hetz-root' "$TMP/launcher.out" ||
-    fail "launcher run ignored the project map: $(grep -E '^  (push|pull|skip) +- ' "$TMP/launcher.out" | tr '\n' ';')"
-  ! grep -Eq '^  push  -  ->  memory/-$' "$TMP/launcher.out" ||
-    fail "launcher run wrote a mapped folder under its unmapped name"
+  # Invoke both relative to a working directory outside the link's directory.
+  (
+    cd "$TMP"
+    unset AI_MEMORY_TOOL_ROOT
+    export HOME="$HOME_A" CLAUDE_HOME="$CLAUDE_A"
+    export AI_MEMORY_HUB_ROOT="$HUB_A"
+    export AI_MEMORY_TEST_MODE=1 AI_MEMORY_TEST_PRIVATE=1
+    export AI_MEMORY_REMOTE="$REMOTE" AI_MEMORY_HUB="$HUB_A" AI_MEMORY_LOG="$LOG_A"
+
+    # Simulate readlink failing before either command can start syncing.
+    mkdir broken-readlink
+    printf '#!/bin/bash\nexit 1\n' > broken-readlink/readlink
+    chmod +x broken-readlink/readlink
+    for launcher in ai-memory-sync ai-sync-memory; do
+      args=(--dry-run)
+      [[ "$launcher" == ai-sync-memory ]] && args=(push --dry-run)
+      "./relative-bin/$launcher" "${args[@]}" > launcher.out 2>&1 ||
+        fail "$launcher could not run through its installed link: $(tail -3 launcher.out)"
+      grep -Fq 'push  -  ->  memory/hetz-root' launcher.out ||
+        fail "$launcher preview did not use the project map"
+      if grep -Eq '^  push  -  ->  memory/-$' launcher.out; then
+        fail "$launcher preview also used the unmapped folder name"
+      fi
+
+      if PATH="$TMP/broken-readlink:$PATH" "./relative-bin/$launcher" "${args[@]}" > launcher.out 2>&1; then
+        fail "$launcher succeeded with an unreadable launcher link"
+      fi
+      grep -Fq "$launcher: could not read launcher symlink:" launcher.out ||
+        fail "$launcher did not explain the unreadable link: $(tail -3 launcher.out)"
+    done
+  )
 else
-  echo "SKIP: the launcher alias check needs real symlinks"
+  echo "SKIP: launcher checks need real symlinks (Git Bash may lack native symlink permission)"
 fi
 
 bash -n "$ROOT/bin/ai-memory-sync"

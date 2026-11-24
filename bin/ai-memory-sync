@@ -42,7 +42,10 @@ MACHINE_CLAUDE_HOME="${CLAUDE_HOME:-$BASE_HOME/.claude}"
 # not exist, so every alias in the map would be silently ignored (#2818).
 _self="${BASH_SOURCE[0]}"
 while [ -L "$_self" ]; do
-  _link="$(readlink "$_self")"
+  if ! _link="$(readlink "$_self")" || [[ -z "$_link" ]]; then
+    printf 'ai-memory-sync: could not read launcher symlink: %s\n' "$_self" >&2
+    exit 1
+  fi
   case "$_link" in /*) _self="$_link" ;; *) _self="$(dirname "$_self")/$_link" ;; esac
 done
 TOOL_ROOT="${AI_MEMORY_TOOL_ROOT:-$(cd "$(dirname "$_self")/.." && pwd)}"
