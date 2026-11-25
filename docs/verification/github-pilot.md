@@ -7,7 +7,7 @@ read-when: Deciding outage hardening, a GitHub event listener or check-speed wor
 
 # GitHub continuity and throughput pilot — findings
 
-Plan: [plan_github-continuity-pilot.md](../../plan_github-continuity-pilot.md). Issue: [#2869](https://github.com/popcre/ai-devops/issues/2869). Run on edge-dev3, November 25, 2026, 3:20–4:00 PM EST. Harness: `tools/github-pilot/`. Raw records stayed in private temporary storage; only aggregates appear here.
+Plan: [plan_github-continuity-pilot.md](../../plan_github-continuity-pilot.md). Issue: [#2869](https://github.com/popcre/ai-devops/issues/2869). Run on edge-dev3, November 25, 2026, from 3:23 PM EST. Harness: `tools/github-pilot/`. Raw records stayed in private temporary storage; only aggregates appear here.
 
 Fixture and replay results are labelled as such. Live proof is limited to the two disposable draft pull requests in experiment 1 and the saved GitHub records in experiments 2 and 3.
 
@@ -25,7 +25,7 @@ Complete New York days with records from both machines: November 19–24, 2026 (
 
 - Quota hour: November 19, 2026, 2:08–3:08 PM EST (GitHub's own rolling window), REST core, 4,165 of 5,000 used.
 - Timing day: November 23, 2026, the day with the most distinct non-prose PRs (11).
-- Live request budget: 50 extra requests reserved as 10 discovery, 12 drafts and cleanup, 8 status, 20 timing. Spent 22 (discovery 3, timing 3, drafts 11, status 2, final checks 3); no allocation overran.
+- Live request budget: 50 extra requests reserved as 10 discovery, 12 drafts and cleanup, 8 status, 20 timing. Spent 19 (discovery 3, timing 3, drafts and cleanup 11, status 2); no allocation overran. Delivering these findings used the normal pull-request path and is outside the pilot budget.
 
 ## 1. Work through an outage (fixture, network-isolated)
 
@@ -94,7 +94,7 @@ No change to required checks, advisory checks or runners would shorten these mer
 
 - Drafts #2879 and #2880: closed, unmerged, branches deleted (verified by GraphQL and `ls-remote`).
 - Issue #2881 (opened by CI for draft #2879): closed with a signed note.
-- edge-dev3: the toolkit copy, drill output and fixture server under the temporary area were removed and verified absent. No host networking, DNS, credentials, backoff settings, subscriptions or installs were changed.
+- edge-dev3: the toolkit copy, drill output, test scratch and one leftover fixture server from a debug run were removed and verified absent. No host networking, DNS, credentials, backoff settings, subscriptions or installs were changed.
 - The ordinary waiter still works: this findings PR was followed to merge with the normal wait helper.
 
 ## Limitations
