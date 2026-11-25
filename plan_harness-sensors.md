@@ -1,14 +1,14 @@
 ---
 summary: Plan for mechanical Claude Code checks — fix the swallowed hard block, proof-of-done, destructive-command guard (#2835)
 kind: plan
-status: open
+status: complete
 read-when: Changing ai-completion-check-hook or ai-pr-poll-guard-hook, or work on false "done" claims or destructive git commands
 ---
 
 # Implementation plan — harness sensors (v2)
 
 Issue: [popcre/ai-devops#2835](https://github.com/popcre/ai-devops/issues/2835).
-Handoff: [HANDOFF.d/2026-11-25T0358Z-edge-dev3-claude-harness-sensors.md](HANDOFF.d/2026-11-25T0358Z-edge-dev3-claude-harness-sensors.md).
+Handoff: removed 2026-11-25 when the work finished (#2835 closed).
 Created 2026-11-24 by a Claude session on `edge-dev3`. v1 merged in #2836.
 v2 rewritten 2026-11-24 11:20 PM EST after an Antigravity review.
 
@@ -22,9 +22,9 @@ v2 rewritten 2026-11-24 11:20 PM EST after an Antigravity review.
 | 3 | Proof-of-done | ✅ code 2026-11-25 | `bin/ai-completion-check-hook --sensors`; `bash tests/test-ai-completion-check-hook.sh` (115 checks). Deviations below under "Build notes". |
 | 4 | Destructive-command guard | ✅ code 2026-11-25 | `bin/ai-pr-poll-guard-hook` (`destructive_guard`); every section 10 row is a named check in `bash tests/test-ai-pr-poll-guard-hook.sh` (146 checks). |
 | 5 | Docs | ✅ 2026-11-25 | `docs/harness-sensors.md` (what, signs of trouble, off switches, full undo), `docs/config-inventory.md`, hook headers, `AGENTS.md` router row. |
-| 6 | Protected install + live proof on edge-dev3 | ✅ live proof 2026-11-25; ⚠️ full receipt pending | [`tests/verification/harness-sensors/2026-11-25-live.md`](tests/verification/harness-sensors/2026-11-25-live.md): all four outcomes on the installed hooks, `--check` DRIFT→OK. `update.sh` advanced the installed checkout to 91aca13d but stopped at the sudo-only protected config backup; the receipt waits on an interactive sudo. |
+| 6 | Protected install + live proof on edge-dev3 | ✅ live proof 2026-11-25; ✅ full receipt 2026-11-25 (install record source 26c04748) | [`tests/verification/harness-sensors/2026-11-25-live.md`](tests/verification/harness-sensors/2026-11-25-live.md): all four outcomes on the installed hooks, `--check` DRIFT→OK. `update.sh` advanced the installed checkout to 91aca13d but stopped at the sudo-only protected config backup; the receipt waits on an interactive sudo. |
 
-**Built, merged (#2854) and live on edge-dev3.** Only the edge-dev3 `update.sh` receipt (needs sudo) and other machines' next installs remain. If the checks slow work down, see `docs/harness-sensors.md`.
+**Built, merged (#2854) and live on edge-dev3.** Done; #2835 closed. Other machines pick it up on their next protected install. If the checks slow work down, see `docs/harness-sensors.md`.
 
 ### Build notes (2026-11-25, deviations from the steps below)
 
