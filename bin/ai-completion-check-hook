@@ -254,7 +254,7 @@ case "$event" in
           s_class=mutation
           # Scratch, reviewer briefs, memory and plan-mode files are not deliverables.
           case "$s_path" in
-            /tmp/*|"${TMPDIR:-/nonexistent-tmpdir}"/*|*/.claude/projects/*|*/.claude/plans/*) s_class=inspection ;;
+            /tmp/*|"${TMPDIR:-/nonexistent-tmpdir}"/*|*/.claude/projects/*|*/.claude/plans/*) s_class=inspection ;;  # temp-hygiene: allow (matching paths, not writing)
           esac ;;
         Bash)
           s_cmd="$(printf '%s' "$payload" | jq -r '.tool_input.command // .tool_input.cmd // empty' 2>/dev/null || true)"
