@@ -25,21 +25,23 @@ fi
 PS_CROSS_BIN=pwsh
 command -v powershell.exe >/dev/null 2>&1 && PS_CROSS_BIN=powershell.exe
 
+start_dir="$(pwd -P)"
 TMP_ROOT="$(mktemp -d)"
-trap 'rm -rf "$TMP_ROOT"' EXIT
+TMP_ROOT="$(cd "$TMP_ROOT" && pwd -P)"
+trap 'cd "$start_dir"; rm -rf "$TMP_ROOT"' EXIT
 
 # The cross-installer runs below start Windows PowerShell 5.1 with a temporary
 # USERPROFILE. That edition then cannot find the user's Local Application Data
 # folder, so when it saves its module analysis cache the cache lands under the
 # folder this test was started from (Microsoft/Windows/PowerShell/
 # ModuleAnalysisCache). Naming the cache inside the temporary folder keeps it
-# there; an edition that does not read the variable keeps its usual cache
-# location. This variable only changes where PowerShell saves the cache.
+# there when the edition honors the variable. Run from scratch as well so
+# a relative fallback cache path also stays inside the temporary folder.
 module_cache_native="$(cygpath -w "$TMP_ROOT/ModuleAnalysisCache" 2>/dev/null || echo "$TMP_ROOT/ModuleAnalysisCache")"
 export PSModuleAnalysisCachePath="$module_cache_native"
-start_dir="$(pwd -P)"
 : > "$TMP_ROOT/started"
 export ANTIGRAVITY_HOME="$TMP_ROOT/antigravity"
+cd "$TMP_ROOT"
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
@@ -78,16 +80,9 @@ mkdir -p "$TMP_ROOT/profile"
 profile_native="$(cygpath -w "$TMP_ROOT/profile" 2>/dev/null || echo "$TMP_ROOT/profile")"
 antigravity_native="$(cygpath -w "$ANTIGRAVITY_HOME" 2>/dev/null || echo "$ANTIGRAVITY_HOME")"
 if [[ "$PS_CROSS_BIN" == powershell.exe ]]; then
-  # Keep 5.1 alive long enough for its background cache writer to finish.
-  USERPROFILE="$profile_native" "$PS_CROSS_BIN" -NoProfile -Command '
+  "$PS_CROSS_BIN" -NoProfile -Command '
     if ($PSVersionTable.PSVersion.Major -ne 5 -or $PSVersionTable.PSVersion.Minor -ne 1) { exit 1 }
-    Get-Module -ListAvailable | Out-Null
-    $deadline = [DateTime]::UtcNow.AddSeconds(15)
-    until (Test-Path -LiteralPath $env:PSModuleAnalysisCachePath -PathType Leaf) {
-        if ([DateTime]::UtcNow -ge $deadline) { exit 1 }
-        Start-Sleep -Milliseconds 200
-    }
-  ' || fail 'Windows PowerShell 5.1 did not write its module cache to the requested scratch path'
+  ' || fail 'cross-installer check did not run under Windows PowerShell 5.1'
 fi
 locked_installer="$(cygpath -w "$REPO_ROOT/tests/fixtures/installer-parity-locked.ps1" 2>/dev/null || echo "$REPO_ROOT/tests/fixtures/installer-parity-locked.ps1")"
 "$PS_CROSS_BIN" -NoProfile -ExecutionPolicy Bypass -File "$locked_installer" -TestLockContract || fail 'parity lock contract failed'
