@@ -27,7 +27,10 @@ for line in sys.stdin:
              "isError": p["name"] == "bad"}
     print(json.dumps({"jsonrpc": "2.0", "id": m["id"], "result": r}), flush=True)
 FAKE
-L(){ printf '%s|%s|%s' "$PY" "$TMP/fake.py" "$1"; }
+FAKE_PY="$TMP/fake.py"
+# Native Windows Python cannot open a Git Bash /tmp path.
+command -v cygpath >/dev/null 2>&1 && FAKE_PY="$(cygpath -m "$FAKE_PY")"
+L(){ printf '%s|%s|%s' "$PY" "$FAKE_PY" "$1"; }
 
 out="$(AI_NAS_LAUNCHER="$(L ok)" "$SCRIPT" tools)"; rc=$?
 [ $rc -eq 0 ] && [ "$out" = "$(printf 'check_disk_space\tDisk')" ] && ok "tools lists names with first description line" || bad "tools: rc=$rc out=$out"
