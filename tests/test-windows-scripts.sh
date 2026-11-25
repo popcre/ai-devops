@@ -228,8 +228,8 @@ fi
 
 echo "== MCP catalog has explicit per-client membership =="
 if grep -q '\$McpServerCatalog\["chrome-devtools"\]' bin/setup-machine.ps1 &&
-   grep -Fq '$ClaudeCodeMcpNames = @("1password", "scaledown-migration-agent")' bin/setup-machine.ps1 &&
-   grep -Fq '$ClaudeDesktopMcpNames = @("1password", "playwright")' bin/setup-machine.ps1 &&
+   grep -Fq '$ClaudeCodeMcpNames = @("1password", "scaledown-migration-agent", "synology-monitor")' bin/setup-machine.ps1 &&
+   grep -Fq '$ClaudeDesktopMcpNames = @("1password", "playwright", "synology-monitor")' bin/setup-machine.ps1 &&
    grep -Fq 'if (-not $ClaudeCodeMcpServers.Contains($name))' bin/setup-machine.ps1 &&
    grep -Fq '@{ servers = $ClaudeDesktopMcpServers; managed = $ManagedMcpServerNames }' bin/setup-machine.ps1 &&
    grep -Fq 'if (-not $servers.ContainsKey($name)) { $null = $cfg["mcpServers"].Remove($name)' bin/sync-claude-desktop-mcp.ps1; then
@@ -254,7 +254,7 @@ done
 # ScaleDown's slm-agent skills are shared skills, so every coding client needs
 # their helper (#2791). Codex takes the whole catalog, so it needs no list row.
 for list in ClaudeCode ZCode Mimo Antigravity; do
-  if grep -Fq "\$${list}McpNames = @(\"1password\", \"scaledown-migration-agent\")" bin/setup-machine.ps1; then
+  if grep -Eq "^[\$]${list}McpNames = @[(]\"1password\", \"scaledown-migration-agent\"[,)]" bin/setup-machine.ps1; then
     ok "$list registers the ScaleDown helper"
   else bad "$list does not register the ScaleDown helper"; fi
 done

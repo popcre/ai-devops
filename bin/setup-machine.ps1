@@ -657,8 +657,12 @@ $ManagedMcpServerNames = @(@($McpServerCatalog.Keys) + $RetiredMcpServerNames)
 # scaledown-migration-agent is global in every coding client by owner request
 # (2026-11-23, #2791): the slm-agent skills are installed for all of them, and
 # the helper has no startup cost beyond one local node process.
-$ClaudeCodeMcpNames = @("1password", "scaledown-migration-agent")
-$ClaudeDesktopMcpNames = @("1password", "playwright")
+#
+# synology-monitor is global in both Claude clients by owner request
+# (2026-11-25): Albert wants the NAS connector in the desktop chat and in every
+# Claude Code session, not only inside the synology-monitor repository.
+$ClaudeCodeMcpNames = @("1password", "scaledown-migration-agent", "synology-monitor")
+$ClaudeDesktopMcpNames = @("1password", "playwright", "synology-monitor")
 # ZCode gets the same minimal default as Claude Code. The plan's illustrative
 # "@("1password","codex-cli")" predates PR #573 (2026-09-17), which suspended
 # the dormant codex-cli server from both Claude clients after transcript mining
@@ -688,7 +692,7 @@ $McpProjectScope = [ordered]@{
   "oracle"              = @("trigger", "vercel")
   "popdam3"             = @("railway", "chrome-devtools")
   "designflow-frontend" = @("ag-grid")
-  "synology-monitor"    = @("devops-mcp", "synology-monitor")
+  "synology-monitor"    = @("devops-mcp")
 }
 
 . (Join-Path $PSScriptRoot "repo-identity.ps1")

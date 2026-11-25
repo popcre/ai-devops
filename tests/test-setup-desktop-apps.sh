@@ -107,7 +107,7 @@ import json, sys
 p = json.load(sys.stdin)
 assert "recall-ai" in p["retired"] and "recall-ai" not in p["scoped"] + p["desktop"]
 assert p["scope"]["oracle"] == ["trigger", "vercel"] and "railway" in p["scope"]["popdam3"]
-assert {"ag-grid", "devops-mcp", "synology-monitor"} <= set(p["scoped"])
+assert {"ag-grid", "devops-mcp"} <= set(p["scoped"]) and "synology-monitor" not in p["scoped"]
 ' && ok "policy parsed from setup-machine.ps1" || bad "policy parse wrong"
 
 clones="$T/clones"; mkdir -p "$clones/theoracle"
