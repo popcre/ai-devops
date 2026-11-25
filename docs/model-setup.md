@@ -107,7 +107,22 @@ preservation), MCP servers in `~/.zcode/cli/config.json` via
   the copy from ZCode with ZCode's own per-skill switch in
   `~/.zcode/cli/config.json` (`bin/configure-zcode-skill-shadows.ps1`,
   [#2795](https://github.com/popcre/ai-devops/issues/2795)). Only the copy
-  under `~/.agents/skills` is switched off, and only for ZCode.
+  under `~/.agents/skills` is switched off, and only for ZCode. No setting
+  removes a skill root and no qualified name exists for a skill that is not a
+  plugin skill, so hiding the second copy is the only lever. The installer
+  never writes into `~/.agents/skills`: for it that root is a read-only
+  compatibility scan, and where the folder exists the toolkit did not make it
+  (on edge-dev it is a hand-made link to `~/.codex/skills`). Two accepted
+  limits, 2026-11-24: the switch is a vendor feature read from ZCode's own
+  code, not a published promise, so a future ZCode may ignore it (subagents
+  would then refuse bare names again; the install stage is a warning and the
+  install completes); and a retired toolkit skill that someone keeps under the
+  same name in `~/.agents/skills` stays switched off for ZCode after the
+  toolkit retires it, which was judged rare enough to leave as it is.
+- **Reading ZCode's own code:** its program file (`resources/glm/zcode.cjs`)
+  is about 16 MB with one line of about 2 MB. `grep -o -E ".{2600}<text>"`
+  over it ran past two minutes on 2026-11-24; a short Node script that reads
+  the file and prints a window around each match answered at once.
 
 - **Headless driving:** `ai-zcode ask "<prompt>"` — the governed wrapper
   (`bin/ai-zcode`). Never call the zcode.cjs bundle directly: without the
@@ -152,6 +167,16 @@ no config-file hook surface).
   headless fallback. Never pass `--yolo` / `--dangerously-skip-permissions`
   from caller input. Health: `ai-mimo doctor [--live]`.
 - **No MiMo reviewer.** Interactive client only (ZCode pattern).
+- **A doubled skill does not affect MiMo.** MiMo reads `~/.agents/skills` as
+  well as its own skills folder, but it keeps one entry per skill name and its
+  skill tool looks a skill up by that name, so a second copy changes nothing.
+  Read from its own runtime on 2026-11-24, so the question stays closed:
+  [#2827](https://github.com/popcre/ai-devops/issues/2827).
+- **Reading MiMo's own code:** its runtime ships as a `seed-runtime*.zip` in
+  its install folder (under `resources/runtime-res/seed`). Copy the archive
+  into an empty scratch folder, unpack and search it there, and run nothing
+  from it; the skill code sits in its `main/node-*.mjs` bundle
+  (`src/skill/index.ts`).
 - **Traps:** MCP `command` is an **array** of argv strings and the timeout key
   is `timeout` (ms), not ZCode's string command / `timeoutMs`; the atomic JSON
   writer does not preserve `//` comments in `mimocode.jsonc`; skills write root
