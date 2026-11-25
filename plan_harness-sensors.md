@@ -1,7 +1,7 @@
 ---
 summary: Plan for mechanical Claude Code checks — fix the swallowed hard block, proof-of-done, destructive-command guard (#2835)
 kind: plan
-status: complete
+status: done
 read-when: Changing ai-completion-check-hook or ai-pr-poll-guard-hook, or work on false "done" claims or destructive git commands
 ---
 
