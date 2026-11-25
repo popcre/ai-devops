@@ -1,5 +1,6 @@
 ---
 name: gemini-code-delegation
+disable-model-invocation: true
 description: "FROZEN 2026-10-13 (popcre/ai-devops#1714), legacy Gemini 3.8 Flash wrapper (`ai-gemini`) only. For current Antigravity + Gemini second opinions or reviews, use `ask-antigravity` (`ai-antigravity`)."
 ---
 

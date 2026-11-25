@@ -24,13 +24,14 @@ Skip it and the rest of ai-devops works normally — the submodule is opt-in.
 ## Backing up new transcripts
 Since 2026-09-27 new transcripts go to Albert's private Dropbox folder
 `ai\chat_transcripts\<machine>\`, uncompressed (see the
-`claude-transcript-backup` and `zcode/transcript-to-dropbox` skills; the
+`claude-transcript-backup` and `transcript-to-dropbox` skills; the
 latter carries the 2026-10-29 owner ruling for hetz). The private repository
 is a frozen historical archive — no new transcripts are added to it. Never
 put transcripts into ai-devops.
-`.gitignore` blocks `/claude_chats/` and `/codex_chats/` here on purpose. The
-transcript skills run `ai-transcript-destination-check` before copying; it
-accepts only the canonical private remote and rejects public or lookalike paths.
+`.gitignore` blocks `/claude_chats/` and `/codex_chats/` here on purpose.
+`ai-transcript-destination-check` guards only the frozen historical Git
+archive; active transcript skills target Dropbox `ai\chat_transcripts\<machine>\`
+only.
 
 ## Why
 Every credential that appeared in any transcript while this repo was public

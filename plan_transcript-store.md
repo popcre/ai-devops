@@ -39,7 +39,7 @@ remains, and a real Dropbox restore test passed. Counts-only acceptance:
 The edge-dev3 pull remains supported; its additional source files do not increase
 the distinct conversation count. Source: PRs #2377, #2378 and #2381.
 Installation and recovery instructions are in the
-[hetz transcript skill](skills/zcode/transcript-to-dropbox/SKILL.md).
+[hetz transcript skill](skills/shared/transcript-to-dropbox/SKILL.md).
 
 **Fresh-session entry:** all nine stages and the hetz follow-up are complete;
 do not repeat implementation or backfill. No next step or blocker remains on

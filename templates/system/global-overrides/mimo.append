@@ -14,5 +14,6 @@
 - **Headless driving:** `ai-mimo ask "<prompt>"` -- the governed wrapper. Never
   launch `Xiaomi MiMo AI.exe` (Desktop GUI) as a headless fallback. Never pass
   `--yolo` / `--dangerously-skip-permissions` from caller input.
-- **Transcripts:** SQLite `~/.local/share/mimocode/mimocode.db` -- back up and
-  mine by SQL with `mimo-transcript-backup` (private repo only).
+- **Transcripts:** SQLite `~/.local/share/mimocode/mimocode.db` -- mine a local
+  copy by SQL with `mimo-transcript-backup` (private Git repo frozen; daily
+  MiMo uploads stopped 2026-11-24).

@@ -1,35 +1,33 @@
 ---
 name: zcode-transcript-backup
-description: Back up ZCode's SQLite + rollout-JSONL session store to the PRIVATE repo u2giants/ai-devops-transcripts under zcode_chats/<machine>, and mine it by direct SQL query against the copy. Use when the user says "back up my ZCode transcripts/sessions" or asks to analyze ZCode usage (tools, tokens, sessions, prompts).
+disable-model-invocation: true
+description: Back up local ZCode session exports to Dropbox (bin/ai-transcript-upload or transcript-to-dropbox) and mine a COPY of ZCode's SQLite + rollout store by direct SQL (queries.md). The private Git transcript repo is frozen since 2026-09-27. Use when explicitly asked to mine ZCode SQLite/rollout logs or check ZCode Dropbox backups.
 ---
 
 # zcode-transcript-backup
 
-> **STOP — transcripts belong only in the private transcript repository.**
-> Before any copy, run `ai-transcript-destination-check <checkout>`. A missing
-> validator or nonzero result stops the backup.
->
-> **Exception (owner ruling 2026-10-29):** on `hetz`, ZCode transcripts go to
-> Dropbox instead — see `skills/zcode/transcript-to-dropbox`. Nothing from hetz
-> is pushed to the GitHub repo.
+> **Owner rule (Albert, 2026-09-27 / 2026-10-29):**
+> - `u2giants/ai-devops-transcripts` is a **frozen historical archive** (last upload 2026-09-27). Never add transcripts to it.
+> - Routine ZCode session exports go to **Dropbox** (`ai/chat_transcripts/<machine>/zcode/`): on active desktops via `bin/ai-transcript-upload` / `bin/ai-transcript-upload.ps1` (which exports filtered ZCode sessions only, never the raw SQLite database), and on `hetz` via [`transcript-to-dropbox`](../transcript-to-dropbox/SKILL.md).
 
 Unlike Claude and Codex, ZCode keeps its session history in a **relational
 SQLite store**, so this skill does NOT convert anything into a JSONL pile: it
-copies the store and queries it by SQL. Mining recipes live in
+copies the store locally and queries it by SQL. Mining recipes live in
 [`queries.md`](queries.md) next to this file.
 
-## Where the store lives (Windows)
+## Where the store lives (Windows / Linux)
 
 - `~/.zcode/cli/db/db.sqlite` — the session database, **plus its `-wal` and
   `-shm` sidecars** (a copy without them can be missing recent commits).
-- `~/.zcode/cli/rollout/model-io-sess_<uuid>.jsonl` — per-session raw model
-  I/O captures.
-- `~/.zcode/cli/exec/sess_<uuid>/` — tool-call logs (not usually part of the
-  backup; include on request).
+- `~/.zcode/cli/rollout/model-io-session_*.jsonl` and
+  `~/.zcode/cli/rollout/model-io-sess_*.jsonl` — per-session raw model I/O
+  captures.
+- `~/.zcode/cli/exec/sess_<uuid>/` — tool-call logs (not usually queried;
+  include on request).
 - `~/.zcode/cli/log/zcode-<date>.jsonl` — daily diagnostics (include on
   request only; they are large and rarely mined).
 
-## Backup procedure
+## Copy-and-inspect procedure
 
 1. **Dry run first (default):** report the count of sessions, the newest
    session title, the DB size, and the rollout-file count — WITHOUT copying:
@@ -43,27 +41,20 @@ copies the store and queries it by SQL. Mining recipes live in
    mkdir -p /tmp/zcode-backup-$USER && \
    cp ~/.zcode/cli/db/db.sqlite ~/.zcode/cli/db/db.sqlite-wal ~/.zcode/cli/db/db.sqlite-shm \
       /tmp/zcode-backup-$USER/ 2>/dev/null; \
-   cp ~/.zcode/cli/rollout/model-io-sess_*.jsonl /tmp/zcode-backup-$USER/ 2>/dev/null
+   cp ~/.zcode/cli/rollout/model-io-session_*.jsonl ~/.zcode/cli/rollout/model-io-sess_*.jsonl /tmp/zcode-backup-$USER/ 2>/dev/null
    ```
    Copying while ZCode is running is safe for a WAL-mode SQLite database, but
-   prefer running the backup with ZCode closed when convenient. Verify the
-   copy parses (`python -c "import sqlite3; con=sqlite3.connect(...)"` with a
-   trivial query) before pushing it anywhere.
-3. **Prove the destination:** clone/pull the PRIVATE
-   `u2giants/ai-devops-transcripts`, then run
-   `ai-transcript-destination-check <private-checkout>`. Only after PASS:
-4. **Copy into** `zcode_chats/<machine>/` (machine = short hostname), e.g.
-   `zcode_chats/<machine>/db/db.sqlite{,-wal,-shm}` and
-   `zcode_chats/<machine>/rollout/model-io-sess_*.jsonl`. Keep per-backup
-   snapshots in dated subfolders (`2026-09-17/`) rather than overwriting —
-   the database is cumulative and a dated trail shows growth.
-5. Commit and push to the private repo's `main`. Warn (don't block) on files
-   over GitHub's 50 MB soft limit; the DB can exceed it — if so, split the
-   push or suggest Git LFS to the owner.
-6. **Public-repo discipline:** nothing from the store is ever committed to
+   prefer copying with ZCode closed when convenient. Verify the copy parses
+   before querying it.
+3. **Dropbox session refresh (not raw DB):** to refresh filtered ZCode session
+   exports into `ai/chat_transcripts/<machine>/`, run `ai-transcript-upload`
+   (`ai-transcript-upload.ps1` on Windows), or follow
+   [`transcript-to-dropbox`](../transcript-to-dropbox/SKILL.md) on `hetz`. Never
+   push raw `db.sqlite` files to GitHub or upload dated DB snapshots to Dropbox.
+4. **Public-repo discipline:** nothing from the store is ever committed to
    `popcre/ai-devops` or any public repository, issue, log, or prompt. After a
-   run, `git status` in the public repo must be clean. This skill names the
-   private destination only.
+   run, `git status` in the public repo must be clean, and delete the temporary
+   `/tmp/zcode-backup-$USER` copy when done.
 
 ## Mining the copy
 
