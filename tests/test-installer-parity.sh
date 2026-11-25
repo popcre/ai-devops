@@ -8,7 +8,8 @@
 # with one and refreshed with the other sees phantom local edits and pointless
 # backups. The managed marker is the contract, so it is compared byte for byte.
 #
-# Skips (exit 0) when pwsh is not installed — Linux/macOS have one installer.
+# Runs wherever pwsh is installed, Linux CI included, and skips (exit 0) only
+# where it is not. Its ZCode part applies on Windows only.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -26,6 +27,18 @@ command -v powershell.exe >/dev/null 2>&1 && PS_CROSS_BIN=powershell.exe
 
 TMP_ROOT="$(mktemp -d)"
 trap 'rm -rf "$TMP_ROOT"' EXIT
+
+# The cross-installer runs below start Windows PowerShell 5.1 with a temporary
+# USERPROFILE. That edition then cannot find the user's Local Application Data
+# folder, so when it saves its module analysis cache the cache lands under the
+# folder this test was started from (Microsoft/Windows/PowerShell/
+# ModuleAnalysisCache). Naming the cache inside the temporary folder keeps it
+# there; an edition that does not read the variable keeps its usual cache
+# location. The starting folder is checked at the end of the run.
+module_cache_native="$(cygpath -w "$TMP_ROOT/ModuleAnalysisCache" 2>/dev/null || echo "$TMP_ROOT/ModuleAnalysisCache")"
+export PSModuleAnalysisCachePath="$module_cache_native"
+start_dir="$PWD"
+: > "$TMP_ROOT/started"
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
@@ -228,5 +241,11 @@ grep -Fq '= shared-one (shared) up to date' <<<"$out" || fail "PowerShell did no
 [[ -e "$TMP_ROOT/bash/claude/skills-backup" ]] && fail "cross-installer refresh made a backup"
 [[ "$PS_CROSS_BIN" != powershell.exe ]] || powershell.exe -NoProfile -Command '$PSVersionTable.PSVersion.Major' | tr -d '\r' | grep -qx 5 \
   || fail "cross-installer check did not run under Windows PowerShell 5.1"
+# Anything under a Microsoft folder in the starting folder written since this
+# run began is a PowerShell child's module analysis cache (see
+# PSModuleAnalysisCachePath above). An older one was left by an earlier run.
+if [ -e "$start_dir/Microsoft" ] && [ -n "$(find "$start_dir/Microsoft" -newer "$TMP_ROOT/started" -print -quit)" ]; then
+  fail 'the test left a Microsoft folder in the folder it was started from'
+fi
 
 echo "PASS: installer parity"
