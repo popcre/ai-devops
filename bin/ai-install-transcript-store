@@ -54,8 +54,20 @@ fi
 if (( check_only )); then
   rc=0
   [ -x "$inst_dir/ai-transcript-store-run" ] || { echo "ERROR $inst_dir/ai-transcript-store-run not installed"; rc=1; }
+  if [ -x "$inst_dir/ai-transcript-store-run" ]; then
+    cmp -s "$repo_root/bin/ai-transcript-store-run" "$inst_dir/ai-transcript-store-run" \
+      || { echo "ERROR installed ai-transcript-store-run differs from the checkout"; rc=1; }
+  fi
   diff -rq -x __pycache__ "$repo_root/tools/transcript_store" "$inst_dir/transcript_store" >/dev/null 2>&1 \
     || { echo "ERROR installed transcript_store differs from the checkout"; rc=1; }
+  diff -rq "$repo_root/skills" "$inst_dir/repo-snapshot/skills" >/dev/null 2>&1 \
+    || { echo "ERROR installed repo-snapshot skills differ from the checkout"; rc=1; }
+  for cfg in skill-scope.json skill-trigger-policy.json; do
+    if [ -f "$repo_root/config/$cfg" ]; then
+      cmp -s "$repo_root/config/$cfg" "$inst_dir/repo-snapshot/config/$cfg" \
+        || { echo "ERROR installed repo-snapshot $cfg differs from the checkout"; rc=1; }
+    fi
+  done
   if (( key )); then
     [ -s "$key_store" ] && [ "$(stat -c %a "$key_store")" = 600 ] || { echo "ERROR ScaleDown key store missing or not owner-only"; rc=1; }
   fi
@@ -67,10 +79,34 @@ if (( check_only )); then
 fi
 
 mkdir -p "$inst_dir"
-rm -rf "$inst_dir/transcript_store.new"
+rm -rf "$inst_dir/transcript_store.new" "$inst_dir/transcript_store.old"
 cp -r "$repo_root/tools/transcript_store" "$inst_dir/transcript_store.new" || exit 1
-rm -rf "$inst_dir/transcript_store.new/__pycache__" "$inst_dir/transcript_store"
-mv "$inst_dir/transcript_store.new" "$inst_dir/transcript_store" || exit 1
+rm -rf "$inst_dir/transcript_store.new/__pycache__"
+if [ -e "$inst_dir/transcript_store" ]; then
+  mv "$inst_dir/transcript_store" "$inst_dir/transcript_store.old" || exit 1
+fi
+if ! mv "$inst_dir/transcript_store.new" "$inst_dir/transcript_store"; then
+  [ -e "$inst_dir/transcript_store.old" ] && mv "$inst_dir/transcript_store.old" "$inst_dir/transcript_store"
+  exit 1
+fi
+rm -rf "$inst_dir/transcript_store.old"
+
+rm -rf "$inst_dir/repo-snapshot.new" "$inst_dir/repo-snapshot.old"
+mkdir -p "$inst_dir/repo-snapshot.new/skills" "$inst_dir/repo-snapshot.new/config" || exit 1
+cp -r "$repo_root/skills/." "$inst_dir/repo-snapshot.new/skills/" || exit 1
+for cfg in skill-scope.json skill-trigger-policy.json; do
+  [ -f "$repo_root/config/$cfg" ] && cp "$repo_root/config/$cfg" "$inst_dir/repo-snapshot.new/config/$cfg"
+done
+git -C "$repo_root" rev-parse --short HEAD 2>/dev/null > "$inst_dir/repo-snapshot.new/.source-commit" || echo unknown > "$inst_dir/repo-snapshot.new/.source-commit"
+if [ -e "$inst_dir/repo-snapshot" ]; then
+  mv "$inst_dir/repo-snapshot" "$inst_dir/repo-snapshot.old" || exit 1
+fi
+if ! mv "$inst_dir/repo-snapshot.new" "$inst_dir/repo-snapshot"; then
+  [ -e "$inst_dir/repo-snapshot.old" ] && mv "$inst_dir/repo-snapshot.old" "$inst_dir/repo-snapshot"
+  exit 1
+fi
+rm -rf "$inst_dir/repo-snapshot.old"
+
 cp "$repo_root/bin/ai-transcript-store-run" "$inst_dir/ai-transcript-store-run" || exit 1
 chmod +x "$inst_dir/ai-transcript-store-run"
 echo "OK writer copied to $inst_dir"

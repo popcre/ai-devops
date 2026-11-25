@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import json
 import os
 import re
 import socket
@@ -185,6 +186,30 @@ def add_labels(src: Path, inbox: Path, host: str | None = None, now: dt.datetime
     return dest
 
 
+def skill_alert_line(store_root: Path) -> str | None:
+    """One-line counts-only summary of the daily private skill-bypass check."""
+    p = store_root / "reports" / "skill-alerts-latest.json"
+    if not p.is_file():
+        return None
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    checked = data.get("checked") or "unknown"
+    active = data.get("active_alerts")
+    if not isinstance(active, list):
+        return None
+    if not active:
+        return f"skill check ({checked}): 0 active alerts"
+    items = ", ".join(
+        f"{a['skill']} ({a['sessions']} sessions)"
+        for a in active if isinstance(a, dict) and "skill" in a and "sessions" in a
+    )
+    return f"skill check ({checked}): {len(active)} active alert(s): {items} (details in private reports/)"
+
+
 # ---------------------------------------------------------------- main
 
 def main(argv=None) -> int:
@@ -226,6 +251,10 @@ def main(argv=None) -> int:
             now = parse_ts(a.now) if a.now else None
             print(f"store: {info.source}" + ("  (FALLBACK: current version did not verify)" if info.fallback else ""))
             print("\n".join(stats(conn, now)))
+            alert_line = skill_alert_line(root)
+            if alert_line:
+                print("")
+                print(alert_line)
         elif a.raw:
             archive = Path(os.environ.get("AI_TRANSCRIPT_ARCHIVE") or root.parent / "chat_transcripts")
             print("\n".join(raw_pointer(conn, a.raw, archive)))
