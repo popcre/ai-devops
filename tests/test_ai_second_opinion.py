@@ -399,5 +399,74 @@ class AntigravitySecondOpinion(unittest.TestCase):
         self.assertEqual(r.returncode, 3)
 
 
+CODEX_FAKE = textwrap.dedent("""\
+    #!/usr/bin/env python3
+    import json, os, sys
+    state = os.environ["AI_REVIEW_SIMPLE_FAKE_STATE"]
+    prompt = sys.stdin.read()
+    args = sys.argv[1:]
+    with open(os.path.join(state, "codex-calls.jsonl"), "a") as fh:
+        fh.write(json.dumps({"args": args, "prompt": prompt, "cwd": os.getcwd()}) + "\\n")
+    mode = open(os.path.join(state, "mode")).read().strip() if os.path.exists(os.path.join(state, "mode")) else "ok"
+    print(json.dumps({"type": "thread.started", "thread_id": "th_fake1"}))
+    print(json.dumps({"type": "item.completed", "item": {"type": "agent_message", "text": "CODEX: " + prompt.splitlines()[-1]}}))
+    if mode == "fail":
+        print(json.dumps({"type": "turn.failed", "error": {"message": "usage limit"}}))
+        sys.exit(1)
+    if mode == "write":
+        open("CODEX_NEW.txt", "w").write("x\\n")
+    print(json.dumps({"type": "turn.completed", "usage": {}}))
+""")
+
+
+class CodexSecondOpinion(AntigravitySecondOpinion):
+    def setUp(self):
+        super().setUp()
+        fake = os.path.join(self.tmp, "codex")
+        with open(fake, "w") as fh:
+            fh.write(CODEX_FAKE)
+        os.chmod(fake, 0o755)
+        self.env["AI_REVIEW_SIMPLE_CODEX"] = fake
+
+    def calls(self):
+        with open(os.path.join(self.state, "codex-calls.jsonl")) as fh:
+            return [json.loads(x) for x in fh]
+
+    def test_named_session_resumes_conversation(self):
+        r1 = self.run_tool("codex", "new", "s1", "first question")
+        self.assertEqual(r1.returncode, 0, r1.stderr)
+        self.assertIn("CODEX: first question", r1.stdout)
+        r2 = self.run_tool("codex", "ask", "s1", "follow up")
+        self.assertEqual(r2.returncode, 0, r2.stderr)
+        first, second = self.calls()
+        self.assertIn('sandbox_mode="read-only"', first["args"])
+        self.assertEqual(second["args"][:2], ["exec", "resume"])
+        self.assertIn("th_fake1", second["args"])
+        self.assertFalse(any("dangerously" in a for a in first["args"] + second["args"]))
+
+    test_implement_uses_accept_edits_and_returns_diff = None  # Antigravity-only
+
+    def test_implement_uses_private_writable_copy(self):
+        with open(os.path.join(self.state, "mode"), "w") as fh:
+            fh.write("write")
+        r = self.run_tool("codex", "implement", "imp1", "add file")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("CODEX_NEW.txt", r.stdout)
+        self.assertFalse(os.path.exists(os.path.join(self.repo, "CODEX_NEW.txt")))
+        self.assertIn('sandbox_mode="workspace-write"', self.calls()[0]["args"])
+
+    def test_failed_turn_is_unavailable(self):
+        with open(os.path.join(self.state, "mode"), "w") as fh:
+            fh.write("fail")
+        r = self.run_tool("codex", "ask", "hello")
+        self.assertEqual(r.returncode, 3)
+
+    def test_doctor_and_store_key_and_auth_error(self):
+        r = self.run_tool("codex", "store-key")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        r = self.run_tool("codex", "doctor")
+        self.assertIn("doctor: OK", r.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()

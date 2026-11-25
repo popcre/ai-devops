@@ -93,6 +93,13 @@ PROVIDERS = {
         "key_file": None, "key_env": None, "override": None,
         "timeout": 1200, "provider": None,
     },
+    # Second opinions only (ask-codex); never in ROTATION, so never a CI reviewer.
+    "codex": {
+        "engine": "codex",
+        "model": os.environ.get("AI_CODEX_MODEL") or "",
+        "key_file": None, "key_env": None, "override": None,
+        "timeout": 1200, "provider": None,
+    },
 }
 
 # Candidate reviewer entries built from the shared route registry
@@ -360,6 +367,14 @@ AGY_READONLY_RULE = (
     " (pipes between them are fine; no output redirection). Any other shell "
     "command is refused automatically and ends your turn with no answer.\n\n"
 )
+
+
+def resolve_codex():
+    """The OpenAI Codex CLI: explicit override, then PATH (never a hardcoded junction path)."""
+    override = os.environ.get("AI_REVIEW_SIMPLE_CODEX")
+    if override:
+        return override if os.path.isfile(override) else None
+    return shutil.which("codex")
 
 
 def resolve_antigravity():
@@ -1005,7 +1020,7 @@ def render_comment(summary, head):
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="ai-review-simple", description=__doc__.split("\n")[0])
     ap.add_argument("--combine", nargs="+", metavar="JSON")
-    ap.add_argument("--provider", choices=sorted(PROVIDERS))
+    ap.add_argument("--provider", choices=sorted(p for p in PROVIDERS if p != "codex"))
     ap.add_argument("--route", choices=sorted(RR.routes()),
                     help="candidate route (opt-in, #2549/#2550); overrides the provider spec")
     ap.add_argument("--repo", default=".")

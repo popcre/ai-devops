@@ -22,6 +22,14 @@ for heading in "Goal" "Disputed claim" "Other model's reasoning" \
 done
 check "template requires current path re-read" "grep -qi 're-read.*current' '$TEMPLATE'"
 check "GLM skill uses shared template" "grep -Fq 'templates/delegation/debate-turn.md' '$GLM_SKILL'"
+# Every ask-* second-opinion skill debates by default (commit first, rebut, verdict).
+for ask in "$REPO_ROOT"/skills/shared/ask-*/SKILL.md; do
+  n="$(basename "$(dirname "$ask")")"
+  check "$n debates by default" "grep -Fqx '## Debate is the default' '$ask'"
+  check "$n commits its own position first" "grep -Fq 'Commit to your own position first' '$ask'"
+  check "$n caps rebuttals at two rounds" "grep -Fq 'Cap at two rounds' '$ask'"
+  check "$n uses the shared debate template" "grep -Fq 'templates/delegation/debate-turn.md' '$ask'"
+done
 
 printf 'test-delegation-templates: %s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
