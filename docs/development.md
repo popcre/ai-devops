@@ -485,6 +485,24 @@ bugs the PR-section path can miss. Patterns that have already cost a day
   (`test-ai-task-gates-linux-install.sh`, `test-linux-install-authorization.sh`)
   must `exit 0` with a skip reason on non-Linux rather than call a
   "Linux-only" route and fail.
+- **The Windows installer also runs on Linux CI.** Linux has `pwsh`, and
+  `tests/test-installer-parity.sh` runs `bin/install-ai-devops-windows.ps1`
+  there. A stage that needs Windows must stand down elsewhere and say so
+  (#2805).
+- **Two PowerShell editions spell one path two ways.** Windows PowerShell 5.1
+  spells short (8.3) folder names out in `[IO.Path]::GetFullPath`; PowerShell 7
+  keeps them. Anything written into a file from a path needs one normalization
+  for both editions, or machines updated by both rewrite that file on every
+  alternation (#2805).
+- **`bin/windows-json-file.ps1` needs PowerShell 7.** The Windows installer
+  must stay usable by Windows PowerShell 5.1, so its stages cannot use it;
+  they write JSON with means that exist in both editions (#2805).
+- **Small traps met while testing a PowerShell stage (#2805).** PowerShell
+  variable names ignore case, so `$home` cannot be assigned (`$HOME` is
+  read-only); `"$Path:"` inside a double-quoted string parses as a drive
+  variable (write `${Path}:`); a helper that returns one item yields a bare
+  string, not an array (return `,@(...)`); and in `jq`, `a // b` yields `b`
+  when `a` is `false` (use `-e '.x == false'`).
 
 Do not paper these over with blanket skips of whole suites. Platform-correct
 skips with a named reason are fine; dropping coverage is not.
@@ -520,7 +538,10 @@ recoverable.
 `tests/test-installer-parity.sh` runs BOTH installers against one fixture and
 compares the result: same files, byte-identical `.ai-devops-managed` markers, and
 no phantom "local edits" when one installer refreshes the other's install. It
-skips itself where `pwsh` is not installed. It is slower than the rest because it
+runs wherever `pwsh` is installed, Linux CI included, and skips itself where
+`pwsh` is not installed. On Windows it drives the PowerShell side with Windows
+PowerShell 5.1 wherever that edition exists, because that is the runtime the
+documented install command uses. It is slower than the rest because it
 hashes every installed file twice.
 
 `tests/test-codex-trigger-eval.sh` is offline and calls no model. It pins the

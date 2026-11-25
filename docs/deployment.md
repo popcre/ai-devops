@@ -604,6 +604,18 @@ Field notes from the 2026-10-06 edge-dev3 recovery (verified, not theory):
 Without that exact reviewed evidence, the updater stops before changing the
 installed checkout.
 
+**Update a Windows machine from another computer (verified 2026-11-24 on two
+machines, #2830).** Reach it over its SSH alias. On that machine, in Git Bash:
+fetch `origin main` in the installed checkout, add a candidate worktree at the
+installed commit, record the installation task from the candidate, move only
+the candidate to the merged target, and run the same gate check with that
+machine's checkout and launcher paths. A process started from the SSH session
+dies with it, so start the installer through WMI (`Invoke-CimMethod
+Win32_Process -MethodName Create`): that process outlives the session and
+receives the user's own environment. Read its log later, then compare the
+installed commit, the launcher stamp and `ai-review-preflight status` with a
+snapshot taken before, and remove the candidate and the task.
+
 Reviewer hosts do not need `update.sh` for requalification: the managed
 `post-merge` hook runs `ai-review-preflight requalify` on every pull whose
 result is on `origin/main` (development-branch merges are skipped). The two
