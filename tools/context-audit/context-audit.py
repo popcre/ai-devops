@@ -6,11 +6,12 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import re
 import subprocess
 import sys
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -563,6 +564,83 @@ def shingles(text: str) -> set[tuple[str, ...]]:
     return {tuple(words[i:i + SHINGLE_WORDS]) for i in range(len(words) - SHINGLE_WORDS + 1)}
 
 
+SKILL_OVERLAP_STOP = set("""
+about above after again against also because been before being below between both
+could does doing down during each from further have having here into itself just
+more most only other ours over same should some such than that their theirs them
+then there these they this those through under until very what when where which
+while will with would your yours""".split())
+SKILL_WORD_RE = re.compile(r"[a-z][a-z0-9]{3,}")
+QUOTED_PHRASE_RE = re.compile(r'"([^"\n]{4,120})"|\'([^\'\n]{4,120})\'')
+
+
+def _skill_words(text: str) -> list[str]:
+    return [w for w in SKILL_WORD_RE.findall((text or "").lower()) if w not in SKILL_OVERLAP_STOP]
+
+
+def _quoted_phrases(text: str) -> set[str]:
+    phrases = set()
+    for g1, g2 in QUOTED_PHRASE_RE.findall(text or ""):
+        raw = " ".join((g1 or g2).lower().split())
+        if len(raw.split()) >= 2:
+            phrases.add(raw)
+    return phrases
+
+
+def _mentions_skill(desc: str, skill_name: str) -> bool:
+    if not skill_name:
+        return False
+    return bool(re.search(rf"(?<![a-z0-9-]){re.escape(skill_name.lower())}(?![a-z0-9-])", (desc or "").lower()))
+
+
+def skill_description_overlap(manifests: dict) -> list[dict]:
+    """Advisory check for model-invocable skill descriptions that overlap."""
+    by_name: dict[str, dict] = {}
+    for client in ("claude", "codex"):
+        for entry in manifests.get(client, []):
+            if entry.get("description") and entry["name"] not in by_name:
+                by_name[entry["name"]] = entry
+    skills = [by_name[k] for k in sorted(by_name)]
+    if len(skills) < 2:
+        return []
+
+    toks = [_skill_words(s["description"]) for s in skills]
+    df: Counter[str] = Counter()
+    for tk in toks:
+        df.update(set(tk))
+    n = len(skills)
+    vecs = []
+    for tk in toks:
+        tf = Counter(tk)
+        v = {w: (1.0 + math.log(c)) * (math.log((n + 1) / (df[w] + 1)) + 1.0) for w, c in tf.items()}
+        norm = math.sqrt(sum(x * x for x in v.values())) or 1.0
+        vecs.append({w: x / norm for w, x in v.items()})
+    quoted = [_quoted_phrases(s["description"]) for s in skills]
+
+    overlaps = []
+    for i in range(len(skills)):
+        for j in range(i + 1, len(skills)):
+            a, b = skills[i], skills[j]
+            va, vb = vecs[i], vecs[j]
+            if len(va) > len(vb):
+                va, vb = vb, va
+            score = sum(x * vb.get(w, 0.0) for w, x in va.items())
+            shared_quoted = sorted(quoted[i] & quoted[j])
+            cross_ref = _mentions_skill(a["description"], b["name"]) or _mentions_skill(b["description"], a["name"])
+            if score >= 0.5 or (shared_quoted and not cross_ref):
+                overlaps.append({
+                    "skillA": a["name"],
+                    "skillB": b["name"],
+                    "score": round(score, 3),
+                    "sharedQuotedPhrases": shared_quoted,
+                    "reason": (
+                        f"model-invocable skills '{a['name']}' and '{b['name']}' overlap in trigger "
+                        f"description (cosine={round(score, 3)}, sharedQuoted={len(shared_quoted)})."
+                    ),
+                })
+    return overlaps
+
+
 def global_skill_overlap(global_texts: dict[str, str], manifests: dict) -> list[dict]:
     """Report ritual summaries in an always-loaded global that repeat a skill description.
 
@@ -737,6 +815,7 @@ def run(args: argparse.Namespace) -> dict:
         "budgets": budget_section,
         "crossClientParity": parity,
         "globalSkillOverlap": global_skill_overlap(global_texts, manifests),
+        "skillDescriptionOverlap": skill_description_overlap(manifests),
         "excludedPathClasses": sorted(EXCLUDED_PARTS) + ["secret file suffixes", "network roots"],
     }
     return report
@@ -781,6 +860,7 @@ def summary(report: dict) -> str:
         f"missing safety markers: {len(report['safetyMarkerIssues'])}",
         f"cross-client parity mismatches: {len(report['crossClientParity']['mismatches'])}",
         f"global vs skill-description overlaps: {len(report['globalSkillOverlap'])}",
+        f"skill vs skill description overlaps: {len(report.get('skillDescriptionOverlap', []))}",
         f"budget warnings: {report['budgets']['warnings']} (warnings only, never a failure)",
         f"open handoffs: {len(report['openHandoffs'])} (a count, never a finding — see #658)",
     ])
@@ -809,6 +889,8 @@ def summary(report: dict) -> str:
             f"OVERLAP: {item['reason']} Shared phrases: {item['sharedPhrases']}; "
             f"example: \"{item['examplePhrase']}\"."
         )
+    for item in report.get("skillDescriptionOverlap", []):
+        lines.append(f"SKILL OVERLAP: {item['reason']}")
     return "\n".join(lines) + "\n"
 
 

@@ -19,13 +19,36 @@ IFS= read -r SCALEDOWN_API_KEY < "$key_store" || true
 export SCALEDOWN_API_KEY
 # Single writer: a run (daily timer or the backfill) holds this lock; a second
 # start while one is running skips instead of writing the same database.
+command -v flock >/dev/null 2>&1 || { echo "ERROR flock not found" >&2; exit 1; }
 lock="${AI_TRANSCRIPT_STORE_LOCK:-$HOME/.local/share/ai-devops/transcript-store/writer.lock}"
 mkdir -p "$(dirname "$lock")"
 exec 9>"$lock"
 if ! flock -n 9; then echo "SKIP another transcript-store writer is running"; exit 0; fi
+skip_mine=0
+[ "${AI_TRANSCRIPT_STORE_SKIP_MINE:-0}" = "1" ] && skip_mine=1
+for arg in "$@"; do
+  case "$arg" in
+    --no-publish|--relabel|--stats|--import-labels) skip_mine=1 ;;
+  esac
+done
 "$python" "$tools/build.py" "$@" > "$log" 2> "$log_dir/run-$stamp.err"
 rc=$?
+exec 9>&-
+unset SCALEDOWN_API_KEY
+if [ "$rc" -eq 0 ] && [ "$skip_mine" -eq 0 ]; then
+  mine_repo="${AI_TRANSCRIPT_STORE_REPO_ROOT:-$here/repo-snapshot}"
+  if [ ! -d "$mine_repo/skills" ] && [ -d "$here/../skills" ]; then
+    mine_repo="$here/.."
+  fi
+  mine_db="${AI_TRANSCRIPT_STORE_DB:-$HOME/.local/share/ai-devops/transcript-store/store.db}"
+  mine_log="$log_dir/mine-$stamp.log"
+  mine_args=(skill-bypass --db "$mine_db" --repo-root "$mine_repo" --since-days 30 --min-sessions 3 --delta)
+  [ -n "${AI_TRANSCRIPT_STORE_ROOT:-}" ] && mine_args+=(--store-root "$AI_TRANSCRIPT_STORE_ROOT")
+  "$python" "$tools/mine.py" "${mine_args[@]}" > "$mine_log" 2>&1
+  mine_rc=$?
+  echo "transcript-store mine rc=$mine_rc log=$mine_log"
+fi
 # keep a year of run logs
-find "$log_dir" -maxdepth 1 -name 'run-*' -mtime +365 -delete 2>/dev/null || true
+find "$log_dir" -maxdepth 1 \( -name 'run-*' -o -name 'mine-*' \) -mtime +365 -delete 2>/dev/null || true
 echo "transcript-store run rc=$rc log=$log"
 exit "$rc"

@@ -211,6 +211,138 @@ class TestMine(Base):
         self.assertIn("pdf work", body)
         self.assertNotIn("SECRETWORD", body)
 
+    def test_frontmatter_parses_folded_block_scalar(self):
+        sk = self.root / "skills" / "shared" / "folded-skill"
+        sk.mkdir(parents=True)
+        (sk / "SKILL.md").write_text(
+            "---\nname: folded-skill\ndescription: >-\n  First folded line\n  second folded line.\n---\nbody\n"
+        )
+        skills = {s["name"]: s for s in mine.load_skills(self.root)}
+        self.assertEqual(skills["folded-skill"]["description"], "First folded line second folded line.")
+
+    def test_main_fails_loudly_when_skills_or_bullets_missing(self):
+        empty_root = self.tmp / "empty-toolkit"
+        empty_root.mkdir()
+        make_store(self.tmp / "s.db", self.filler()).close()
+        out = self.tmp / "reports"
+        rc = mine.main(["skill-bypass", "--db", str(self.tmp / "s.db"), "--reports", str(out),
+                        "--cache", str(self.tmp / "c.db"), "--repo-root", str(empty_root)])
+        self.assertEqual(rc, 2)
+        rc2 = mine.main(["instructions", "--db", str(self.tmp / "s.db"), "--reports", str(out),
+                         "--cache", str(self.tmp / "c.db"), "--repo-root", str(empty_root)])
+        self.assertEqual(rc2, 2)
+
+    def test_triggers_runs_without_store(self):
+        out = self.tmp / "reports"
+        rc = mine.main(["triggers", "--store-root", str(self.tmp / "nonexistent-store"),
+                        "--reports", str(out), "--cache", str(self.tmp / "c.db"),
+                        "--repo-root", str(self.root), "--date", "2026-10-30"])
+        self.assertEqual(rc, 0)
+        self.assertIn("pdf-merge <> pdf-split", (out / "triggers-2026-10-30.md").read_text())
+
+    def test_skill_bypass_window_manual_only_and_scope(self):
+        sk = self.root / "skills" / "shared"
+        (sk / "manual-pdf").mkdir(parents=True)
+        (sk / "manual-pdf" / "SKILL.md").write_text(
+            "---\nname: manual-pdf\ndisable-model-invocation: true\n"
+            "description: Merge combine split rotate watermark pdf documents pages\n---\nbody\n"
+        )
+        (sk / "scoped-licensor").mkdir(parents=True)
+        (sk / "scoped-licensor" / "SKILL.md").write_text(
+            "---\nname: scoped-licensor\ndescription: Capture disney character guide metadata\n---\nbody\n"
+        )
+        cfg = self.root / "config"
+        cfg.mkdir(exist_ok=True)
+        (cfg / "skill-scope.json").write_text(json.dumps({"skills": {"scoped-licensor": ["licensor-source-data"]}}))
+        (cfg / "skill-trigger-policy.json").write_text(json.dumps({"protected_skills": ["pdf-merge"]}))
+        segs = [
+            ("pdf old", "merge split rotate watermark pdf documents pages", "demo", OLD, ["Bash"]),
+            ("pdf recent", "merge split rotate watermark pdf documents pages", "demo", RECENT, ["Bash"]),
+            ("licensor outside", "capture disney character guide metadata", "demo", RECENT, ["Bash"]),
+            ("licensor inside", "capture disney character guide metadata", "licensor-source-data-disney", RECENT, ["Bash"]),
+        ] + self.filler()
+        conn = make_store(self.tmp / "s.db", segs)
+        flags, stats = mine.check_skill_bypass(mine.segments(conn), self.ctx(conn), 0.35, since_days=30)
+        objs = {(f["segment"], f["skill"]): f for f in flags}
+        self.assertIn(("g1", "pdf-merge"), objs)
+        self.assertTrue(objs[("g1", "pdf-merge")]["protected"])
+        self.assertNotIn(("g0", "pdf-merge"), objs)  # outside 30-day window
+        self.assertFalse(any(f["skill"] == "manual-pdf" for f in flags))
+        self.assertNotIn(("g2", "scoped-licensor"), objs)  # wrong repo
+        self.assertIn(("g3", "scoped-licensor"), objs)     # matching scoped repo prefix
+        self.assertEqual(stats["distinct_sessions"], 2)
+
+    def test_skill_bypass_delta_alerts_distinct_sessions_and_episode_reset(self):
+        cfg = self.root / "config"
+        cfg.mkdir(exist_ok=True)
+        (cfg / "skill-trigger-policy.json").write_text(json.dumps({"protected_skills": ["pdf-merge"]}))
+        text = "merge split rotate watermark pdf documents pages"
+        out = self.tmp / "reports"
+        cache = self.tmp / "c.db"
+
+        # 3 segments in ONE session path must NOT cross min-sessions=3
+        conn = sqlite3.connect(self.tmp / "s1.db")
+        conn.executescript(build.SCHEMA)
+        conn.execute("INSERT INTO sessions (path, first_ts, last_ts, repo) VALUES (?,?,?,?)",
+                     ("m/same.jsonl", OLD, RECENT, "demo"))
+        conn.execute("INSERT INTO chunks (chunk_id, path, tool_seq_json) VALUES (?,?,?)", ("c0", "m/same.jsonl", '["Bash"]'))
+        for i in range(3):
+            conn.execute("INSERT INTO segments (id, chunk_id, section_no, path, subject, repo, text) VALUES (?,?,?,?,?,?,?)",
+                         (f"s{i}", "c0", i, "m/same.jsonl", "SENSITIVE SUBJECT", "demo", text))
+        for i, (subj, body, repo, ts, tools) in enumerate(self.filler()):
+            conn.execute("INSERT INTO sessions (path, first_ts, last_ts, repo) VALUES (?,?,?,?)",
+                         (f"m/f{i}.jsonl", OLD, ts, repo))
+            conn.execute("INSERT INTO chunks (chunk_id, path, tool_seq_json) VALUES (?,?,?)", (f"fc{i}", f"m/f{i}.jsonl", json.dumps(tools)))
+            conn.execute("INSERT INTO segments (id, chunk_id, section_no, path, subject, repo, text) VALUES (?,?,?,?,?,?,?)",
+                         (f"fg{i}", f"fc{i}", 0, f"m/f{i}.jsonl", subj, repo, body))
+        conn.commit()
+        conn.close()
+
+        rc = mine.main(["skill-bypass", "--db", str(self.tmp / "s1.db"), "--reports", str(out), "--cache", str(cache),
+                        "--repo-root", str(self.root), "--since-days", "30", "--min-sessions", "3", "--delta",
+                        "--now", NOW.isoformat(), "--date", "2026-10-30"])
+        self.assertEqual(rc, 0)
+        self.assertFalse((out / "skill-bypass-2026-10-30.md").exists())
+        alerts = json.loads((out / "skill-alerts-latest.json").read_text())
+        self.assertEqual(alerts["active_alerts"], [])
+        self.assertEqual(alerts["new_alerts"], [])
+
+        # 3 distinct sessions triggers once, writes privacy-safe JSON + dated report
+        segs3 = [("SENSITIVE SUBJECT", text + " UNIQUE_SECRET", "demo", RECENT, ["Bash"]) for _ in range(3)] + self.filler()
+        make_store(self.tmp / "s3.db", segs3).close()
+        rc = mine.main(["skill-bypass", "--db", str(self.tmp / "s3.db"), "--reports", str(out), "--cache", str(cache),
+                        "--repo-root", str(self.root), "--since-days", "30", "--min-sessions", "3", "--delta",
+                        "--now", NOW.isoformat(), "--date", "2026-10-31"])
+        self.assertEqual(rc, 0)
+        self.assertTrue((out / "skill-bypass-2026-10-31.md").exists())
+        raw_json = (out / "skill-alerts-latest.json").read_text()
+        self.assertNotIn("SENSITIVE SUBJECT", raw_json)
+        self.assertNotIn("UNIQUE_SECRET", raw_json)
+        alerts2 = json.loads(raw_json)
+        self.assertEqual([a["skill"] for a in alerts2["new_alerts"]], ["pdf-merge", "pdf-split"])
+        self.assertTrue(next(a for a in alerts2["active_alerts"] if a["skill"] == "pdf-merge")["protected"])
+
+        # Repeat run while still active emits no new dated report
+        rc = mine.main(["skill-bypass", "--db", str(self.tmp / "s3.db"), "--reports", str(out), "--cache", str(cache),
+                        "--repo-root", str(self.root), "--since-days", "30", "--min-sessions", "3", "--delta",
+                        "--now", NOW.isoformat(), "--date", "2026-11-01"])
+        self.assertEqual(rc, 0)
+        self.assertFalse((out / "skill-bypass-2026-11-01.md").exists())
+        alerts3 = json.loads((out / "skill-alerts-latest.json").read_text())
+        self.assertEqual(alerts3["new_alerts"], [])
+        self.assertEqual(len(alerts3["active_alerts"]), 2)
+
+        # Drop below threshold clears episode, then recurring alerts again
+        rc = mine.main(["skill-bypass", "--db", str(self.tmp / "s1.db"), "--reports", str(out), "--cache", str(cache),
+                        "--repo-root", str(self.root), "--since-days", "30", "--min-sessions", "3", "--delta",
+                        "--now", NOW.isoformat(), "--date", "2026-11-02"])
+        self.assertEqual(rc, 0)
+        rc = mine.main(["skill-bypass", "--db", str(self.tmp / "s3.db"), "--reports", str(out), "--cache", str(cache),
+                        "--repo-root", str(self.root), "--since-days", "30", "--min-sessions", "3", "--delta",
+                        "--now", NOW.isoformat(), "--date", "2026-11-03"])
+        self.assertEqual(rc, 0)
+        self.assertTrue((out / "skill-bypass-2026-11-03.md").exists())
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=1)

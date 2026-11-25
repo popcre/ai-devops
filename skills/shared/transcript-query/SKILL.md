@@ -19,7 +19,8 @@ topic-labelled segments, published to Dropbox `ai/transcript-store/`. Plan:
      nothing new), `UPLOAD-BROKEN` (report old, missing or with errors),
      `INGEST-LAG` (uploaded files not yet in the store), `ARCHIVE-ONLY` (no live
      uploader) or `UNKNOWN` (writer has not checked recently). Report only
-     `UPLOAD-BROKEN`, `INGEST-LAG` and `UNKNOWN` as problems.
+     `UPLOAD-BROKEN`, `INGEST-LAG` and `UNKNOWN` as problems. `--stats` also
+     displays any active counts from the daily private skill-bypass check.
 2. **Raw transcripts only for drill-down, only through the pointer:**
    `--raw <segment id>` prints the raw file path in your own Dropbox archive
    and the turn range. Run `ai-task-gates start --class private-evidence`

@@ -15,6 +15,7 @@ import argparse
 import datetime as dt
 import json
 import math
+import os
 import re
 import sqlite3
 import subprocess
@@ -88,14 +89,14 @@ def parse_ts(s) -> dt.datetime | None:
 def segments(conn: sqlite3.Connection) -> list[dict]:
     """Segments with their chunk tool sequence and session end time."""
     rows = conn.execute(
-        "SELECT s.id, s.subject, s.text, s.repo, s.topic_slugs, c.tool_seq_json, se.last_ts, se.first_ts"
+        "SELECT s.id, s.subject, s.text, s.repo, s.topic_slugs, c.tool_seq_json, se.last_ts, se.first_ts, s.path"
         " FROM segments s LEFT JOIN chunks c ON c.chunk_id = s.chunk_id"
         " LEFT JOIN sessions se ON se.path = s.path").fetchall()
     out = []
-    for sid, subj, text, repo, slugs, seq, last, first in rows:
+    for sid, subj, text, repo, slugs, seq, last, first, path in rows:
         out.append({"id": sid, "subject": subj or "", "text": text or "", "repo": repo or "unknown",
                     "slugs": slugs or "", "tools": _tools(seq), "ts": parse_ts(last),
-                    "timed": bool(first and last and first != last)})
+                    "timed": bool(first and last and first != last), "path": path or ""})
     return out
 
 
@@ -121,28 +122,52 @@ def tool_name(t) -> str:
 
 def frontmatter(path: Path) -> dict:
     text = path.read_text(encoding="utf-8", errors="replace")
-    m = re.match(r"---\s*\n(.*?)\n---", text, re.S)
+    m = re.match(r"---\s*\r?\n(.*?)\r?\n---", text, re.S)
     out = {}
     if m:
         key = None
         for ln in m.group(1).splitlines():
             km = re.match(r"([A-Za-z_-]+):\s*(.*)", ln)
             if km:
-                key, out[km.group(1)] = km.group(1), km.group(2).strip().strip("'\"")
+                key = km.group(1)
+                val = km.group(2).strip().strip("'\"")
+                out[key] = "" if val in (">", "|", ">-", "|-", ">+", "|+") else val
             elif key and ln.startswith((" ", "\t")):
                 out[key] = (out[key] + " " + ln.strip()).strip()
     return out
 
 
+def _load_json_dict(path: Path) -> dict:
+    if not path.is_file():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
 def load_skills(root: Path) -> list[dict]:
+    scope_cfg = _load_json_dict(root / "config" / "skill-scope.json").get("skills")
+    scope_map = scope_cfg if isinstance(scope_cfg, dict) else {}
+    policy_cfg = _load_json_dict(root / "config" / "skill-trigger-policy.json").get("protected_skills")
+    protected = set(policy_cfg) if isinstance(policy_cfg, list) else set()
     skills = []
     for p in sorted((root / "skills").glob("**/SKILL.md")):
         fm = frontmatter(p)
+        name = fm.get("name") or p.parent.name
         desc = fm.get("description", "")
-        if desc in (">", "|", ">-", "|-"):
-            desc = ""
-        skills.append({"name": fm.get("name") or p.parent.name, "file": p.relative_to(root).as_posix(),
-                       "description": desc})
+        manual_only = str(fm.get("disable-model-invocation", "")).strip().lower() == "true"
+        scoped = scope_map.get(name)
+        scoped_repos = [str(r) for r in scoped] if isinstance(scoped, list) else []
+        skills.append({
+            "name": name,
+            "file": p.relative_to(root).as_posix(),
+            "description": desc,
+            "manual_only": manual_only,
+            "scoped_repos": scoped_repos,
+            "protected": name in protected,
+        })
     return skills
 
 
@@ -355,13 +380,23 @@ def skill_applies(sk: dict, names: set) -> bool:
     return client in ("shared", "claude", "codex")
 
 
-def check_skill_bypass(segs, ctx, thr):
-    skills = [s for s in ctx["skills"] if s["description"]]
+def _repo_matches_scope(repo: str, scoped_repos: list[str]) -> bool:
+    r = (repo or "").lower()
+    return any(r == sc.lower() or r.startswith(sc.lower() + "-") for sc in scoped_repos)
+
+
+def check_skill_bypass(segs, ctx, thr, since_days: int | None = None):
+    skills = [s for s in ctx["skills"] if s["description"] and not s.get("manual_only")]
     toks = [words(s["subject"] + " " + s["text"]) for s in segs]
     idf = Idf(toks)
     svecs = [(s, idf.vec(words(s["description"]))) for s in skills]
+    if since_days is not None and since_days > 0:
+        cutoff = ctx["now"] - dt.timedelta(days=since_days)
+        pairs = [(seg, tk) for seg, tk in zip(segs, toks) if seg["ts"] and seg["ts"] >= cutoff]
+    else:
+        pairs = list(zip(segs, toks))
     flags = []
-    for seg, tk in zip(segs, toks):
+    for seg, tk in pairs:
         if not tk:
             continue
         v = idf.vec(tk)
@@ -370,13 +405,26 @@ def check_skill_bypass(segs, ctx, thr):
             continue  # schema and migration work around a skill's data is not the skill's task
         low = (seg["subject"] + " " + seg["text"]).lower()
         for sk, sv in svecs:
+            if sk.get("scoped_repos") and not _repo_matches_scope(seg["repo"], sk["scoped_repos"]):
+                continue
             sc = cosine(sv, v)
             # A named skill was used (Codex reads SKILL.md by path) or is being worked on.
             if sc >= thr and "Skill" not in names and sk["name"] not in names and skill_applies(sk, names) \
                     and sk["name"] not in low and "skill" not in seg["subject"].lower():
-                flags.append({"segment": seg["id"], "subject": seg["subject"], "object": f"skill {sk['name']}",
-                              "score": round(sc, 3)})
-    return flags, {"skills": len(skills), "segments": len(segs)}
+                flags.append({
+                    "segment": seg["id"],
+                    "subject": seg["subject"],
+                    "object": f"skill {sk['name']}",
+                    "skill": sk["name"],
+                    "session": seg.get("path") or seg["id"],
+                    "protected": bool(sk.get("protected")),
+                    "score": round(sc, 3),
+                })
+    distinct_sessions = len({f["session"] for f in flags if f.get("session")})
+    stats = {"skills": len(skills), "segments": len(segs), "distinct_sessions": distinct_sessions}
+    if since_days is not None and since_days > 0:
+        stats["recent_segments"] = len(pairs)
+    return flags, stats
 
 
 def check_instructions(segs, ctx, thr):
@@ -669,6 +717,65 @@ RUNNERS = {"skill-bypass": check_skill_bypass, "instructions": check_instruction
 
 # ------------------------------------------------------------------- reports
 
+def _repo_sha(root: Path) -> str:
+    marker = root / ".source-commit"
+    if marker.is_file():
+        val = marker.read_text(encoding="utf-8", errors="replace").strip()
+        if val:
+            return val
+    r = run(["git", "-C", str(root), "rev-parse", "--short", "HEAD"])
+    return r.stdout.strip() or "unknown" if r.returncode == 0 else "unknown"
+
+
+def evaluate_skill_bypass_alerts(
+    flags: list[dict],
+    cache: Cache,
+    min_sessions: int,
+    today: str,
+    repo_sha: str,
+    window_days: int | None,
+    out_dir: Path,
+):
+    """Group skill-bypass flags by distinct session and emit episode deltas safely."""
+    by_skill: dict[str, dict] = defaultdict(lambda: {"sessions": set(), "protected": False})
+    for f in flags:
+        sk = f.get("skill") or f["object"].removeprefix("skill ")
+        by_skill[sk]["sessions"].add(f.get("session") or f["segment"])
+        by_skill[sk]["protected"] = by_skill[sk]["protected"] or bool(f.get("protected"))
+
+    prev = cache.get("daily:skill-bypass:episodes")
+    prev_episodes = prev if isinstance(prev, dict) else {}
+    active_alerts, new_alerts, episodes = [], [], {}
+    for sk in sorted(by_skill):
+        info = by_skill[sk]
+        cnt = len(info["sessions"])
+        if cnt < min_sessions:
+            continue
+        first = prev_episodes.get(sk, {}).get("first_flagged") if isinstance(prev_episodes.get(sk), dict) else None
+        first = first or today
+        entry = {"skill": sk, "sessions": cnt, "first_flagged": first, "protected": info["protected"]}
+        active_alerts.append(entry)
+        episodes[sk] = {"first_flagged": first, "sessions": cnt, "protected": info["protected"]}
+        if sk not in prev_episodes:
+            new_alerts.append(entry)
+    cache.put("daily:skill-bypass:episodes", episodes)
+
+    payload = {
+        "schema_version": 1,
+        "checked": today,
+        "repo_sha": repo_sha,
+        "window_days": window_days,
+        "min_sessions": min_sessions,
+        "active_alerts": active_alerts,
+        "new_alerts": new_alerts,
+    }
+    out_dir.mkdir(parents=True, exist_ok=True)
+    tmp = out_dir / ".skill-alerts-latest.json.tmp"
+    tmp.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    os.replace(tmp, out_dir / "skill-alerts-latest.json")
+    return active_alerts, new_alerts, payload
+
+
 def write_report(out_dir: Path, check: str, flags, stats, thr, date: str) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     p = out_dir / f"{check}-{date}.md"
@@ -677,8 +784,9 @@ def write_report(out_dir: Path, check: str, flags, stats, thr, date: str) -> Pat
     for k, v in sorted(stats.items()):
         lines.append(f"- {k}: {v}")
     lines += ["", "## Flags", ""]
+    skip_keys = {"segment", "subject", "object", "skill", "session"}
     for i, f in enumerate(flags, 1):
-        extra = ", ".join(f"{k}={v}" for k, v in f.items() if k not in ("segment", "subject", "object"))
+        extra = ", ".join(f"{k}={v}" for k, v in f.items() if k not in skip_keys)
         lines.append(f"{i}. `{f['segment']}` | {f['subject']} | {f['object']}" + (f" | {extra}" if extra else ""))
     p.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return p
@@ -694,13 +802,32 @@ def main(argv=None) -> int:
     ap.add_argument("--repo-root", default=str(REPO_ROOT))
     ap.add_argument("--repos-home", default=str(REPOS_HOME))
     ap.add_argument("--threshold", type=float)
+    ap.add_argument("--since-days", type=int, default=None)
+    ap.add_argument("--min-sessions", type=int, default=0)
+    ap.add_argument("--delta", action="store_true")
     ap.add_argument("--now", help="ISO time treated as now (tests)")
     ap.add_argument("--date", help="report date stamp (default today, America/New_York)")
     a = ap.parse_args(argv)
 
-    store_root = Path(a.store_root) if a.store_root else reader.default_store_root()
-    conn = sqlite3.connect(f"file:{a.db}?mode=ro", uri=True) if a.db else reader.open_store(store_root)
     root = Path(a.repo_root)
+    skills = load_skills(root)
+    bullets = load_bullets(root)
+    checks = CHECKS if a.check == "all" else (a.check,)
+    if any(c in ("skill-bypass", "triggers", "refs") for c in checks) and not skills:
+        print(f"ERROR: no skills found under --repo-root {root}", file=sys.stderr)
+        return 2
+    if "instructions" in checks and not bullets:
+        print(f"ERROR: no bullets found under --repo-root {root}", file=sys.stderr)
+        return 2
+
+    store_root = Path(a.store_root) if a.store_root else reader.default_store_root()
+    needs_store = any(c != "triggers" for c in checks)
+    if needs_store:
+        conn = sqlite3.connect(f"file:{a.db}?mode=ro", uri=True) if a.db else reader.open_store(store_root)
+        segs = segments(conn)
+    else:
+        conn, segs = None, []
+
     cache = Cache(Path(a.cache) if a.cache else
                   Path.home() / ".local/share/ai-devops/transcript-store/mine-meta.db")
     now = parse_ts(a.now) if a.now else dt.datetime.now(dt.timezone.utc)
@@ -709,18 +836,39 @@ def main(argv=None) -> int:
         today = dt.datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
     except Exception:
         today = now.strftime("%Y-%m-%d")
+    date_str = a.date or today
     origin = run(["git", "-C", str(root), "remote", "get-url", "origin"]).stdout.strip()
     home = re.sub(r"\.git$", "", origin.rstrip("/")).split(":")[-1].split("github.com/")[-1]
-    ctx = {"conn": conn, "skills": load_skills(root), "bullets": load_bullets(root), "now": now,
+    ctx = {"conn": conn, "skills": skills, "bullets": bullets, "now": now,
            "gh": GH(cache), "repos_home": Path(a.repos_home), "home_repo": home or "popcre/ai-devops"}
-    segs = segments(conn)
     out_dir = Path(a.reports) if a.reports else store_root / "reports"
-    for check in (CHECKS if a.check == "all" else (a.check,)):
-        thr = a.threshold if a.threshold is not None else DEFAULTS.get(check, 6 if check == "claims" else 0)
-        flags, stats = RUNNERS[check](segs, ctx, thr)
-        p = write_report(out_dir, check, flags, stats, thr, a.date or today)
-        print(f"{check}: {len(flags)} flags -> {p.name}")
-    print(f"gh calls: {ctx['gh'].calls}")
+    try:
+        for check in checks:
+            thr = a.threshold if a.threshold is not None else DEFAULTS.get(check, 6 if check == "claims" else 0)
+            if check == "skill-bypass":
+                flags, stats = check_skill_bypass(segs, ctx, thr, since_days=a.since_days)
+                if a.min_sessions > 0:
+                    active_alerts, new_alerts, _ = evaluate_skill_bypass_alerts(
+                        flags, cache, a.min_sessions, date_str, _repo_sha(root), a.since_days, out_dir)
+                    stats["active_alerts"] = len(active_alerts)
+                    stats["new_alerts"] = len(new_alerts)
+                    if a.delta and not new_alerts:
+                        print(f"skill-bypass: 0 new alerts ({len(active_alerts)} active) -> skill-alerts-latest.json")
+                        continue
+                    alerted = {x["skill"] for x in (new_alerts if a.delta else active_alerts)}
+                    flags = [
+                        {**f, **({"note": "protected (tighten only, never retire)"} if f.get("protected") else {})}
+                        for f in flags if (f.get("skill") or "") in alerted
+                    ]
+            else:
+                flags, stats = RUNNERS[check](segs, ctx, thr)
+            p = write_report(out_dir, check, flags, stats, thr, date_str)
+            print(f"{check}: {len(flags)} flags -> {p.name}")
+        print(f"gh calls: {ctx['gh'].calls}")
+    finally:
+        if conn is not None:
+            conn.close()
+        cache.conn.close()
     return 0
 
 

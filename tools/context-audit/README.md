@@ -71,6 +71,10 @@ warning. Point `--budgets <file>` at a different file to try other numbers.
 - **Global vs skill-description overlap.** Both are startup context, so a
   sentence repeated in an always-loaded global and a skill description is paid
   for twice. Shared ten-word phrases are reported with an example.
+- **Skill vs skill description overlap (advisory).** Model-invocable skill
+  descriptions with high word similarity or un-disambiguated shared quoted
+  trigger phrases are reported so overlapping pairs can be tightened or sent
+  through `tools/skill-trigger-eval`.
 
 `--strict` exits 1 for a missing safety marker, a parity mismatch, or a stale
 allowlist entry. Budget overruns stay warnings in every mode.

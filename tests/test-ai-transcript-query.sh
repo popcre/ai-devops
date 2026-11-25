@@ -63,6 +63,18 @@ printf '%s\n' "$out" | grep -q '^  designflow: 1$' || fail "stats repo count" "$
 printf '%s\n' "$out" | grep -q '^by machine: state UNKNOWN, writer has not recorded upload status$' || fail "machine state head" "$out"
 printf '%s\n' "$out" | grep -q '^  edge-dev3: 1 sessions, last 2026-10-29 10:00 AM EDT  UNKNOWN$' || fail "fresh machine line" "$out"
 printf '%s\n' "$out" | grep -q '^  old-box: 1 sessions, last 2026-10-20 10:00 AM EDT  UNKNOWN$' || fail "machine without recorded upload status is UNKNOWN" "$out"
+if printf '%s\n' "$out" | grep -q '^skill check'; then fail "skill check printed when alerts file absent" "$out"; fi
+
+# stats prints counts-only skill alert line when reports/skill-alerts-latest.json exists
+mkdir -p "$store/reports"
+printf '%s\n' '{"schema_version":1,"checked":"2026-10-29","active_alerts":[]}' > "$store/reports/skill-alerts-latest.json"
+out="$(q --stats --now 2026-10-29T18:00:00Z)"
+printf '%s\n' "$out" | grep -q '^skill check (2026-10-29): 0 active alerts$' || fail "zero active skill alerts line" "$out"
+printf '%s\n' "$out" | grep -q 'active_alerts' && fail "raw json leaked" "$out"
+printf '%s\n' '{"schema_version":1,"checked":"2026-10-30","active_alerts":[{"skill":"dflow-ship","sessions":4,"protected":false}]}' > "$store/reports/skill-alerts-latest.json"
+out="$(q --stats --now 2026-10-29T18:00:00Z)"
+printf '%s\n' "$out" | grep -q '^skill check (2026-10-30): 1 active alert(s): dflow-ship (4 sessions) (details in private reports/)$' || fail "active skill alerts line" "$out"
+rm -rf "$store/reports"
 
 # raw: a pointer into the reader's own archive, never transcript text
 # MSYS would rewrite /arch to a Windows path for native Python; keep it literal.

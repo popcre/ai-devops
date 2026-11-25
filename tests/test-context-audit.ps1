@@ -485,6 +485,37 @@ owner: claude/fixture-$n
     if ($result.exit -ne 0) { throw "An overlap warning changed the exit status." }
     Write-Host "PASS: global text repeating a skill description is reported as duplicated startup context"
 
+    # -------------------------------- skill vs skill description overlap (advisory)
+    New-AuditFixture -Path $fixture
+    foreach ($pair in @(
+        @("pdf-merge", 'Merge combine split rotate watermark pdf documents pages. Use for "merge pdf files".'),
+        @("pdf-split", 'Split combine merge rotate pdf documents pages watermark. Use for "merge pdf files".'),
+        @("pdf-manual", "Merge combine split rotate watermark pdf documents pages.", $true),
+        @("ship-a", 'Deploy Coolify docker containers onto hetz servers via GitHub Actions. For DesignFlow apps use ship-b. Trigger: "ship service".'),
+        @("ship-b", 'Build Google Cloud Run pipelines for frontend modules and sandbox previews. Trigger: "ship service".')
+    )) {
+        $skName = $pair[0]
+        $skDesc = $pair[1]
+        $manual = ($pair.Count -gt 2 -and $pair[2])
+        $skDir = Join-Path $fixture "skills\shared\$skName"
+        New-Item -ItemType Directory -Path $skDir -Force | Out-Null
+        $manualLine = if ($manual) { "disable-model-invocation: true`n" } else { "" }
+        Write-Utf8 (Join-Path $skDir "SKILL.md") "---`nname: $skName`n${manualLine}description: $skDesc`n---`nBody.`n"
+    }
+    $result = Invoke-Audit -Path $fixture -Strict
+    if ($result.exit -ne 0) { throw "Skill-vs-skill overlap changed the exit status in strict mode." }
+    $skillOverlaps = @($result.report.skillDescriptionOverlap)
+    if (-not ($skillOverlaps | Where-Object { $_.skillA -eq "pdf-merge" -and $_.skillB -eq "pdf-split" })) {
+        throw "Overlapping model-invocable skills pdf-merge and pdf-split were not flagged."
+    }
+    if ($skillOverlaps | Where-Object { $_.skillA -eq "pdf-manual" -or $_.skillB -eq "pdf-manual" }) {
+        throw "Manual-only skill was flagged for overlap."
+    }
+    if ($skillOverlaps | Where-Object { $_.skillA -eq "ship-a" -and $_.skillB -eq "ship-b" }) {
+        throw "Cross-referenced skills ship-a and ship-b were flagged for shared quoted phrase."
+    }
+    Write-Host "PASS: skill-vs-skill description overlap is reported as advisory only, ignores manual-only and cross-referenced skills"
+
     # ------------------------------------------ client autonomy guardrails
     # These assertions protect the behavior contract Albert corrected after the
     # old wording made both clients stop on harmless errors, ask for repeated
