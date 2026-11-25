@@ -760,6 +760,11 @@ run_stage optional "Memory health scheduling" "$REPO_ROOT/bin/ai-memory-health" 
 # host with no Dropbox; the Windows installer has the same stage.
 run_stage optional "Transcript upload" "$REPO_ROOT/bin/ai-transcript-upload" --sync
 
+# Optional: nightly off-GitHub backup of every repository (code, issues, PRs)
+# to the local drive, the Synology NAS and Dropbox. Installs only on the
+# backup host (edge-dev3); SKIP elsewhere.
+run_stage optional "GitHub backup" "$REPO_ROOT/bin/ai-github-backup" --install
+
 publish_install_manifest() {
   local source_sha staged owner group
   source_sha="$(git -C "$REPO_ROOT" rev-parse HEAD)" || return 1

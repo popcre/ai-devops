@@ -1,0 +1,148 @@
+#!/usr/bin/env bash
+# ai-github-backup - nightly off-GitHub backup of every repository Albert can
+# reach (u2giants personal + popcre org), so a GitHub catastrophe loses nothing.
+#
+# What is saved, per repository:
+#   - a full git mirror (all branches, tags, history) and the wiki if present
+#   - issues, pull requests, all comments, review comments, releases, labels
+#     and milestones as JSON (GitHub-only data that a git clone never has)
+#   - a single-file git bundle (restorable with `git clone <bundle>`)
+# Where it goes (three copies):
+#   1. local drive   $GITHUB_BACKUP_ROOT   (default /mnt/secondary-hdd/github-backup)
+#   2. Synology NAS  $GITHUB_BACKUP_NAS    (default edgesynology1:/volume1/homes/ai/github-backup)
+#   3. Dropbox       $GITHUB_BACKUP_DROPBOX (default ~/Dropbox/backups/github)
+#      bundles + metadata only; Dropbox keeps its own version history.
+#
+# Usage:
+#   ai-github-backup run         back up now (what the nightly timer runs)
+#   ai-github-backup --install   install the nightly systemd user timer (only on
+#                                the backup host, $GITHUB_BACKUP_HOST, default
+#                                edge-dev3; elsewhere prints SKIP)
+#   ai-github-backup --check     report last successful run; nonzero if stale
+#   ai-github-backup --uninstall remove the timer (backups are left in place)
+#
+# Restore one repository:
+#   git clone <root>/bundles/<owner>/<repo>.bundle <repo>
+#   (or `git clone <root>/mirrors/<owner>/<repo>.git`); issue/PR JSON is in
+#   <root>/meta/<owner>/<repo>/.
+set -uo pipefail
+
+ROOT="${GITHUB_BACKUP_ROOT:-/mnt/secondary-hdd/github-backup}"
+NAS="${GITHUB_BACKUP_NAS:-edgesynology1:/volume1/homes/ai/github-backup}"
+DROPBOX="${GITHUB_BACKUP_DROPBOX:-$HOME/Dropbox/backups/github}"
+BACKUP_HOST="${GITHUB_BACKUP_HOST:-edge-dev3}"
+GIT_BASE="${GITHUB_BACKUP_GIT_BASE:-https://github.com}"
+STALE_HOURS="${GITHUB_BACKUP_STALE_HOURS:-36}"
+unit=ai-github-backup
+unit_dir="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+self="$(readlink -f "$0")"
+
+log() { printf '%s %s\n' "$(date '+%F %T')" "$*"; }
+
+# Save one paginated API list to a file as a single JSON array.
+save_list() { # endpoint outfile
+  local tmp="$2.tmp"
+  if gh api --paginate "$1" > "$tmp" 2>/dev/null && jq -s 'add // []' "$tmp" > "$2"; then
+    rm -f "$tmp"; return 0
+  fi
+  rm -f "$tmp"; return 1
+}
+
+backup_repo() { # owner/name has_wiki
+  local full="$1" wiki="$2" mirror="$ROOT/mirrors/$1.git" meta="$ROOT/meta/$1" bundle="$ROOT/bundles/$1.bundle"
+  local url="$GIT_BASE/$full.git" rc=0 before after
+  mkdir -p "$(dirname "$mirror")" "$meta" "$(dirname "$bundle")"
+  if [ -d "$mirror" ]; then
+    before="$(git -C "$mirror" for-each-ref --format='%(objectname) %(refname)' | sha1sum)"
+    # No --prune: a branch deleted on GitHub stays in the backup.
+    git -C "$mirror" fetch --quiet --force "$url" '+refs/heads/*:refs/heads/*' '+refs/tags/*:refs/tags/*' || rc=1
+  else
+    before=""
+    git clone --quiet --mirror "$url" "$mirror" || rc=1
+  fi
+  if [ "$rc" -eq 0 ]; then
+    after="$(git -C "$mirror" for-each-ref --format='%(objectname) %(refname)' | sha1sum)"
+    if [ ! -s "$bundle" ] || [ "$before" != "$after" ]; then
+      if git -C "$mirror" rev-parse --verify -q HEAD >/dev/null || [ -n "$(git -C "$mirror" for-each-ref --count=1)" ]; then
+        git -C "$mirror" bundle create --quiet "$bundle.tmp" --all 2>/dev/null && mv -f "$bundle.tmp" "$bundle" || { rm -f "$bundle.tmp"; rc=1; }
+      fi
+    fi
+  fi
+  if [ "$wiki" = true ]; then
+    local wm="$ROOT/mirrors/$full.wiki.git"
+    if [ -d "$wm" ]; then git -C "$wm" fetch --quiet --force origin '+refs/*:refs/*' 2>/dev/null || true
+    else git clone --quiet --mirror "$GIT_BASE/$full.wiki.git" "$wm" 2>/dev/null || rm -rf "$wm"; fi
+  fi
+  local ep
+  for ep in "issues?state=all&per_page=100:issues" "issues/comments?per_page=100:issue-comments" \
+            "pulls?state=all&per_page=100:pulls" "pulls/comments?per_page=100:pull-review-comments" \
+            "releases?per_page=100:releases" "labels?per_page=100:labels" "milestones?state=all&per_page=100:milestones"; do
+    save_list "repos/$full/${ep%%:*}" "$meta/${ep##*:}.json" || { log "WARN $full: could not save ${ep##*:}"; rc=1; }
+  done
+  gh api "repos/$full" > "$meta/repo.json" 2>/dev/null || rc=1
+  return "$rc"
+}
+
+do_run() {
+  command -v gh >/dev/null && command -v jq >/dev/null || { log "ERROR gh and jq are required"; return 1; }
+  mkdir -p "$ROOT" || return 1
+  exec 9>"$ROOT/.lock"; flock -n 9 || { log "ERROR another backup is running"; return 1; }
+  export GIT_TERMINAL_PROMPT=0
+  git config --global --get-all credential.https://github.com.helper >/dev/null 2>&1 ||
+    export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=credential.https://github.com.helper GIT_CONFIG_VALUE_0='!gh auth git-credential'
+  local list="$ROOT/repos.tsv" failed=0 total=0 full wiki
+  gh api --paginate 'user/repos?affiliation=owner,organization_member&per_page=100' \
+    -q '.[] | "\(.full_name)\t\(.has_wiki)"' > "$list.tmp" && [ -s "$list.tmp" ] && mv -f "$list.tmp" "$list" ||
+    { log "ERROR could not list repositories"; return 1; }
+  while IFS=$'\t' read -r full wiki; do
+    total=$((total + 1))
+    backup_repo "$full" "$wiki" </dev/null || { failed=$((failed + 1)); log "FAIL $full"; }
+  done < "$list"
+  log "local copy: $((total - failed))/$total repositories complete"
+
+  local copies_ok=1
+  local nas_err="$ROOT/.nas-rsync.err"
+  local mk=(mkdir -p "$NAS")
+  case "$NAS" in *:*) mk=(ssh -o BatchMode=yes -o ConnectTimeout=20 "${NAS%%:*}" "mkdir -p '${NAS#*:}'") ;; esac
+  if "${mk[@]}" 2>"$nas_err" &&
+     rsync -a --timeout=600 -e 'ssh -o BatchMode=yes -o ConnectTimeout=20' \
+       --exclude .lock --exclude .nas-rsync.err "$ROOT/" "$NAS/" 2>>"$nas_err"; then
+    log "NAS copy: ok"
+  else
+    log "ERROR NAS copy failed: $(grep -v -i -E 'post-quantum|store now|pq.html|server may' "$nas_err" | tail -2)"; copies_ok=0
+  fi
+  if mkdir -p "$DROPBOX" && rsync -a --delete-after "$ROOT/bundles/" "$DROPBOX/bundles/" &&
+     rsync -a --delete-after "$ROOT/meta/" "$DROPBOX/meta/"; then log "Dropbox copy: ok"
+  else log "ERROR Dropbox copy failed"; copies_ok=0; fi
+
+  local status=ok
+  [ "$failed" -eq 0 ] && [ "$copies_ok" -eq 1 ] || status=failed
+  jq -n --arg t "$(date -Is)" --arg s "$status" --argjson n "$total" --argjson f "$failed" --argjson c "$copies_ok" \
+    '{finished:$t,status:$s,repos:$n,failed_repos:$f,copies_ok:($c==1)}' > "$ROOT/last-run.json"
+  [ "$status" = ok ] && date -Is > "$ROOT/last-success" && cp -f "$ROOT/last-success" "$DROPBOX/last-success" 2>/dev/null
+  [ "$status" = ok ]
+}
+
+do_check() {
+  [ -f "$ROOT/last-success" ] || { echo "ERROR no successful GitHub backup recorded in $ROOT"; return 1; }
+  local age=$(( ( $(date +%s) - $(date -d "$(cat "$ROOT/last-success")" +%s) ) / 3600 ))
+  [ "$age" -le "$STALE_HOURS" ] || { echo "ERROR last GitHub backup succeeded ${age}h ago"; return 1; }
+  echo "OK last GitHub backup succeeded ${age}h ago ($(jq -r '"\(.repos) repositories"' "$ROOT/last-run.json" 2>/dev/null))"
+}
+
+do_install() {
+  [ "$(hostname)" = "$BACKUP_HOST" ] || { echo "SKIP GitHub backup runs only on $BACKUP_HOST"; return 0; }
+  mkdir -p "$unit_dir"
+  printf '[Unit]\nDescription=Nightly backup of all GitHub repositories (ai-devops)\n\n[Service]\nType=oneshot\nExecStart=/usr/bin/env bash "%s" run\nNice=19\nIOSchedulingClass=idle\nTimeoutStartSec=6h\n' "$self" > "$unit_dir/$unit.service"
+  printf '[Unit]\nDescription=Nightly GitHub backup\n\n[Timer]\nOnCalendar=*-*-* 02:15:00\nRandomizedDelaySec=900\nPersistent=true\n\n[Install]\nWantedBy=timers.target\n' > "$unit_dir/$unit.timer"
+  systemctl --user daemon-reload && systemctl --user enable --now "$unit.timer" >/dev/null || return 1
+  echo "OK GitHub backup timer installed (nightly 02:15 local)"
+}
+
+case "${1:-}" in
+  run) do_run ;;
+  --check) do_check ;;
+  --install) do_install ;;
+  --uninstall) systemctl --user disable --now "$unit.timer" >/dev/null 2>&1; rm -f "$unit_dir/$unit".{timer,service}; echo "OK GitHub backup timer removed (backups left in place)" ;;
+  *) sed -n '2,26p' "$0"; exit 2 ;;
+esac
