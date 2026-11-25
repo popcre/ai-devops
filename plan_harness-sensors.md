@@ -17,15 +17,37 @@ v2 rewritten 2026-11-24 11:20 PM EST after an Antigravity review.
 | Step | What | State | Evidence |
 |---|---|---|---|
 | 0 | Plan reviewed | ✅ 2026-11-24 | Codex `gpt-6.2-astra` low: 2 rounds, 8 defects (v1). Antigravity `gemini-4-neon-high`: round 1 found 8 defects (v1); round 2 confirmed 7 closed and 1 partly closed, and found 3 new defects in v2. All are applied. The final 3 fixes were not re-reviewed (two-round cap). |
-| 1 | Capture real hook payload fixtures | ⬜ open | — |
-| 2 | Un-swallow the existing hard block | ⬜ open | — |
-| 3 | Proof-of-done | ⬜ open | — |
-| 4 | Destructive-command guard | ⬜ open | — |
-| 5 | Docs | ⬜ open | — |
+| 1 | Capture real hook payload fixtures | ✅ 2026-11-25 | `tests/fixtures/hooks/` (Claude Code 2.1.330). A failed Bash call arrives **only** as `PostToolUseFailure` (with `.error`), never as `PostToolUse`. `jq -r 'if .hook_event_name=="PostToolUseFailure" then "fail" elif .hook_event_name=="PostToolUse" then "ok" else "unknown" end'` prints ok/fail on the two Bash fixtures. |
+| 2 | Un-swallow the existing hard block | ✅ code 2026-11-25 | `bin/ai-install-completion-check-hook` (`registration_state`); tests `installer upgrades old Claude registration in place`, `--check DRIFT on the old registration`, `future promise exits 2 through the registered command line` in `tests/test-ai-completion-check-hook.sh`. Live proof is step 6. |
+| 3 | Proof-of-done | ✅ code 2026-11-25 | `bin/ai-completion-check-hook --sensors`; `bash tests/test-ai-completion-check-hook.sh` (115 checks). Deviations below under "Build notes". |
+| 4 | Destructive-command guard | ✅ code 2026-11-25 | `bin/ai-pr-poll-guard-hook` (`destructive_guard`); every section 10 row is a named check in `bash tests/test-ai-pr-poll-guard-hook.sh` (146 checks). |
+| 5 | Docs | ✅ 2026-11-25 | `docs/harness-sensors.md` (what, signs of trouble, off switches, full undo), `docs/config-inventory.md`, hook headers, `AGENTS.md` router row. |
 | 6 | Protected install + live proof on edge-dev3 | ⬜ open | — |
 
-**A fresh session starts at step 1.** Steps 1 → 2 → 3 run in order. Step 4 is
-independent of steps 1–3 and may run in parallel; it touches a different file.
+**A fresh session starts at step 6** once the build PR is merged (find it on #2835).
+
+### Build notes (2026-11-25, deviations from the steps below)
+
+- **`PostToolUseFailure` is registered too** (step 1 finding): without it a
+  failed test leaves no trace. Without `--sensors` the hook ignores that event.
+- **`publish` class:** `git add/commit/push` count as "changed things" but do
+  not undo an earlier passing check, because they do not change content.
+  Otherwise the normal honest flow edit → test → commit → push → "done" would
+  be blocked every time. `git pull` joins the content-changing `mutation` list.
+- **Scratch is not a deliverable:** Write/Edit under `/tmp/`, `$TMPDIR`,
+  `~/.claude/projects/` (memory) and `~/.claude/plans/` is `inspection`.
+- **A promise after real action** ("Edited it. Next I will run the suite.") is
+  not an unverified close; the future-promise guard owns that case.
+- **Extra escape** word `not checked`; extra verification commands `make
+  test|check`, `npm run test`; `git checkout -f` is guarded like `checkout .`.
+- **Off switches** (owner request 2026-11-25: "document well … how to undo it
+  if things start getting bogged down again"): files `proof-of-done.off`,
+  `promise-block.off`, `destructive-guard.off` in `~/.config/ai-devops/`,
+  tested in both suites; see `docs/harness-sensors.md`.
+- The dirty check uses `--untracked-files=no`: reset/checkout/restore never
+  touch untracked files, so untracked-only folders are not refused.
+- The 1-in-10 noise rule was not measured on replays; watch it live (doc's
+  "Signs it is bogging work down").
 
 ---
 

@@ -1,0 +1,21 @@
+{
+  "session_id": "FIXTURE",
+  "transcript_path": "/home/USER/.claude/projects/FIXTURE/FIXTURE.jsonl",
+  "cwd": "/tmp/FIXTURE/cap/repo",
+  "scratchpad_dir": "/tmp/FIXTURE",
+  "prompt_id": "FIXTURE-PROMPT",
+  "permission_mode": "bypassPermissions",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "PostToolUseFailure",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "bash -c 'echo boom >&2; exit 3'",
+    "description": "Write boom to stderr and exit with code 3"
+  },
+  "tool_use_id": "FIXTURE-TOOL",
+  "error": "Exit code 3\nboom",
+  "is_interrupt": false,
+  "duration_ms": 6
+}

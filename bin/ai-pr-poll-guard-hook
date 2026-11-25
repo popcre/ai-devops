@@ -10,6 +10,23 @@
 # This hook blocks the loop before it runs (exit 2; stderr reaches the model)
 # and names the waiter to use instead. A single `gh pr view`, a lone `sleep`,
 # and ai-pr-wait itself are allowed. It never edits anything.
+#
+# Destructive-command guard (#2835, plan_harness-sensors.md). Before the polling
+# rules, an embedded Python block reads the RAW command (quotes intact) and
+# refuses, with exit 2 and a named safe alternative:
+#   * git reset --hard, git checkout . / -- <paths> / -f, and git restore of the
+#     working tree, when the target directory has uncommitted tracked changes,
+#     or when it cannot tell which directory or git status fails
+#   * git clean -f in any spelling (always)
+#   * git push --force / -f / +refspec (--force-with-lease is allowed)
+#   * rm with both -r and -f on /, the home directory, *, ., .., or a .git dir
+# Text is not a command: quoted operators, commit messages, echo/printf and
+# heredoc bodies are never judged; bash -c, sh -c, eval and heredocs fed to a
+# shell are. Fail-open: python3 missing (or a Windows Store alias), a parse
+# error such as an unterminated quote, or any internal error means allow.
+# Known limits: text piped into a shell, and commands that edit files without
+# these verbs, are not judged. Turn it off: touch
+# ~/.config/ai-devops/destructive-guard.off (docs/harness-sensors.md).
 
 set -u
 payload="$(cat 2>/dev/null || true)"
@@ -17,6 +34,353 @@ payload="$(cat 2>/dev/null || true)"
 
 cmd="$(printf '%s' "$payload" | jq -r '.tool_input.command // empty' 2>/dev/null || true)"
 [[ -n "$cmd" ]] || exit 0
+
+destructive_guard() {
+  local py
+  py="$(command -v python3 2>/dev/null || true)"
+  case "$py" in ""|*WindowsApps*) return 0 ;; esac
+  AI_GUARD_CMD="$cmd" AI_GUARD_CWD="$(printf '%s' "$payload" | jq -r '.cwd // empty' 2>/dev/null || true)" \
+    "$py" -I - <<'PY' 2>/dev/null || true
+import os, posixpath, re, subprocess, sys
+
+HOME = None  # set after norm() is defined
+TMPDIR = os.environ.get('TMPDIR', '/tmp')
+SHELLS = ('bash', 'sh', 'zsh', 'dash', 'ksh', 'ash')
+
+class Unknown(Exception):
+    pass
+
+def tokenize(s):
+    toks, word, i, n = [], None, 0, len(s)
+    def add(t, k):
+        nonlocal word
+        if word is None:
+            word = []
+        if word and word[-1][1] == k == 'bare':
+            word[-1] = (word[-1][0] + t, k)
+        else:
+            word.append((t, k))
+    def flush():
+        nonlocal word
+        if word is not None:
+            toks.append(('word', word))
+        word = None
+    while i < n:
+        c = s[i]
+        if c in ' \t':
+            flush(); i += 1; continue
+        if c == '\n':
+            flush(); toks.append(('op', ';')); i += 1; continue
+        if c == '#' and word is None:
+            j = s.find('\n', i); i = n if j < 0 else j; continue
+        if c == "'":
+            j = s.find("'", i + 1)
+            if j < 0:
+                raise ValueError('unterminated quote')
+            add(s[i + 1:j], 'single'); i = j + 1; continue
+        if c == '"':
+            i += 1; buf = ''
+            while True:
+                if i >= n:
+                    raise ValueError('unterminated quote')
+                d = s[i]
+                if d == '\\' and i + 1 < n and s[i + 1] in '"\\$`\n':
+                    buf += s[i + 1]; i += 2; continue
+                if d == '"':
+                    i += 1; break
+                buf += d; i += 1
+            add(buf, 'double'); continue
+        if c == '\\':
+            if i + 1 < n and s[i + 1] != '\n':
+                add(s[i + 1], 'single')
+            i += 2; continue
+        if s.startswith('&&', i) or s.startswith('||', i) or s.startswith(';;', i):
+            flush(); toks.append(('op', s[i:i + 2])); i += 2; continue
+        if c in ';&|()':
+            if c == '&' and word and word[-1][1] == 'bare' and word[-1][0].endswith(('>', '<')):
+                add('&', 'bare'); i += 1; continue
+            if c == '&' and s.startswith('&>', i):
+                add('&>', 'bare'); i += 2; continue
+            flush(); toks.append(('op', c)); i += 1; continue
+        add(c, 'bare'); i += 1
+    flush()
+    return toks
+
+HEREDOC = re.compile(r'<<-?[ \t]*["\']?([A-Za-z_][A-Za-z0-9_]*)["\']?')
+SHELL_LINE = re.compile(r'(^|[;&|( \t])(/(usr/)?bin/)?(env[ \t]+)?(ba|da|z|k|a)?sh([ \t]|<|$)')
+
+def split_heredocs(cmd):
+    """Return (command text without heredoc bodies, [bodies fed to a shell])."""
+    out, scripts, lines, i = [], [], cmd.replace('\r', '').split('\n'), 0
+    while i < len(lines):
+        line = lines[i]; out.append(line); i += 1
+        m = HEREDOC.search(line)
+        if not m:
+            continue
+        end, dash = m.group(1), line[m.start():].startswith('<<-')
+        body = []
+        while i < len(lines):
+            l = lines[i].lstrip('\t') if dash else lines[i]
+            i += 1
+            if l == end:
+                break
+            body.append(lines[i - 1])
+        else:
+            out.extend(body)  # unterminated: scan it like any command
+            continue
+        if SHELL_LINE.search(line[:m.start()]):
+            scripts.append('\n'.join(body))
+    return '\n'.join(out), scripts
+
+def raw(w):
+    return ''.join(t for t, _ in w)
+
+def expand(w, first=True):
+    """Expand $HOME/${HOME}/$TMPDIR and a leading bare ~. Other expansions -> Unknown."""
+    out = []
+    for idx, (t, k) in enumerate(w):
+        if k == 'single':
+            out.append(t); continue
+        if idx == 0 and k == 'bare' and (t == '~' or t.startswith('~/')):
+            t = HOME + t[1:]
+        t = re.sub(r'\$\{HOME\}|\$HOME(?![A-Za-z0-9_])', lambda _: HOME, t)
+        t = re.sub(r'\$\{TMPDIR\}|\$TMPDIR(?![A-Za-z0-9_])', lambda _: TMPDIR, t)
+        if '$' in t or '`' in t:
+            raise Unknown()
+        out.append(t)
+    return ''.join(out)
+
+def safe_expand(w):
+    try:
+        return expand(w)
+    except Unknown:
+        return None
+
+def norm(p):
+    if re.match(r'^[A-Za-z]:[\\/]', p):
+        p = p.replace('\\', '/')
+    q = posixpath.normpath(p)
+    if q.startswith('//'):
+        q = '/' + q.lstrip('/')
+    return q
+
+def resolve(cwd, p):
+    if p is None:
+        return None
+    p = norm(p)
+    if p.startswith('/') or re.match(r'^[A-Za-z]:/', p):
+        return p
+    if cwd is None:
+        return None
+    return norm(posixpath.join(cwd, p))
+
+def name(w):
+    b = re.split(r'[\\/]', w)[-1].lower()
+    return b[:-4] if b.endswith('.exe') else b
+
+def short_flags(args, stop_at_dashdash=True):
+    flags = set()
+    for a in args:
+        if a == '--' and stop_at_dashdash:
+            break
+        if a.startswith('-') and not a.startswith('--'):
+            flags.update(a[1:])
+    return flags
+
+def dirty(d):
+    if d is None:
+        return 'it could not tell which directory the command runs in (cd to a plain path first)'
+    try:
+        r = subprocess.run(['git', '-C', d, 'status', '--porcelain', '--untracked-files=no'],
+                           capture_output=True, text=True, timeout=10,
+                           env=dict(os.environ, GIT_OPTIONAL_LOCKS='0'))
+    except Exception:
+        return 'it could not check %s for uncommitted changes' % d
+    if r.returncode != 0:
+        return 'it could not check %s for uncommitted changes (git status failed)' % d
+    if r.stdout.strip():
+        return '%s has uncommitted changes that it would throw away' % d
+    return None
+
+WIP = 'If it has changes you need, save them first with a temporary WIP commit (git add -A && git commit -m wip), then retry.'
+
+def check_git(words, cwd):
+    # words: list of token words; words[0] is git
+    i, gdir = 1, cwd
+    while i < len(words):
+        a = safe_expand(words[i])
+        if a == '-C' and i + 1 < len(words):
+            gdir = resolve(gdir, safe_expand(words[i + 1]))
+            i += 2; continue
+        if a in ('-c', '--git-dir', '--work-tree', '--namespace') and i + 1 < len(words):
+            if a != '-c':
+                gdir = None
+            i += 2; continue
+        if a is not None and a.startswith('-'):
+            if a.startswith('--git-dir=') or a.startswith('--work-tree='):
+                gdir = None
+            i += 1; continue
+        break
+    if i >= len(words):
+        return None
+    sub = raw(words[i]).lower()
+    args = [raw(w) for w in words[i + 1:]]
+    if sub == 'reset' and '--hard' in args:
+        why = dirty(gdir)
+        return why and 'Blocked: git reset --hard refused because %s. %s' % (why, WIP)
+    if sub == 'checkout':
+        paths = '--' in args or '.' in args
+        force = '--force' in args or 'f' in short_flags(args)
+        if paths or force:
+            why = dirty(gdir)
+            return why and 'Blocked: this git checkout would overwrite files, and %s. %s' % (why, WIP)
+    if sub == 'restore':
+        fl = short_flags(args)
+        staged = '--staged' in args or 'S' in fl
+        worktree = '--worktree' in args or 'W' in fl
+        if worktree or not staged:
+            why = dirty(gdir)
+            return why and 'Blocked: git restore would overwrite files, and %s. %s (git restore --staged only unstages and is allowed.)' % (why, WIP)
+    if sub == 'clean':
+        if '--force' in args or 'f' in short_flags(args):
+            return 'Blocked: git clean -f permanently deletes untracked files and cannot be undone. Run git clean -n to list them, then remove the exact paths you mean to delete.'
+    if sub == 'push':
+        pos = [a for a in args if not a.startswith('-')]
+        if '--force' in args or 'f' in short_flags(args) or any(a.startswith('+') for a in pos[1:]) \
+                or any(a.startswith('--force=') for a in args):
+            return 'Blocked: a force-push can overwrite commits someone else pushed. Use git push --force-with-lease instead.'
+    return None
+
+def check_rm(words, cwd):
+    args, targets, ddash = [], [], False
+    for w in words[1:]:
+        r = raw(w)
+        if not ddash and r == '--':
+            ddash = True; continue
+        if not ddash and r.startswith('-') and len(r) > 1 and all(k == 'bare' for _, k in w):
+            args.append(r); continue
+        targets.append(w)
+    fl = short_flags(args, False)
+    recursive = '--recursive' in args or 'r' in fl or 'R' in fl
+    force = '--force' in args or 'f' in fl
+    if not (recursive and force):
+        return None
+    for w in targets:
+        t = safe_expand(w)
+        if t is None or t == '':
+            continue
+        bare_glob = any(k == 'bare' and ('*' in x or '?' in x) for x, k in w)
+        n = norm(t)
+        base = n.rstrip('/').split('/')[-1] if n != '/' else '/'
+        absn = resolve(cwd, t)
+        bad = None
+        if n == '/' or absn == '/':
+            bad = 'the whole filesystem root'
+        elif n == HOME or absn == HOME:
+            bad = 'the home directory'
+        elif n in ('.', '..') or all(p == '..' for p in n.split('/')):
+            bad = 'the current or a parent directory'
+        elif base == '.git':
+            bad = "a repository's .git directory (all its history and stashes)"
+        elif bare_glob and base == '*':
+            parent = norm(posixpath.dirname(t)) if '/' in t else '.'
+            if parent in ('.', '/', HOME, '..') or (cwd is not None and resolve(cwd, parent) in ('/', HOME)) or t == '*':
+                bad = 'everything in %s' % ('this directory' if parent == '.' else parent)
+        if bad:
+            return 'Blocked: rm -rf on %s would delete %s. Name the exact subdirectory you mean to remove.' % (raw(w), bad)
+    return None
+
+KEYWORDS = ('!', 'if', 'then', 'else', 'elif', 'do', 'while', 'until', '{', '}', 'time',
+            'exec', 'command', 'builtin', 'nohup', 'sudo', 'env', 'xargs')
+
+def analyse(cmd, cwd, depth=0):
+    if depth > 4:
+        return None
+    text, scripts = split_heredocs(cmd)
+    for sc in scripts:
+        r = analyse(sc, cwd, depth + 1)
+        if r:
+            return r
+    toks = tokenize(text)
+    cmds, cur = [], []
+    for kind, v in toks:
+        if kind == 'op':
+            if cur:
+                cmds.append(cur)
+            cur = []
+        else:
+            cur.append(v)
+    if cur:
+        cmds.append(cur)
+    for words in cmds:
+        while words and (raw(words[0]) in KEYWORDS or re.match(r'^[A-Za-z_][A-Za-z0-9_]*=', raw(words[0]))):
+            words = words[1:]
+        if words and raw(words[0]) == 'timeout':
+            words = words[1:]
+            while words and raw(words[0]).startswith('-'):
+                words = words[1:]
+            words = words[1:]
+        if not words:
+            continue
+        n0 = name(raw(words[0]))
+        if n0 in ('cd', 'pushd'):
+            if len(words) == 1:
+                cwd = HOME
+            else:
+                t = safe_expand(words[1])
+                cwd = None if t == '-' else resolve(cwd, t)
+            continue
+        if n0 in ('echo', 'printf', 'true', ':'):
+            continue
+        if n0 in SHELLS:
+            for j, w in enumerate(words[1:], 1):
+                r = raw(w)
+                if r.startswith('-') and not r.startswith('--') and 'c' in r[1:] and j + 1 < len(words):
+                    res = analyse(raw(words[j + 1]), cwd, depth + 1)
+                    if res:
+                        return res
+                    break
+            continue
+        if n0 == 'eval':
+            res = analyse(' '.join(raw(w) for w in words[1:]), cwd, depth + 1)
+            if res:
+                return res
+            continue
+        if n0 == 'git':
+            res = check_git(words, cwd)
+            if res:
+                return res
+        if n0 == 'rm':
+            res = check_rm(words, cwd)
+            if res:
+                return res
+    return None
+
+HOME = norm(os.environ.get('HOME') or os.path.expanduser('~'))
+TMPDIR = norm(TMPDIR)
+
+try:
+    cwd0 = os.environ.get('AI_GUARD_CWD') or None
+    if cwd0:
+        cwd0 = norm(cwd0)
+    out = analyse(os.environ.get('AI_GUARD_CMD', ''), cwd0)
+    if out:
+        print(out)
+except Exception:
+    pass
+PY
+}
+# Cheap prefilter: Python starts only when a guarded verb appears at all.
+# Off switch (docs/harness-sensors.md): ~/.config/ai-devops/destructive-guard.off
+if [[ ! -e "$HOME/.config/ai-devops/destructive-guard.off" ]] \
+   && printf '%s' "$cmd" | grep -Eiq 'reset|checkout|restore|clean|push|rm'; then
+  guard_reason="$(destructive_guard)"
+  if [[ -n "$guard_reason" ]]; then
+    printf '%s\n' "$guard_reason" >&2
+    exit 2
+  fi
+fi
+
 # Windows spellings of a shell get exactly the Unix treatment (#1891 install
 # review): a Windows full path (drive letter or .exe, quoted or not) becomes
 # the bare name, .exe is dropped, and the name is lowercased. Nothing

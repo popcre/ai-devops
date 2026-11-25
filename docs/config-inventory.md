@@ -266,6 +266,14 @@ hidden. Run `ai-devops doctor` after any Codex install or upgrade, on every mach
   [`../plan_completion-honesty-enforcement.md`](../plan_completion-honesty-enforcement.md).
   Each refuses to write if `settings.json` does not parse, and neither ever
   removes the other. Verify with `--check`.
+  Harness sensors (#2835, [`harness-sensors.md`](harness-sensors.md)): the
+  Claude closeout registration passes `--sensors`, adds `PostToolUseFailure`,
+  and no longer swallows exit 2 (`--check` prints `DRIFT` for the old form).
+  `--sensors` adds proof-of-done: a turn that changed things must show a
+  passing check after the last change before it closes as finished. The
+  poll-guard hook also refuses destructive git and `rm -rf` commands. Off
+  switches are files in `~/.config/ai-devops/`: `proof-of-done.off`,
+  `promise-block.off`, `destructive-guard.off`.
 - **Workflow config:** `config/*.env.example` seeds `/etc/ai-devops/` without
   overwriting existing machine-local values.
 - **Portable-memory tooling:** public `memory/` contains only the architecture

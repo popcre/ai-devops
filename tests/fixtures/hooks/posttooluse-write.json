@@ -1,0 +1,27 @@
+{
+  "session_id": "FIXTURE",
+  "transcript_path": "/home/USER/.claude/projects/FIXTURE/FIXTURE.jsonl",
+  "cwd": "/tmp/FIXTURE/cap/repo",
+  "scratchpad_dir": "/tmp/FIXTURE",
+  "prompt_id": "FIXTURE-PROMPT",
+  "permission_mode": "bypassPermissions",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Write",
+  "tool_input": {
+    "file_path": "/tmp/FIXTURE/cap/repo/note.txt",
+    "content": "hi"
+  },
+  "tool_response": {
+    "type": "create",
+    "filePath": "/tmp/FIXTURE/cap/repo/note.txt",
+    "content": "hi",
+    "structuredPatch": [],
+    "originalFile": null,
+    "userModified": false
+  },
+  "tool_use_id": "FIXTURE-TOOL",
+  "duration_ms": 14
+}
