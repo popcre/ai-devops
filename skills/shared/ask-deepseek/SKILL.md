@@ -51,7 +51,9 @@ rules. DeepSeek's report is a claim, not proof.
 ## Debate is the default
 
 Every opinion, review, or second opinion is a **debate**, not a lookup, unless
-the user asks only for a one-line fact or for `implement`. Two models agreeing
+the request is `implement`, or a factual lookup with nothing to judge (such as
+"which file defines X?"). Anything asking whether something is right, safe,
+better, or done is a debate. Two models agreeing
 because the second anchored on the first is worth nothing; the value is real
 independence, then real argument.
 
@@ -61,8 +63,9 @@ independence, then real argument.
    "I have no independent read; DeepSeek's answer stands unopposed."
 2. **Send the brief plus your position**, labelled as one input to weigh and
    *not* the expected answer. Tell DeepSeek to reason from the material first
-   and say plainly if you are wrong. Put the position inside the brief
-   file itself. State that this is read-only.
+   and say plainly if you are wrong. `send` takes the brief as its message
+   (there is no `--prompt-file`): put the position in that message, and attach
+   long material with `--file`. State that this is read-only.
    `ai-deepseek-agent send "<brief>" [--file plan.md]`
 3. **Report two separate things:** what DeepSeek said, faithfully (keep the
    parts that hurt your position), then whether you agree, point by point. If
@@ -70,8 +73,8 @@ independence, then real argument.
 4. **Rebut only real disagreement**, in the same session so it argues with its
    own reasoning: `ai-deepseek-agent reply <session-id> "<rebuttal>"`. Name the claim you reject, give the evidence it
    lacked, and ask whether that changes its verdict; tell it not to split the
-   difference to be agreeable. Use `templates/delegation/debate-turn.md` for
-   the turn. **Cap at two rounds.**
+   difference to be agreeable. Fill `templates/delegation/debate-turn.md`
+   and pass it as the `reply` message (or attach it with `--file`). **Cap at two rounds.**
 5. **Close with one verdict:** *Agreed* (note when it merely confirmed),
    *DeepSeek conceded*, *Claude conceded* (and what moved you), or *Still split*
    with the crux and what would settle it. Then recommend what to do.
@@ -97,16 +100,5 @@ alone.** Never write "as discussed" or "the usual setup". Every brief carries:
 
 Never put a secret, token, connection string, or `.env` value in a brief.
 
-## Debate discipline
-
-1. Commit to your own position (claim, confidence, what would change your
-   mind) before DeepSeek answers; include it labelled as one input to weigh.
-2. Report what DeepSeek said faithfully, then whether you agree, per point.
-3. Rebut only real disagreement, with `reply` on the same session, and at most
-   two rounds. Use `templates/delegation/debate-turn.md`.
-4. Close with one verdict: **Agreed**, **DeepSeek conceded**, **I conceded**,
-   or **Still split** (state the crux and what would settle it), then a
-   recommendation.
-
-Never fold because DeepSeek sounds confident, never soften its disagreement,
-and never start a new session for a rebuttal.
+Run every opinion as the debate above; it is the only reporting rule. Never
+start a new session for a rebuttal.

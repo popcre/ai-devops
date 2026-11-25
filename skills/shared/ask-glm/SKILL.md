@@ -29,7 +29,9 @@ ai-glm list | show <name> | transcript <name> | abort <name> | delete <name>
 ## Debate is the default
 
 Every opinion, review, or second opinion is a **debate**, not a lookup, unless
-the user asks only for a one-line fact or for `implement`. Two models agreeing
+the request is `implement`, or a factual lookup with nothing to judge (such as
+"which file defines X?"). Anything asking whether something is right, safe,
+better, or done is a debate. Two models agreeing
 because the second anchored on the first is worth nothing; the value is real
 independence, then real argument.
 
@@ -88,10 +90,7 @@ Every brief carries all of this, every time:
 Never put a secret, token, connection string, credential, or `.env` value in a
 brief. Point at facts, not credentials.
 
-Write briefs with the shared debate template
-`templates/delegation/debate-turn.md` when you disagree and want GLM to argue
-back. Report GLM's view in your own words, say whether you agree, and push back
-with evidence when you do not.
+Run every opinion as the debate above; it is the only reporting rule.
 
 Exit code 3 means GLM was unavailable (no key, out of credit, timeout or an
 empty answer); try another second-opinion tool rather than retrying in a loop.
