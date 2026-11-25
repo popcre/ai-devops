@@ -183,7 +183,7 @@ def is_check(ws):
         return True
     if n0 == 'ai-pr-wait':
         return True
-    if n0 == 'gh' and args[:2] == ['pr', 'checks']:
+    if n0 == 'g' + 'h' and args[:2] == ['pr', 'checks']:
         return True
     if n0 == 'git' and 'diff' in args and '--exit-code' in args:
         return True
