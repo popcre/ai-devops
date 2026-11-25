@@ -34,11 +34,12 @@ trap 'rm -rf "$TMP_ROOT"' EXIT
 # folder this test was started from (Microsoft/Windows/PowerShell/
 # ModuleAnalysisCache). Naming the cache inside the temporary folder keeps it
 # there; an edition that does not read the variable keeps its usual cache
-# location. The starting folder is checked at the end of the run.
+# location. This variable only changes where PowerShell saves the cache.
 module_cache_native="$(cygpath -w "$TMP_ROOT/ModuleAnalysisCache" 2>/dev/null || echo "$TMP_ROOT/ModuleAnalysisCache")"
 export PSModuleAnalysisCachePath="$module_cache_native"
-start_dir="$PWD"
+start_dir="$(pwd -P)"
 : > "$TMP_ROOT/started"
+export ANTIGRAVITY_HOME="$TMP_ROOT/antigravity"
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
@@ -75,6 +76,19 @@ mkdir -p "$TMP_ROOT/bash/codex" "$TMP_ROOT/ps/codex" "$TMP_ROOT/ps/mimo" "$TMP_R
 mkdir -p "$TMP_ROOT/bash/zcode" "$TMP_ROOT/ps/zcode"
 mkdir -p "$TMP_ROOT/profile"
 profile_native="$(cygpath -w "$TMP_ROOT/profile" 2>/dev/null || echo "$TMP_ROOT/profile")"
+antigravity_native="$(cygpath -w "$ANTIGRAVITY_HOME" 2>/dev/null || echo "$ANTIGRAVITY_HOME")"
+if [[ "$PS_CROSS_BIN" == powershell.exe ]]; then
+  # Keep 5.1 alive long enough for its background cache writer to finish.
+  USERPROFILE="$profile_native" "$PS_CROSS_BIN" -NoProfile -Command '
+    if ($PSVersionTable.PSVersion.Major -ne 5 -or $PSVersionTable.PSVersion.Minor -ne 1) { exit 1 }
+    Get-Module -ListAvailable | Out-Null
+    $deadline = [DateTime]::UtcNow.AddSeconds(15)
+    until (Test-Path -LiteralPath $env:PSModuleAnalysisCachePath -PathType Leaf) {
+        if ([DateTime]::UtcNow -ge $deadline) { exit 1 }
+        Start-Sleep -Milliseconds 200
+    }
+  ' || fail 'Windows PowerShell 5.1 did not write its module cache to the requested scratch path'
+fi
 locked_installer="$(cygpath -w "$REPO_ROOT/tests/fixtures/installer-parity-locked.ps1" 2>/dev/null || echo "$REPO_ROOT/tests/fixtures/installer-parity-locked.ps1")"
 "$PS_CROSS_BIN" -NoProfile -ExecutionPolicy Bypass -File "$locked_installer" -TestLockContract || fail 'parity lock contract failed'
 # The fixture repo holds skills and templates only, not bin/ai-git-identity, so
@@ -98,6 +112,7 @@ AI_DEVOPS_INSTALL_TEST_MODE=1 AI_DEVOPS_SKIP_MACHINE_TOOLS_GATE=1 AI_DEVOPS_TEST
   -CodexHome "$(cygpath -w "$TMP_ROOT/ps/codex" 2>/dev/null || echo "$TMP_ROOT/ps/codex")" \
   -ZCodeHome "$(cygpath -w "$TMP_ROOT/ps/zcode" 2>/dev/null || echo "$TMP_ROOT/ps/zcode")" \
   -MimoHome "$(cygpath -w "$TMP_ROOT/ps/mimo" 2>/dev/null || echo "$TMP_ROOT/ps/mimo")" \
+  -AntigravityHome "$antigravity_native" \
   -AgentsSkillsRoot "$(cygpath -w "$TMP_ROOT/agents-skills" 2>/dev/null || echo "$TMP_ROOT/agents-skills")" \
   >"$TMP_ROOT/powershell-install.log" 2>&1 || {
     cat "$TMP_ROOT/powershell-install.log" >&2
@@ -200,6 +215,7 @@ out="$(GH_CONFIG_DIR="$gh_config_native" GH_TOKEN= GITHUB_TOKEN= \
   -CodexHome "$(cygpath -w "$TMP_ROOT/bash/codex" 2>/dev/null || echo "$TMP_ROOT/bash/codex")" \
   -ZCodeHome "$(cygpath -w "$TMP_ROOT/bash/zcode" 2>/dev/null || echo "$TMP_ROOT/bash/zcode")" \
   -MimoHome "$(cygpath -w "$TMP_ROOT/bash/mimo" 2>/dev/null || echo "$TMP_ROOT/bash/mimo")" \
+  -AntigravityHome "$antigravity_native" \
   -AgentsSkillsRoot "$(cygpath -w "$TMP_ROOT/agents-skills" 2>/dev/null || echo "$TMP_ROOT/agents-skills")" \
   2>&1)"
 cross_rc=$?
@@ -239,13 +255,10 @@ fi
 if grep -Fq 'LOCAL EDITS' <<<"$out"; then printf '%s\n' "$out" >&2; fail "PowerShell saw Bash's install as locally edited"; fi
 grep -Fq '= shared-one (shared) up to date' <<<"$out" || fail "PowerShell did not accept Bash's install"
 [[ -e "$TMP_ROOT/bash/claude/skills-backup" ]] && fail "cross-installer refresh made a backup"
-[[ "$PS_CROSS_BIN" != powershell.exe ]] || powershell.exe -NoProfile -Command '$PSVersionTable.PSVersion.Major' | tr -d '\r' | grep -qx 5 \
-  || fail "cross-installer check did not run under Windows PowerShell 5.1"
-# Anything under a Microsoft folder in the starting folder written since this
-# run began is a PowerShell child's module analysis cache (see
-# PSModuleAnalysisCachePath above). An older one was left by an earlier run.
+# At the end of a successful run, check for new or modified entries under
+# Microsoft in the starting directory, where the cache leak was observed.
 if [ -e "$start_dir/Microsoft" ] && [ -n "$(find "$start_dir/Microsoft" -newer "$TMP_ROOT/started" -print -quit)" ]; then
-  fail 'the test left a Microsoft folder in the folder it was started from'
+  fail 'PowerShell cache may have leaked into Microsoft under the starting directory'
 fi
 
 echo "PASS: installer parity"

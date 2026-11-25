@@ -5,6 +5,7 @@ param(
     [string]$CodexHome,
     [string]$ZCodeHome,
     [string]$MimoHome,
+    [string]$AntigravityHome,
     # Pins the second ZCode skill root to scratch, so the installer's result
     # never depends on what this machine holds in the real ~/.agents/skills.
     [string]$AgentsSkillsRoot = '',
@@ -66,10 +67,10 @@ try {
     Invoke-ParityLockedAction $mutex {
         if ($AgentsSkillsRoot) {
             & $Installer -RepoPath $RepoPath -ClaudeHome $ClaudeHome -CodexHome $CodexHome `
-                -ZCodeHome $ZCodeHome -MimoHome $MimoHome -AgentsSkillsRoot $AgentsSkillsRoot -SkipGitInstall
+                -ZCodeHome $ZCodeHome -MimoHome $MimoHome -AntigravityHome $AntigravityHome -AgentsSkillsRoot $AgentsSkillsRoot -SkipGitInstall
         } else {
             & $Installer -RepoPath $RepoPath -ClaudeHome $ClaudeHome -CodexHome $CodexHome `
-                -ZCodeHome $ZCodeHome -MimoHome $MimoHome -SkipGitInstall
+                -ZCodeHome $ZCodeHome -MimoHome $MimoHome -AntigravityHome $AntigravityHome -SkipGitInstall
         }
         if (-not $?) { throw 'Fixture installer failed' }
     }
