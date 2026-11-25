@@ -9,6 +9,8 @@ read-when: Working on GitHub API quota protection or request reduction
 
 ## STATUS — read first
 
+For the separate one-repository outage, notification and timing experiment, read the [pilot STATUS](plan_github-continuity-pilot.md) first.
+
 November 19, 2026 closeout update for the scoped Windows installation wait.
 The no-wait admission repair landed in [#2667](https://github.com/popcre/ai-devops/pull/2667)
 at `66c37eccb93ab783d845000b61b5f8c2a9f45969` and was installed through the
