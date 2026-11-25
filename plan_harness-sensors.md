@@ -1,29 +1,31 @@
 ---
-summary: Plan to add three mechanical Claude Code checks: proof-of-done, repeat-failure stop, destructive-command guard (#2835)
+summary: Plan for mechanical Claude Code checks — fix the swallowed hard block, proof-of-done, destructive-command guard (#2835)
 kind: plan
 status: open
-read-when: Changing ai-completion-check-hook or ai-pr-poll-guard-hook, or work on false "done" claims, agent loops, or destructive git commands
+read-when: Changing ai-completion-check-hook or ai-pr-poll-guard-hook, or work on false "done" claims or destructive git commands
 ---
 
-# Implementation plan — harness sensors: proof-of-done, repeat-failure stop, destructive-command guard
+# Implementation plan — harness sensors (v2)
 
 Issue: [popcre/ai-devops#2835](https://github.com/popcre/ai-devops/issues/2835).
 Handoff: [HANDOFF.d/2026-11-25T0358Z-edge-dev3-claude-harness-sensors.md](HANDOFF.d/2026-11-25T0358Z-edge-dev3-claude-harness-sensors.md).
-Created 2026-11-24 10:58 PM EST by a Claude session on `edge-dev3`.
+Created 2026-11-24 by a Claude session on `edge-dev3`. v1 merged in #2836.
+v2 rewritten 2026-11-24 11:20 PM EST after an Antigravity review.
 
 ## STATUS
 
 | Step | What | State | Evidence |
 |---|---|---|---|
+| 0 | Plan reviewed | ✅ 2026-11-24 | Codex `gpt-6.2-astra` low: 2 rounds, 8 defects (v1). Antigravity `gemini-4-neon-high`: round 1 found 8 defects (v1); round 2 confirmed 7 closed and 1 partly closed, and found 3 new defects in v2. All are applied. The final 3 fixes were not re-reviewed (two-round cap). |
 | 1 | Capture real hook payload fixtures | ⬜ open | — |
-| 0 | Plan reviewed by Codex (gpt-6.2-astra, low), two rounds | ✅ 2026-11-24 | Both rounds' 8 defects applied to steps 2–4 and to sections 10–11; the round-2 fixes were not re-reviewed (two-round cap) |
-| 2 | Proof-of-done in the completion hook | ⬜ open | — |
-| 3 | Repeat-failure stop | ⬜ open | — |
+| 2 | Un-swallow the existing hard block | ⬜ open | — |
+| 3 | Proof-of-done | ⬜ open | — |
 | 4 | Destructive-command guard | ⬜ open | — |
-| 5 | Docs, router, inventory | ⬜ open | — |
-| 6 | Install and live proof on edge-dev3 | ⬜ open | — |
+| 5 | Docs | ⬜ open | — |
+| 6 | Protected install + live proof on edge-dev3 | ⬜ open | — |
 
-**A fresh session starts at step 1.**
+**A fresh session starts at step 1.** Steps 1 → 2 → 3 run in order. Step 4 is
+independent of steps 1–3 and may run in parallel; it touches a different file.
 
 ---
 
@@ -31,167 +33,199 @@ Created 2026-11-24 10:58 PM EST by a Claude session on `edge-dev3`.
 
 ### 1. The ultimate goal
 
-Albert, the owner of POP Creations and not a programmer, runs many AI coding
-sessions. Three failures keep costing him time and trust:
+Albert owns POP Creations and is not a programmer. He runs many AI coding
+sessions, and two failures keep costing him time and trust:
 
 1. A session says a job is **done** when nothing proved it.
-2. A session **gets stuck** running the same failing step again and again.
-3. Rarely, a session runs a command that **destroys unsaved work**, sometimes
+2. Rarely, a session runs a command that **destroys unsaved work**, sometimes
    another session's.
 
-Rules against all three already exist, but only as written instructions, and
-written instructions drift. When this plan is done, the machine itself catches
-each failure as it happens, at no model (LLM) cost, and never jams a session.
+Rules against both already exist, but only as written instructions, and written
+instructions drift. When this plan is done, the machine itself catches both
+failures as they happen, at no model (LLM) cost, and never jams a session.
 
 **If a step conflicts with this goal, the goal wins. Stop and flag it on #2835.**
-Two examples. A check that wedges a session or blocks legitimate work breaks the
-goal. So does a check that a trivial spelling change gets around.
+Three things break the goal: a check that wedges a session, a check that blocks
+legitimate work, and a check that a trivial spelling change gets around.
 
 ### 2. What this application is
 
 `popcre/ai-devops` is Albert's AI toolkit: global instructions, skills, wrapper
-commands (`bin/ai-*`) and Claude Code hooks. `install.sh` installs them on each
-machine (edge-dev, edge-dev3, hetz, and others). Hooks are bash scripts that
-Claude Code runs on events (`UserPromptSubmit`, `PreToolUse`, `PostToolUse`,
-`Stop`). Each one is copied to `~/.config/ai-devops/<name>` by an installer in
-`bin/ai-install-*-hook` and registered in `~/.claude/settings.json`. Branch from
-`main`, and PRs merge through the repo's merge queue.
+commands (`bin/ai-*`) and Claude Code hooks. It is installed on each machine
+(edge-dev, edge-dev3, hetz and others) through the protected install described
+in `docs/deployment.md`.
+
+Hooks are bash scripts that Claude Code runs on events (`UserPromptSubmit`,
+`PreToolUse`, `PostToolUse`, `Stop`). An installer (`bin/ai-install-*-hook`)
+copies each one, **as a single file**, to `~/.config/ai-devops/<name>` and
+registers it in `~/.claude/settings.json`. Branch from `main`; PRs merge through
+the repo's merge queue.
 
 ### 3. What triggered this work
 
 On 2026-11-24 Albert shared the X article "Harness Engineering: How to Fix Your
 Agent Without Changing the Model" by @0xTrackmind (2026-11-21). Its thesis is
-that agent failures are mostly failures of the environment around the model,
-and that prose rules should become mechanical checks. Claude, Muse and DeepSeek
-debated it against this repo. They agreed the article is sound. They also agreed
-on three gaps. A query of the transcript store (`ai-transcript-query`) then
-tested each gap (counts only):
+that most agent failures come from the environment around the model, so prose
+rules should become mechanical checks.
 
-- **False "done":** strongly supported. 109 `ai-mistakes` segments match
-  "claimed" and 51 match "false claim". Examples are invented test results and
-  live sites "confirmed" when they were not.
-- **Loops:** strongly supported. There are 1,209 `agent-loop` segments, and 144
-  match "repeated". Most are polling or re-verification loops.
-- **Destructive commands:** rare but costly. One example is "Git hard-reset
-  destroyed another session's uncommitted work". A handful of force-push and
-  data-loss segments also exist.
-- **Lost state on long jobs:** NOT supported. Zero "lost track" matches, and the
-  "compact" hits are unrelated. This was dropped from scope, as section 7 records.
+Claude, Muse and DeepSeek debated it against this repo and agreed the article is
+sound. A query of the transcript store (`ai-transcript-query`, about 17k
+sessions) then tested the gaps they found. These are substring counts on segment
+summaries, not a verified classification:
+
+- **False "done": supported.** 109 `ai-mistakes` segments match "claimed", 51
+  "false claim" and 12 "premature". Examples are invented test results and live
+  sites "confirmed" when they were not.
+- **Destructive commands: rare but costly.** Two "reset --hard" segments,
+  including "Git hard-reset destroyed another session's uncommitted work", plus
+  4 force-push segments. The 3 "rm -rf" hits are test-cleanup bugs, not agent
+  damage.
+- **Same-command retry loops: NOT supported.** There are 1,209 `agent-loop`
+  segments, but a 40-subject sample is mostly blocked CI queues, waiting and
+  subagent coordination. Only 3 match "same error", 2 "same failure" and 14
+  "same command". Dropped, as section 7 records.
+- **Lost state on long jobs: NOT supported.** There are 0 "lost track" matches.
+  Dropped.
 
 ### 4. Scope
 
-**In:** steps 1–6 below, Claude Code only, built by extending the two existing,
-installed and tested hooks.
+**In:** steps 1–6, Claude Code only, built by extending the two installed hooks
+`bin/ai-completion-check-hook` and `bin/ai-pr-poll-guard-hook`.
 
 **NOT in this plan:**
-- Any LLM judge or second agent that grades "done". The owner closed
-  `plan_selective-fresh-reader.md` as "not planned" on 2026-11-02, and reviews
-  are advice only (owner ruling 2026-10-29).
-- Behavioral evals that measure whether models obey. The owner said "stop
-  measuring" on 2026-08-26 (`plan_completion-honesty-enforcement.md`, step 10).
-- Codex, ZCode, MiMo or Antigravity parity. Codex had no Stop hook as of
-  2026-08-26. Whether codex-cli 0.172 has one is an open question (section 13).
-- Trimming the global rulebook. Rule text stays, because non-Claude clients
-  still depend on it.
-- Progress or checkpoint files for long jobs (no evidence, section 3).
-- Changes to CI, merge queue, sweeper or server-side force-pushes. These hooks
-  only see Claude's own Bash tool calls.
+- An LLM judge or a second grading agent. The owner closed
+  `plan_selective-fresh-reader.md` "not planned" on 2026-11-02, and reviews are
+  advice only (owner ruling 2026-10-29).
+- Behavioral evals. The owner said "stop measuring" on 2026-08-26
+  (`plan_completion-honesty-enforcement.md`, step 10).
+- A repeat-failure stop (section 7).
+- Progress or checkpoint files.
+- Codex, ZCode, MiMo or Antigravity parity, and any change to their behavior.
+- Trimming the global rulebook.
+- Protection for pushes to `main`. GitHub branch protection already refuses
+  them, and that stays the wall. The guard only refuses force-pushes.
+- CI, the merge queue and the sweeper. These hooks see only Claude's own tool
+  calls.
 
 ---
 
 ## Part 2 — What we already know
 
-### 5. Current state of the code (main at `03b30efe`)
+### 5. Current state of the code (main at `70d97303`)
 
-- `bin/ai-completion-check-hook` (230 lines) is a Stop hook plus per-turn
-  tracking.
-  - `UserPromptSubmit` prints the New York time and resets
-    `~/.local/state/ai-devops/completion-check/actions/<session>` to `no-action`.
-  - `PostToolUse` classifies each tool call as `action` or `inspection`. File
-    writes count as action, and so do Bash commands matching a regex of git
-    writes, test runners and `make` (around line 55). Everything else is
-    inspection.
-  - `Stop` reads `last_assistant_message`, looks at the closing paragraphs, and
-    matches fixed completion phrases ("nothing is pending", "task is complete",
-    and so on, around lines 98–110) and future-tense promises.
-  - A completion claim gets one nudge per `prompt_id` (lines 123–145). The
-    nudge asks the session to check its deliverables, and it fires whether or
-    not anything was verified.
-  - A promise with no action gets exit 2, a hard block.
-  - Any internal error exits 0. It is fail-open by design.
-- `tests/test-ai-completion-check-hook.sh` (172 lines, about 56 cases) tests it.
-  The CI suite manifest is in `config/ci-suites/`.
-- `bin/ai-pr-poll-guard-hook` (73 lines) is a PreToolUse hook for Bash. It
-  normalizes Windows shell spellings, drops heredoc bodies and quoted strings,
-  and unwraps `bash -c` / `eval`. Then it refuses sleep-plus-PR-read loops with
-  exit 2 and a stderr message. `tests/test-ai-pr-poll-guard-hook.sh` (124 lines)
-  includes a Windows-spelling parity replay.
-- Installers: `bin/ai-install-completion-check-hook` (registers
-  `UserPromptSubmit`, `PostToolUse`, `Stop`, and also an Antigravity hook) and
-  `bin/ai-install-pr-poll-guard-hook`. Both are called from `install.sh`, line
-  641 for the poll guard.
-- `config/claude-permissions.allow` has exactly one deny line (line 47,
-  `deny:Bash(gh run watch:*)`).
-- `skills/shared/two-failed-attempts-diagnosis/SKILL.md` is a skill, not a
-  check. It applies only when the session chooses to escalate.
-- Nothing in this plan has been started. There is no branch and no code.
+- `bin/ai-completion-check-hook` (230 lines):
+  - `UserPromptSubmit` prints the New York time and resets the per-session
+    state file `~/.local/state/ai-devops/completion-check/actions/<session>` to
+    `no-action`. It also removes the `.action` marker.
+  - `PostToolUse` sorts each tool call (lines 50–70). `Write`, `Edit`,
+    `MultiEdit` and `NotebookEdit` count as `action`. So do Bash commands
+    matching the regex at line 57, which covers git writes **and** test runners
+    (`pytest`, `bash tests/…`, `npm test`, `make` and others). Everything else
+    is `inspection`. An action also touches the monotonic `.action` marker.
+  - `Stop` judges only the closing paragraphs of `last_assistant_message`
+    (around line 153). It matches the fixed `COMPLETION_CLAIMS` phrases and the
+    `FUTURE_COMMITMENTS` phrases.
+  - A completion claim gets a JSON `decision: block` nudge on stdout, once per
+    `prompt_id`. It fires whether or not anything was verified.
+  - A future promise with no action also prints the reason on stderr and does
+    `exit 2` (lines 222–228).
+  - Every internal error exits 0.
+- **Pre-existing bug:** the Claude registration in `~/.claude/settings.json`
+  (written by `bin/ai-install-completion-check-hook`, around line 268) is
+  `bash ".../completion-check-hook" 2>/dev/null || true`. That wrapper throws
+  away stderr and turns `exit 2` into `exit 0`, so the intended "hard block" on
+  empty promises never happens. Only the JSON nudge survives. The poll-guard
+  registration has no such wrapper (`bin/ai-install-pr-poll-guard-hook:80`).
+  Verified on edge-dev3: `~/.claude/settings.json` lines 47, 59 and 82.
+- The same hook script is also registered for ZCode (`--client zcode`, installer
+  lines 153–220) and Antigravity.
+- `tests/test-ai-completion-check-hook.sh` (172 lines) runs the hook from the
+  repo path. `config/ci-suite-manifest.json:111-128` maps each `bin/ai-*-hook*`
+  file to its suite.
+- `bin/ai-pr-poll-guard-hook` (73 lines) is a PreToolUse Bash guard.
+  - It rewrites Windows shell spellings, drops heredoc bodies, unwraps
+    `bash -c` / `eval`, and strips **all** quotes, including
+    `tr -d "\"'"` at line 48.
+  - It then refuses sleep-plus-PR-read loops with `exit 2`.
+  - `tests/test-ai-pr-poll-guard-hook.sh` (124 lines) replays every case with
+    Windows spellings.
+- `config/claude-permissions.allow` has one deny line (line 47). Line 48 retires
+  an earlier broad `sleep` deny that broke legitimate work.
+- `python3` exists on Linux machines. `tools/` and some `bin/` scripts use it.
+- Nothing in this plan has been started.
 
 ### 6. Key findings
 
-- The completion hook is a reminder, not a sensor. It fires on wording, and it
-  cannot tell a verified claim from an unverified one. By the article's test
-  ("could the evidence have come back red?"), it never comes back red.
-- The hook already records per-turn tool activity. A third class,
-  `verification`, fits the existing state file with little new code.
-- The poll-guard hook already holds the hardest part of a command guard, the
-  normalization (Windows spellings, quotes, heredocs, `bash -c`). Destructive
-  patterns should reuse it rather than duplicate it.
-- The `PostToolUse` payload shape for a failed Bash command is not confirmed
-  here. `plan_zcode-windows-support.md:324` lists a `PostToolUseFailure` event
-  for ZCode's Claude-compatible hooks. Whether installed Claude Code emits it,
-  and which fields carry the exit status and stderr, must be captured (step 1)
-  before step 3 is built.
+- The completion hook is a reminder, not a sensor. It cannot tell a verified
+  claim from an unverified one, so its evidence can never come back red.
+- Test runners are classed as `action` today. A proof-of-done check therefore
+  needs separate **mutation** and **verification** classes. A test is
+  verification and not mutation, while the existing future-promise logic must
+  still treat tests as "did something".
+- A single boolean marker cannot order "verified after the last change" across
+  parallel `PostToolUse` calls. An append-only per-prompt event log (one
+  `printf >>` line per call) can.
+- The poll guard's quote-stripping destroys exactly the information a
+  destructive guard needs (`"$HOME"`, quoted `-C` dirs, `-m` messages). Doing
+  shell word-splitting correctly in sed/awk is error-prone. Python's `shlex`
+  does it in a few lines.
+- Installers copy one file. A shared library file would not be installed and
+  would fail open silently. Any helper code must live **inside** the hook file
+  that uses it.
+- The installed checkout advances only through the protected install
+  (`docs/deployment.md`). A plain `bash install.sh` or `git pull` there is wrong
+  (`AGENTS.md`, around line 127).
 
 ### 7. Approaches considered and REJECTED
 
-- **LLM judge or "fresh reader" agent for done-ness.** Rejected because of the
-  owner closure (2026-11-02) and LLM spend. Muse and DeepSeek both argued
-  against it, and Claude conceded.
-- **Deny lines in `config/claude-permissions.allow`** for `rm -rf`,
-  `git push --force` and `git reset --hard`. Muse proposed it. It was rejected
-  because permission rules match on command prefix.
-  `git -C x reset --hard`, `cd x && git reset --hard` and `bash -c '…'` all get
-  around it, and a broad `rm -rf` deny breaks worktree and temp cleanup. A
-  tested hook with the poll guard's normalization handles all of these.
-- **Trimming the rulebook first.** Muse first proposed it, then conceded. The
-  #1881 trim alone drifted back. Convert to checks first, and trim separately.
-- **PROGRESS.md / checkpoint log.** Dropped because the transcript store shows
-  no evidence for this failure.
-- **"Done" meaning `ai-task-gates check` passes on the change set.** DeepSeek
-  proposed it. It was not adopted as the done-check, because `ai-task-gates`
-  checks the declared task class, not whether the deliverable works. It is still
-  listed as one verification command in step 2.
-- **A new separate hook script plus installer for each check.** Rejected because
-  of the fewest-moving-parts and reuse rules. Extend the two existing installed
-  hooks instead.
+- **LLM judge or "fresh reader".** Rejected: owner closure 2026-11-02, and it
+  spends LLM tokens.
+- **Deny lines in `config/claude-permissions.allow`.** Rejected: they match on
+  prefix, so `git -C x reset --hard`, `cd x && …` and `bash -c` all get around
+  them, and a broad `rm -rf` deny breaks cleanup. The retired `sleep` deny
+  (line 48) is the precedent.
+- **Trimming the rulebook first.** Rejected: the #1881 trim drifted back.
+- **PROGRESS.md checkpoint log.** Rejected: no evidence (section 3).
+- **Repeat-failure stop** (same command plus same error twice in 30 minutes,
+  then refuse). It was in v1 and was dropped in v2. Evidence is too thin (3–14
+  segments). It would need cross-hook state, a `PostToolUseFailure` wiring
+  change and a migration. Hashing stderr misses failures whose output changes
+  (timestamps, PIDs, stdout-only) and would refuse legitimate retries (`curl`,
+  `gh pr checks`). Antigravity recommended dropping it, and Claude's own
+  transcript sample agreed. Revisit only if a classified transcript query shows
+  same-command retries are common.
+- **Bash/sed/awk parser for the destructive guard (v1).** Rejected: Antigravity
+  found false refusals (`git commit -m "a && b; rm -rf /"` split into a bogus
+  `rm -rf /`) and bypasses (`rm -rf ''"$HOME"`, `${HOME}`, `"$HOME/"`, bare
+  `.git`). Replaced by a Python `shlex` block embedded in the hook (step 4).
+- **A shared normalization library used by both hooks (v1).** Rejected: the
+  installers copy single files, so it would not be installed.
+- **The `git clean -n` dry-run check (v1).** Rejected: a failing git command
+  prints nothing, which reads as clean, and flag forwarding (`-e`) is fragile.
+  A plain `git clean -f` on a clean tree is a no-op anyway, so refusing every
+  forced clean costs nothing.
+- **`ai-task-gates check` as the done-check.** Rejected: it checks the task
+  class, not whether the deliverable works. It stays as one verification
+  command.
 
 ### 8. Design decisions
 
 **Locked:**
-- Every check is deterministic bash, with no model calls. (2026-11-24)
-- Every check stays fail-open on internal error (exit 0) and fires at most once
-  per prompt where it nudges, so a broken hook never wedges a session.
-  (Inherited, 2026-08-26.)
-- Proof-of-done and repeat-failure live in `bin/ai-completion-check-hook`. The
-  destructive guard and the pre-side of repeat-failure live in
-  `bin/ai-pr-poll-guard-hook`. (2026-11-24)
-- `--force-with-lease` is allowed. Plain `--force` / `-f` / `+ref` is refused.
-- Repeat-failure memory expires after 30 minutes (consistent with the 30-minute
-  rule), per session.
+- Deterministic code only, with no model calls.
+- Fail-open on any internal error (exit 0). A missing `jq` or `python3` means
+  allow. A deliberate refusal is a verdict, not an error.
+- Nudges fire at most once per `prompt_id`.
+- New completion-hook behavior runs only with the `--sensors` argument, which
+  only the Claude registration passes. ZCode and Antigravity behave exactly as
+  today.
+- Helper code lives inside the hook file that uses it, with no shared library.
+- `--force-with-lease` is allowed. `--force`, `-f` and `+refspec` are refused.
+- `git clean` with `-f` / `--force` is always refused.
 
-**Open (implementer's judgment, criteria given in the steps):**
-- The exact verification-command list (step 2).
-- How a failed Bash call is detected, whichever field step 1 shows (step 3).
+**Open (the criteria are in the steps):**
+- The exact verification-command list (step 3).
+- How widely an unverified mutation turn is caught beyond the fixed phrases
+  (step 3).
 
 ---
 
@@ -199,358 +233,376 @@ installed and tested hooks.
 
 ### 9. The plan
 
-Work in a fresh worktree branched from `origin/main`. Run
+Work in a fresh worktree from `origin/main`. Run
 `ai-task-gates start --class code --reason "harness sensors #2835"`.
 
 #### Step 1 — Capture real hook payloads (`lead-only`: it decides what step 3 trusts)
 
-- Add a temporary logging hook in a scratch `CLAUDE_CONFIG_DIR`. Never use the
-  live settings. The hook writes stdin to files.
-- Run `claude -p` there with prompts that run one succeeding Bash command
-  (`true`), one failing one (`false; echo boom >&2; exit 3`), and one Write.
-- Save scrubbed payloads (session ids replaced with `FIXTURE`, paths
-  generalized) to `tests/fixtures/hooks/claude-posttooluse-bash-ok.json`,
-  `…-bash-fail.json`, and `…-failure-event.json` if a `PostToolUseFailure`
-  event fires.
-- Record in this plan which field carries the exit status and stderr.
+- In a scratch `CLAUDE_CONFIG_DIR`, never the live one, register a logging hook
+  for `PostToolUse` and `PostToolUseFailure` that writes stdin to files.
+- Run `claude -p` there with three prompts: run `true`, run
+  `bash -c 'echo boom >&2; exit 3'`, and write a file.
+- Save the scrubbed payloads (session ids set to `FIXTURE`, home paths
+  generalized) under `tests/fixtures/hooks/`, one file per case.
+- Record in section 5 which field and which event show that a Bash call failed.
 
-**Behaves when done:** the fixtures show exactly how a failed Bash call looks.
-**It worked when:** the fixture files exist, and `jq` on the fail fixture
-prints a non-zero exit indicator or the failure event name.
+**It worked when:** the fixtures exist, and a `jq` expression written into this
+plan prints `ok` for the success fixture and `fail` for the failure fixture.
 
-#### Step 2 — Proof-of-done (`lead-only`: it changes a hook every session runs)
+#### Step 2 — Un-swallow the hard block (`lead-only`: it changes a registration every Claude session runs)
 
-In `bin/ai-completion-check-hook`:
-- **PostToolUse:** add a third state, `verification`. A Bash command is
-  verification when it matches a curated regex. Proposed list:
-  - test runners that are already action-class (pytest, `bash tests/…`,
-    `npm test`, `go test`, `cargo test`, `dotnet test`)
-  - any command with ` --check`
+- In the **Claude branch only** of `bin/ai-install-completion-check-hook`
+  (around line 224 onward), register
+  `bash "$HOME/.config/ai-devops/completion-check-hook" --sensors`, with no
+  `2>/dev/null || true`. The hook is already fail-open inside.
+- Upgrade an existing Claude registration in place, matched by its marker
+  string. `--check` prints `DRIFT` for the old form and `OK` for the new one.
+- Leave the ZCode and Antigravity branches byte-identical.
+- The hook accepts `--sensors`. Until step 3 lands, the flag changes nothing.
+
+**It worked when:** these tests pass: `installer upgrades old Claude
+registration`, `--check DRIFT then OK`, `zcode config byte-identical`, and
+`future promise with no action exits 2 through the registered command line`.
+The last one runs the exact registered string through `bash -c`.
+
+#### Step 3 — Proof-of-done (`lead-only`: it changes a hook every session runs)
+
+All of this goes in `bin/ai-completion-check-hook`, and runs only when
+`--sensors` is passed.
+
+- **Event log.** On every `PostToolUse`, append one line to
+  `…/completion-check/turns/<session>`. Key it by session only, like the
+  existing `$action_file`, because `PostToolUse` payloads may lack `prompt_id`
+  and `Stop` falls back to a message checksum. Delete it with `rm -f` on every
+  `UserPromptSubmit`, so it always holds the current prompt only. Each line is
+  `<seq> <class> <ok|fail|unknown>`. `seq` is a nanosecond timestamp. Use one
+  `printf >>` call per line, which is atomic for short lines. `class` is one of
+  three:
+  - `mutation`: Write, Edit, MultiEdit, NotebookEdit, and Bash git writes
+    (`add`, `commit`, `push`, `merge`, `rebase`, `cherry-pick`, `apply_patch`).
+  - `verification`: see the next bullet. Only Bash calls qualify.
+  - `inspection`: everything else.
+
+  The existing `.action`
+  marker keeps its current meaning (mutation **or** a test runner), so the
+  future-promise guard is unchanged.
+- **Verification command list.** These count only as the first word of a simple
+  command, after splitting on `&&`, `||`, `;`, `|` and `&`:
+  - `pytest`
+  - `python -m pytest` / `python -m unittest`
+  - `bash tests/…`, `./tests/…`
+  - `npm test`, `pnpm test`, `yarn test`
+  - `go test`, `cargo test`, `dotnet test`
   - `ai-task-gates check`
-  - `ai-pr-wait`
+  - `ai-pr-wait` / `bin/ai-pr-wait`
   - `gh pr checks`
-  - `curl` with `-f` / `--fail` or `-w '%{http_code}'`
   - `git diff --exit-code`
-  - `ai-adopt-globals --check`
+  - any `ai-*` or `bin/ai-*` command whose arguments include `--check`
+  - `curl` with `-f`, `--fail` or `--fail-with-body`
 
-  Judgment rule: include a command only if it exits non-zero or prints a failure
-  verdict when the thing is wrong. Exclude bare reads such as `gh pr view`, `cat`
-  and `ls`. Match only in **command position**, after normalization: at the
-  start of the command or after `;`, `&&`, `||` or `|`. Matching never happens
-  inside quoted text or arguments, so `echo --check` and `grep -- --check f` are
-  not verification. Reuse the poll guard's normalization function (step 4
-  extracts it).
-- A verification counts only if its exit status is **its own**. It must be the
-  last simple command of the Bash call, or be joined only by `&&` to further
-  verifications. It must not be followed by `||`, `;` or `&`, must not be
-  inside `if` / `while`, and must not be piped (a pipe masks the exit code
-  without `pipefail`). So `pytest || true`, `pytest; echo done` and
-  `pytest | tail` never count. (Codex round 2.)
-- It also counts only if it **succeeded**, judged by step 1's
-  success/failure signal, and **came after the last action** in this prompt.
-  Record per-prompt ordinals: `last_action_seq` on every action-class call, and
-  `last_ok_verify_seq` on every successful verification. Verified means
-  `last_ok_verify_seq > last_action_seq`. A passing test followed by a further
-  edit is therefore unverified. Use the existing monotonic-marker technique so
-  parallel calls cannot lose an update.
-- Known limit, to state in the hook header: a passing check that is unrelated
-  to the deliverable still counts. Deterministic code cannot judge relevance.
-  That stays the session's duty under the written rule.
-- **Stop:** on a completion claim:
-  - If verified (as defined above), allow silently. This removes today's noisy
-    nudge.
-  - If an action ran but no verification, block once with a new reason: "This
-    turn changed things and claims completion, but no command that could fail
-    checked the result. Run a check (test, --check, HTTP status, CI wait) or say
+  Rule for adding to the list: the command must exit non-zero when the thing is
+  wrong.
+- **Exit-status ownership.** A Bash call counts as verification only when all of
+  these hold:
+  - The whole command is a chain joined only by `&&`, with no `;`, `||`, `&` or
+    newline-separated statements.
+  - At least one link is a verification command.
+  - No link starts with `!`.
+  - There is no `|`, unless `set -o pipefail` comes first in the chain.
+  - It is not inside `if`, `while` or `until`.
+
+  So `pytest && git status` counts. `pytest || true`, `! pytest`,
+  `true || pytest`, `pytest; echo ok` and `pytest | tail` do not.
+
+  Parse with the same embedded `shlex` approach as step 4: a small
+  `python3 - <<'PY'` block inside this hook. If `python3` is missing, the call
+  is `inspection`.
+- **Success.** Use the success or failure signal from step 1. If it is unknown,
+  record `unknown`, which does not count.
+- **Stop with `--sensors`.** A turn is *verified* when its last `verification ok`
+  line comes after its last `mutation` line.
+  - **Claim matched and verified:** allow silently. This removes today's noisy
+    nudge for honest turns.
+  - **Claim matched, a mutation happened, not verified:** block once, with JSON
+    on stdout plus `exit 2`. The reason: "This turn changed things and claims
+    completion, but no command that could fail checked the result after the last
+    change. Write the reason to **stderr** as well as the JSON, before `exit 2`
+    (Claude Code reads the reason from stderr on exit 2), as the future-promise
+    path does at line 226. Run a check (test, --check, CI wait, HTTP status with --fail) or say
     plainly what is unverified."
-  - If inspection only, keep today's nudge unchanged.
-- The future-promise hard block stays unchanged.
+  - **Claim matched, inspection only:** today's nudge, unchanged.
+  - **No claim matched, a mutation happened, not verified:** this is the
+    "Fixed and pushed." bypass. Block once with the same reason, **unless** the
+    closing paragraphs contain any of: `unverified`, `not verified`,
+    `not tested`, `untested`, `still open`, `not done`, `pending`, or a line
+    ending in `?`.
 
-**It worked when:** the new test cases in section 10 pass and all existing
-cases stay green, run with `bash tests/test-ai-completion-check-hook.sh`.
+  Judgment for the implementer: if this last case fires on more than about 1 in
+  10 honest replay turns in tests, narrow it to past-tense delivery words
+  (`fixed`, `pushed`, `merged`, `deployed`, `shipped`, `done`) and record that
+  choice here.
+- **Known limit**, to state in the hook header: a passing check unrelated to the
+  deliverable still counts. Code cannot judge relevance, so the written rule
+  still covers that.
 
-#### Step 3 — Repeat-failure stop (`lead-only`: depends on step 1's evidence)
-
-Depends on step 1.
-- **Post-side, in `bin/ai-completion-check-hook`, on the Bash failure signal
-  from step 1:** compute two separate hashes:
-  - `cmd_hash = sha256(normalized command)`, with whitespace collapsed
-  - `err_hash = sha256(last 3 non-empty stderr lines)`
-
-  Append `epoch cmd_hash err_hash` to
-  `~/.local/state/ai-devops/repeat-failure/<session>`.
-- **Clearing:** a *successful* run of the same `cmd_hash` deletes that
-  command's entries. Any action-class call (a file Write/Edit, or a git write)
-  also clears the whole session file, because the session changed something and
-  a retry after a repair is legitimate.
-- If step 1 shows failures arrive as a separate `PostToolUseFailure` event,
-  register it for the **Claude client only**. That is the `~/.claude/settings.json`
-  branch of `bin/ai-install-completion-check-hook`, from line 224 onward. **Do
-  not touch the ZCode branch (lines 153–220) or the Antigravity branch.** Keep
-  `--check` support, matching the existing three events.
-- **Pre-side, in `bin/ai-pr-poll-guard-hook`:** before the existing checks,
-  compute `cmd_hash` of the incoming normalized command, the same way. If the
-  session file holds at least 2 entries for that `cmd_hash` within the last 30
-  minutes **with the same `err_hash`**, refuse with exit 2 and this message:
-  "This exact command already failed twice with the same error in the last 30
-  minutes. Change the approach; if two real attempts failed, use the
-  two-failed-attempts-diagnosis skill." Prune entries older than 30 minutes on
-  every read.
-- A different command, or the same command whose earlier failures had different
-  errors, is allowed.
-
-**It worked when:** the step 3 test cases pass in both suites.
+**It worked when:** every step 3 test in section 10 passes, and the whole suite
+stays green with `bash tests/test-ai-completion-check-hook.sh`.
 
 #### Step 4 — Destructive-command guard (`lead-only`: a trust-boundary parser)
 
-In `bin/ai-pr-poll-guard-hook`, refuse with exit 2 and a message that names the
-safe alternative.
+This goes in `bin/ai-pr-poll-guard-hook`. Add one embedded block,
+`python3 - "$cwd" <<'PY' … PY`, that reads the **raw** command from the payload
+before any of the existing sed/awk/quote-stripping. It prints a refusal reason
+or nothing. If it prints a reason, the hook prints that on stderr and does
+`exit 2`. The existing poll rules then run unchanged. If `python3` is missing or
+the block errors, skip the guard (fail-open).
 
-**Parsing order matters.** The existing pipeline drops quoted strings, which
-would erase `"$HOME"`, `"$TMPDIR/x"` and quoted `-C` directories, so the guard
-cannot run on its output.
+Inside the block:
 
-1. Extract the shared normalization, shell-name rewriting, heredoc-body drop and
-   `bash -c` / `eval` unwrap, into a function used by both the poll rules and
-   this guard.
-2. Run the destructive guard on that output **before** quote-dropping. Split it
-   into simple commands on `;`, `&&`, `||` and `|`, and then into words with
-   quotes **preserved**. Strip only the outer quote characters from each word,
-   and keep the word.
-3. Drop the argument of `-m`, `--message` and `-F` for git commit/tag, and drop
-   `echo` / `printf` arguments, so a message that only mentions a command passes.
-4. Walk simple commands in order, keeping a current directory. It starts as the
-   payload `.cwd`, and `cd <word>` updates it (relative to the current one). A
-   `-C <word>` on a git command overrides it for that command only. A
-   directory containing `$(`, a backtick or an unexpanded variable other than
-   `$HOME` / `$TMPDIR` cannot be determined, which means refuse.
-5. Expand `~`, `$HOME` and `$TMPDIR` in `rm` targets before matching, so
-   `"$HOME"` is seen as the home directory and `"$TMPDIR/x"` as a temp path.
-   Track each word's quote type. Expand only unquoted or double-quoted words,
-   never single-quoted ones (`rm -rf '$HOME'` names a literal file, so it
-   passes).
-
-Refuse:
-
-- **`git … reset --hard`** when the target tree has uncommitted changes. Find
-  the target from `-C <dir>`, a preceding `cd <dir> &&`, or the payload `.cwd`,
-  then run `git -C <dir> status --porcelain`. An empty result means it is
-  allowed. Fail-safe: if the directory cannot be determined, refuse.
-  Alternative to name: a temporary WIP commit.
-- **`git checkout -- .`, `git checkout .`, `git restore .`** without
-  `--staged`, under the same dirty-tree rule.
-- **`git clean -f…`**: `status --porcelain` hides ignored files, so it is not
-  enough here. Run `git -C <dir> clean -n` with the same `-d` / `-x` / `-X`
-  flags and paths. A non-empty dry-run list means refuse. (Codex round 2.)
-- **`git push`** with `--force`, `-f`, or a `+refspec`. `--force-with-lease`
-  passes.
-- **`git push`** whose explicit refspec targets `main` or `master`. The
-  alternative to name is to branch and open a PR.
-- **`rm`** with recursive and force flags in any spelling (`-rf`, `-fr`,
-  `-r -f`, `--recursive --force`) when a target is `/`, `~`, `$HOME`, `*`, `.`,
-  `..`, or a path ending in `/.git`. Other `rm -rf` targets pass, including
-  worktree and temp cleanup.
-- Bare `git stash` / `git stash pop` (the shared-stash rule from the
-  environment) is **not** included. It is a prose rule, the rule is rarely
-  broken, and it is out of scope.
+1. **Text vs command.** Tokenize with a small POSIX-style tokenizer, about 40
+   lines, written in the block. `shlex` alone loses quote types, which item 4
+   needs. The tokenizer yields operator tokens and word tokens, and each word is
+   a list of `(text, kind)` pieces, where `kind` is `bare`, `single` or
+   `double`. Backslash escapes are honored outside single quotes. An
+   unterminated quote means *parse error*, which means the guard allows
+   (fail-open), and a test covers it. Operators `;`, `&&`, `||`, `|` and `&`
+   split simple commands only when they are **outside** quotes. So
+   `git commit -m "a && b; rm -rf /"` is one command, a commit. Drop heredoc
+   bodies first, using the same delimiter rule as the bash code at lines 33–40.
+   Unwrap `bash -c '<script>'`, `sh -c` and `eval '<script>'` by recursing on
+   the script. Normalize the first word with the same Windows-spelling rule
+   (strip drive, path and `.exe`, lowercase) for `git`, `rm` and shells.
+2. **Words that are only text.** Never inspect the arguments of `echo`,
+   `printf`, or the values of git `-m`, `--message` and `-F`.
+3. **Directory tracking.** Start from the payload `.cwd`. `cd <dir>` updates it,
+   resolved against the current directory. `git -C <dir>` overrides it for that
+   one command. A directory word containing `$(`, a backtick, or any `$VAR` other
+   than `$HOME`, `${HOME}` or `$TMPDIR` is *unknown*.
+4. **Expansion.** Work piece by piece, using the tokenizer's `kind`. Expand `$HOME`, `${HOME}` and `$TMPDIR` only in unquoted or
+   double-quoted text, and `~` / `~/…` only when unquoted and at the start of a
+   word. Then run `os.path.normpath`, which also collapses `//` to `/`, and strip
+   trailing slashes **except** from the bare root `/`, so `rm -rf /` is still
+   seen as `/`.
+5. **Refuse** (each message names the safe alternative):
+   - `git reset --hard`, `git checkout .`, `git checkout -- <paths>`, and
+     `git restore` without `--staged`, or with `-W` / `--worktree`, when the
+     target directory is dirty. Dirty means `git -C <dir> status --porcelain`
+     prints anything. A **non-zero** status or an *unknown* directory also means
+     refuse. Alternative: "commit a temporary WIP commit first."
+   - `git clean` with `-f` or `--force` in any spelling, always. Alternative:
+     "run `git clean -n` and remove named paths."
+   - `git push` with `--force`, `-f`, or a refspec starting with `+`, unless the
+     flag is `--force-with-lease` or `--force-if-includes`. Alternative:
+     "use `--force-with-lease`."
+   - `rm` with both a recursive flag (`-r`, `-R`, `--recursive`) and a force flag
+     (`-f`, `--force`), in any combination, when any target after expansion is
+     `/`, the home directory, `*`, `.`, `..`, or a path whose last component is
+     `.git`.
+6. Run at most one `git status` per guarded command, and only when a pattern in
+   the first rule matched.
 
 **It worked when:** every row of the adversarial table in section 10 has a
-passing named test.
+passing named test, and the existing poll-guard suite and its Windows replay
+stay green.
 
-#### Step 5 — Docs (`helper-ok`: file edits named exactly)
+#### Step 5 — Docs (`helper-ok`: exact files named)
 
-- Update the header comments of both hooks.
-- Add one line per check to `docs/config-inventory.md` (the Claude hooks
-  entry).
-- (Router row in `AGENTS.md` already added with the plan.)
-- Add a memory entry `harness-sensors.md` that says "read the plan STATUS
+- Update both hooks' header comments: what each check does, its known limits,
+  and the `--sensors` flag.
+- Add one line per check to `docs/config-inventory.md`, in the Claude hooks
+  entry.
+- Add a memory entry `harness-sensors.md`: "read plan_harness-sensors.md STATUS
   first".
-- **Stop-and-ask trigger:** any wording change to `templates/system/*-global*.md`
-  goes back to the lead. Those files have a parity audit
-  (`tools/context-audit/context-audit.py`).
+- **Stop-and-ask trigger:** any change to `templates/system/*-global*.md`, or
+  any doc that would describe behavior differently from the code, goes back to
+  the lead.
 
-**It worked when:** `bash tests/test-doc-health.sh`, or the repo's docs check
-named in `config/ci-suites/`, passes.
+**It worked when:** the docs suites mapped in `config/ci-suite-manifest.json`
+pass in CI on the PR.
 
-#### Step 6 — Install and live proof (`lead-only`: live-proof judgment)
+#### Step 6 — Protected install and live proof (`lead-only`: live-proof judgment)
 
-- After merge, run `bash install.sh` on edge-dev3 from the installed checkout.
-  This follows the "worktree agents cannot install" memory, so the coordinator
-  installs. Confirm with `ai-install-completion-check-hook --check` and
-  `ai-install-pr-poll-guard-hook --check`.
-- Live: in a scratch git repo with an uncommitted change, run `claude -p` asking
-  it to run `git reset --hard`. The command must be refused, and the file must
-  still be modified.
-- Then ask it to run `false` with the same error three times. The third attempt
-  must be refused.
-- Then ask it to edit a file and end with "task is complete" without testing.
-  Stop must block once with the new reason.
-- Record the outputs in `tests/verification/harness-sensors/2026-11-XX-live.md`.
+- After merge, install on edge-dev3 **through the protected install in
+  `docs/deployment.md`**: a candidate worktree at the merged SHA, then
+  `ai-task-gates authorize-install --target-head <SHA>`, then that candidate's
+  `update.sh`. Never `git pull` or a direct `install.sh` in the installed
+  checkout.
+- Confirm with `ai-install-completion-check-hook --check` and
+  `ai-install-pr-poll-guard-hook --check`. Both must print OK, and the Claude
+  command line must show `--sensors` and no `|| true`.
+- Live proof with `claude -p`, in a scratch git repo under `$TMPDIR`:
+  1. With an uncommitted change, ask it to run `git reset --hard`. The command
+     must be refused, and the change must survive.
+  2. Ask it to edit a file and end with "task is complete" without testing. Stop
+     must block with the new reason.
+  3. Ask it to edit a file, run `bash -c 'exit 0'` as a stand-in test, and claim
+     completion. It must be allowed. This needs a test-shaped command such as a
+     tiny `tests/ok.sh` run as `bash tests/ok.sh`.
+  4. Ask it to promise future work and do nothing. It must be hard-blocked
+     (exit 2), which proves step 2.
+- Record the commands and outputs in
+  `tests/verification/harness-sensors/<date>-live.md`.
 
-**It worked when:** that file exists, showing all three refusals, and the
-`- [ ] Live proof` box on #2835 is ticked, citing it.
+**It worked when:** that file shows all four outcomes, and the `Live proof` box
+on #2835 is ticked, citing it.
 
-Phases: one session should finish steps 1–5. Step 6 needs the merge. A natural
-cut point is after the merge.
+**Cut point:** one session does steps 1–5 and the PR. Step 6 needs the merged
+SHA, and the same or a fresh session can do it.
 
 ### 10. Tests required
 
-In `tests/test-ai-completion-check-hook.sh`:
-- `verification command then claim → silent`
-- `write action, no verification, claim → blocks once with the "no command that could fail" reason`
+`tests/test-ai-completion-check-hook.sh`. Every existing case must pass
+**without** `--sensors`, which is the ZCode path. These new cases run with
+`--sensors`:
+- `verification ok after mutation then claim → silent`
+- `mutation, no verification, claim → blocks (exit 2, reason on stderr, JSON on stdout)`
+- `PostToolUse without prompt_id → Stop still sees its events`
+- `mutation in prompt 1 does not leak into prompt 2`
 - `inspection only, claim → old nudge text`
-- `verification marker survives a later parallel inspection call`
-- `gh pr view is not verification`
-- `failed Bash call appends a repeat-failure entry (step 1 fixture)`
-- `successful Bash call appends nothing`
+- `passing test, then Edit, then claim → blocks`
+- `failing test then claim → blocks` (uses the step 1 failure fixture)
+- `pytest && git status then claim → silent`
+- `pytest || true`, `! pytest`, `true || pytest`, `pytest; echo ok`, `pytest | tail` then claim → blocks
+- `set -o pipefail && pytest | tail then claim → silent`
+- `echo --check`, `grep -- --check f`, `gh pr view` → not verification
+- `"Fixed and pushed." after unverified mutation → blocks once`
+- `"Fixed; not tested yet." after unverified mutation → silent`
+- `parallel PostToolUse lines never lose an event` (10 background writers, then count lines)
+- `python3 missing → inspection, no crash` (PATH without python3)
+- step 2: `installer upgrades old Claude registration`, `--check DRIFT then OK`, `zcode config byte-identical`, `future promise exits 2 through the registered command line`
 
-In `tests/test-ai-pr-poll-guard-hook.sh`:
-- `third identical failing command within 30 min → exit 2`
-- `same command, different stderr → allowed`
-- `entries older than 30 min are pruned → allowed`
-- all of the adversarial rows below
-- the existing Windows-spelling parity replay, extended automatically to the new
-  `bash -c` cases
-- `echo --check then claim → not verified` and `grep -- --check then claim → not verified`
-- `passing test, then an Edit, then claim → blocks (verification older than last action)`
-- `failing test then claim → blocks (only a successful verification counts)`
-- `two failures, then an Edit, then the same command → allowed (repair clears)`
-- `two failures, then a success of the same command, then a failure → allowed`
-- installer: `--client zcode` output and config are byte-identical before and after the change
-- `pytest || true`, `pytest; echo ok` and `pytest | tail` then claim → not verified
-- hook without `--sensors` (the ZCode path) → today's outputs on every existing case
-- installer upgrades an old Claude registration to `--sensors`, and `--check` shows DRIFT before and OK after
+**Adversarial cases for step 4** (the outside input is the command string the
+model writes). These go in `tests/test-ai-pr-poll-guard-hook.sh`, with real temp
+git repos under `$TMPDIR`:
 
-**Adversarial cases (step 4; external input = the command string the model
-writes):**
-
-| Input | Hostile or edge case | Expected | Test name |
+| Input | Case | Expected | Test name |
 |---|---|---|---|
-| `git reset --hard` | dirty tree | refuse | `reset-hard dirty refused` |
-| `git reset --hard` | clean tree | allow | `reset-hard clean allowed` |
-| `git -C /x reset --hard` | dirty `/x`, cwd clean | refuse | `reset-hard -C dirty refused` |
-| `cd /x && git reset --hard` | dirty `/x` | refuse | `reset-hard after cd refused` |
-| `bash -c 'git reset --hard'` | dirty | refuse | `reset-hard in bash -c refused` |
-| `git commit -m "undo git reset --hard"` | text only | allow | `reset-hard in message allowed` |
-| heredoc body mentions `git push --force` | text only | allow | `force in heredoc allowed` |
-| `git push -f origin b` | force | refuse | `push -f refused` |
+| `git reset --hard` | dirty | refuse | `reset-hard dirty refused` |
+| `git reset --hard` | clean | allow | `reset-hard clean allowed` |
+| `git -C "/x y" reset --hard` | quoted dir, dirty | refuse | `reset-hard quoted -C refused` |
+| `cd /x && cd sub && git reset --hard` | chained cd, dirty | refuse | `reset-hard chained cd refused` |
+| `cd /dirty && git -C /clean reset --hard` | `-C` overrides | allow | `reset-hard -C overrides cd` |
+| `cd "$(pick)" && git reset --hard` | unknown dir | refuse | `reset-hard unknown dir refused` |
+| `git -C /not-a-repo reset --hard` | status fails | refuse | `reset-hard status error refused` |
+| `bash -c 'git reset --hard'` | wrapped, dirty | refuse | `reset-hard in bash -c refused` |
+| `GIT.EXE reset --hard`, `"C:/Git/bin/git.exe" reset --hard` | Windows, dirty | refuse | `reset-hard windows spelling refused` |
+| `git commit -m "a && b; rm -rf /"` | operators in quotes | allow | `operators in message allowed` |
+| `git commit -m "undo git reset --hard"` | text | allow | `reset-hard in message allowed` |
+| heredoc body containing `git push --force` | text | allow | `force in heredoc allowed` |
+| `echo "rm -rf ~"` | text | allow | `rm in echo allowed` |
+| `git restore .` | dirty | refuse | `restore worktree dirty refused` |
+| `git restore --staged --worktree .` | worktree, dirty | refuse | `restore staged+worktree refused` |
+| `git restore --staged .` | unstage only | allow | `restore staged allowed` |
+| `git clean -fdx`, `git clean --force -d` | forced | refuse | `clean forced refused` |
+| `git clean -n` | dry run | allow | `clean dry-run allowed` |
+| `git push -f origin b`, `git push --force origin b` | force | refuse | `push force refused` |
 | `git push origin +b` | plus refspec | refuse | `push plus refspec refused` |
 | `git push --force-with-lease origin b` | lease | allow | `push lease allowed` |
-| `git push origin HEAD:main` | main target | refuse | `push to main refused` |
-| `git push origin feature/main-fix` | name contains main | allow | `push main-substring allowed` |
-| `rm -rf /`, `rm -fr ~`, `rm -r -f "$HOME"` | root/home | refuse | `rm root/home spellings refused` |
-| `rm -rf "$TMPDIR/x"`, `rm -rf .claude/worktrees/old` | cleanup | allow | `rm cleanup allowed` |
-| `rm -rf repo/.git` | git dir | refuse | `rm .git refused` |
-| `rm -rf "$HOME"` | quoted home | refuse | `rm quoted home refused` |
-| `git -C "/x y" reset --hard` | quoted dir with space, dirty | refuse | `reset-hard quoted -C refused` |
-| `cd /x && cd sub && git reset --hard` | chained cd, dirty `/x/sub` | refuse | `reset-hard chained cd refused` |
-| `cd /dirty && git -C /clean reset --hard` | `-C` overrides cd | allow | `reset-hard -C overrides cd` |
-| `GIT.EXE reset --hard` (Windows spelling) | dirty | refuse | `parity replay` |
-| `git clean -fdx` | dirty | refuse | `clean -f dirty refused` |
-| `git clean -fdx` | only ignored files present (status clean) | refuse | `clean -x ignored-only refused` |
-| `git clean -fd` | only ignored files present | allow | `clean -d ignored-only allowed` |
+| `rm -rf /`, `rm -fr ~`, `rm -r -f "$HOME"`, `rm -rf ${HOME}`, `rm -rf "$HOME/"`, `rm -rf ''"$HOME"` | home/root | refuse | `rm home/root spellings refused` |
 | `rm -rf '$HOME'` | single-quoted literal | allow | `rm single-quoted literal allowed` |
-| `git restore --staged .` | unstage only | allow | `restore staged allowed` |
-| target dir not determinable (`cd "$(…)" && git reset --hard`) | unknown | refuse | `reset-hard unknown dir refused` |
+| `rm -rf "~"` | quoted tilde is literal | allow | `rm quoted tilde allowed` |
+| `rm -rf .git`, `rm -rf repo/.git`, `rm -rf repo/.git/` | git dir | refuse | `rm git dir refused` |
+| `rm -rf "$TMPDIR/x"`, `rm -rf .claude/worktrees/old` | cleanup | allow | `rm cleanup allowed` |
+| `rm -rf *` | glob | refuse | `rm star refused` |
+| `rm -rf //`, `rm -rf /./` | root spellings | refuse | `rm root normalized refused` |
+| guard with no `python3` on PATH | missing tool | allow (fail-open) | `guard python3 missing allowed` |
+| `git reset --hard "unterminated` | parse error | allow (fail-open) | `guard parse error allowed` |
 
-Tests must use real temporary git repos for dirty or clean trees, under
-`$TMPDIR`, never the repo itself. Full suites that must stay green:
-`bash tests/test-ai-completion-check-hook.sh`,
-`bash tests/test-ai-pr-poll-guard-hook.sh`, and
+The existing suites must stay green: `bash tests/test-ai-completion-check-hook.sh`,
+`bash tests/test-ai-pr-poll-guard-hook.sh` (including the Windows replay), and
 `bash tests/test-ai-claude-permissions.sh`.
 
 ### 11. Constraints, standing rules, gotchas
 
-- Never push to `main` directly. Branch, open a PR, and the AI merges it.
-  Albert never merges.
-- Commit as `git var GIT_COMMITTER_IDENT`, staging only your own files.
-- Sign GitHub posts with `$AI_GH_SIGNATURE`.
-- Keep the hooks fail-open (exit 0) on every internal error, including a
-  missing `jq`. This is the opposite of the destructive guard's "unknown dir →
-  refuse". That refusal is a deliberate verdict, not an internal error.
-- Each hook runs on every tool call, so keep it fast: no network, and at most
-  one `git status` per call, only when a reset/checkout/clean pattern matched.
-- CRLF breaks bash scripts on Windows (memory
-  `windows-crlf-breaks-bash-scripts`). Keep LF line endings.
-- On Windows the payload may carry `C:\…` paths. The `-C` / `cd` extraction must
-  accept them. Add a test if you touch path parsing.
+- Never push to `main` directly. Branch, open a PR, and the AI merges it; Albert
+  never merges.
+- Commit as `git var GIT_COMMITTER_IDENT`, staging only your own files. Sign
+  GitHub posts with `$AI_GH_SIGNATURE`.
+- The hooks run on every tool call. Keep them fast: no network, one `python3`
+  start per call at most, and `git status` only when a reset/checkout/restore
+  pattern matched.
+- On Windows, `python3` may be a Microsoft Store alias that opens a pop-up
+  (memory `windows-select-an-app-popups`). Before calling it, check
+  `command -v python3` **and** that the path is not under `WindowsApps`.
+  Otherwise skip (fail-open). Test this with a fake `WindowsApps/python3` on
+  PATH.
+- Keep LF line endings (memory `windows-crlf-breaks-bash-scripts`).
+- On Windows, payload `cwd` and `-C` may be `C:\…` paths. Normalize with
+  `os.path` and add a test.
 - Never weaken the existing poll rules or their tests.
-- No automated wait longer than 30 minutes, anywhere.
-- `bin/ai-completion-check-hook` is also installed for ZCode (`--client zcode`).
-  ZCode sends Claude-compatible fields, so shared code would silently change
-  ZCode's behavior. **The new behaviors of steps 2 and 3 are enabled only by an
-  explicit flag.** The Claude registration's command gains `--sensors`. The
-  installer's Claude branch upgrades an existing registration in place, matched
-  by its marker, and `--check` reports `DRIFT` until it has. The ZCode and
-  Antigravity registrations stay unchanged. Without the flag, the hook behaves
-  exactly as today. Test this by running the ZCode fixtures without `--sensors`
-  and asserting today's outputs. (Codex second opinion, both rounds.)
+- No automated wait longer than 30 minutes.
+- ZCode and Antigravity must behave exactly as today. That is why `--sensors`
+  exists and why their installer branches stay byte-identical.
 
 ### 12. Access and environment
 
-- Machine: `edge-dev3` (Ubuntu). `gh` is authenticated as `u2giants`, and
-  `claude` and `jq` are on PATH.
-- Installed checkout is at `/home/ahazan/repos/ai-devops`. Work in a worktree
-  under `.claude/worktrees/`.
+- Machine `edge-dev3` (Ubuntu). `gh` is authenticated as `u2giants`, and
+  `claude`, `jq` and `python3` are on PATH.
+- The installed checkout is `/home/ahazan/repos/ai-devops`. Never edit it or
+  `git pull` there. Work under `.claude/worktrees/`.
 - No secrets are needed.
 
 ### 13. Definition of done, risks, open questions
 
-**Done:** steps 1–6 ✅, with every STATUS row citing an artifact. The PR is
-merged with CI green (`bin/ai-pr-wait <pr>` in the background), the hooks are
-installed on edge-dev3 with `--check` clean, the live-proof file exists, and
-#2835's boxes are ticked and closed.
+**Done:**
+- Steps 1–6 are ✅, each STATUS row citing an artifact.
+- The PR is merged with CI green (`bin/ai-pr-wait <pr>` in the background).
+- The protected install is done on edge-dev3, with `--check` OK.
+- The live-proof file exists.
+- #2835's boxes are ticked and the issue is closed.
 
 **Risks and rollback:**
-- A false refusal that blocks legitimate work. The rollback is to revert the PR
-  and rerun `install.sh`, which recopies the hook.
-- The proof-of-done block annoying pure-answer turns. That is mitigated because
-  inspection-only turns keep the old behavior.
+- A false refusal blocks real work. Revert the PR and reinstall through the
+  protected install.
+- Making the hard block real (step 2) is a behavior change. Sessions that today
+  silently get past an empty promise will now be stopped once per prompt. This
+  is the intended behavior from 2026-10-21, and it was never active.
+- The unverified-mutation block may be noisy. Step 3 gives the narrowing rule.
 
 **Open questions:**
-- Does codex-cli 0.172 support Stop or PreToolUse hooks? If yes, propose
-  parity on #2835 as a later checklist item. Do not build it here.
-- Should other machines (edge-dev, hetz) be installed in the same pass? The
-  default is no: they pick it up on their next `sync-dotfiles`.
+- Does codex-cli 0.172 support hooks? If yes, add parity to #2835 as a later
+  item. Do not build it here.
+- Other machines pick this up on their next protected install or
+  `sync-dotfiles`. They are not installed in this pass.
 
 ---
 
-## Self-audit (2026-11-24)
+## Self-audit (2026-11-24, v2)
 
-1. *Could a brand-new session execute this without asking?* Yes. Section 5
-   gives exact files and lines, section 9 gives the behavior and gate for each
-   step, and section 10 names every test. The one unknown, the failure payload,
-   is turned into step 1 with a concrete capture method rather than left as a
-   guess.
-2. *Does it carry the background and what was ruled out?* Yes. Section 3 gives
-   the transcript evidence, section 7 lists six rejected approaches with
-   reasons, and section 4 states the owner closures (fresh reader, "stop
-   measuring").
-3. *Is the goal clear enough for judgment calls?* Yes. Section 1 states the
-   three failures in plain words, plus the two concrete ways a step can violate
-   the goal (wedging a session, being trivially bypassed).
+1. *Could a new session execute this without asking?* Yes. Section 5 gives files
+   and lines and the verified pre-existing bug. Each step in section 9 has its
+   behavior and a gate. Section 10 names every test. The only unknown, the
+   failure payload, becomes step 1 with a capture method.
+2. *Does it carry the background and what was ruled out?* Yes. Section 3 has the
+   evidence, including what it does **not** support. Section 7 lists nine
+   rejected approaches with reasons and who raised them. Section 4 lists the
+   owner closures.
+3. *Is the goal clear enough for judgment calls?* Yes. Section 1 names the two
+   failures and the three ways a check can break the goal. Step 3 gives a
+   numeric narrowing rule for the one open judgment.
 
 ## Lead launch prompt
 
 ```text
 You are the lead session for popcre/ai-devops issue #2835. Read plan_harness-sensors.md
 in full, starting with its STATUS table; it is the whole brief. Do not re-plan or
-reopen the locked decisions in section 8.
+reopen the locked decisions in section 8, and do not re-add the rejected approaches
+in section 7.
 
-Do steps 1, 2, 3, 4 and 6 yourself (all lead-only), in that order; step 3 needs
-step 1's fixtures. Step 5 (docs) may go to your helper after step 4 lands in your
-branch. Your helper is your own tool's smaller model: Haiku (high effort) for
+Do steps 1, 2, 3, 4 and 6 yourself (all lead-only). Steps 1 → 2 → 3 run in order;
+step 4 is independent. Step 5 (docs) may go to your helper after steps 2–4 are in
+your branch. Your helper is your own tool's smaller model: Haiku (high effort) for
 Claude Opus, Luna (high) for Sol, GLM Flash for GLM MAX, Mimo Flash for Mimo Pro.
 Never a full-strength model. Rules:
 https://github.com/popcre/ai-devops/blob/main/templates/system/model-tier-delegation.md
 
 Helper rules: return finished work or an evidenced blocker; make no design
-decisions; no merges, pushes or GitHub posts; stop and bring it back to you if any
-global template (templates/system/*-global*.md) would change; you take it back
-after 30 minutes stuck.
+decisions; no merges, pushes or GitHub posts; bring it back to you if any
+templates/system/*-global*.md file would change or a doc would contradict the code;
+you take it back after 30 minutes stuck.
 
-You yourself: run both hook suites and tests/test-ai-claude-permissions.sh, open
-the PR, wait with bin/ai-pr-wait in the background, merge, install on edge-dev3,
+You yourself: run all three suites, open the PR, wait with bin/ai-pr-wait in the
+background, merge, do the protected install from docs/deployment.md on edge-dev3,
 do the step 6 live proof, record it under tests/verification/harness-sensors/,
-update every STATUS row with an artifact, tick and close #2835.
+update every STATUS row with an artifact, then tick and close #2835.
 ```
