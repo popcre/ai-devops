@@ -12,7 +12,7 @@ work="$(mktemp -d)"; trap 'rm -rf "$work"' EXIT
 export HOME="$work/home"; mkdir -p "$HOME" "$work/stub"
 export GIT_CONFIG_GLOBAL="$work/gitconfig"; printf '[user]\n\tname=t\n\temail=t@t\n[credential "https://github.com"]\n\thelper=\n' > "$GIT_CONFIG_GLOBAL"
 export GITHUB_BACKUP_ROOT="$work/root" GITHUB_BACKUP_NAS="$work/nas" GITHUB_BACKUP_DROPBOX="$work/dropbox"
-export GITHUB_BACKUP_GIT_BASE="$work/gh"
+export GITHUB_BACKUP_GIT_BASE="$work/gh" GITHUB_BACKUP_GH="$work/stub/gh"
 
 # Fake GitHub: one repository with two commits and a tag.
 mkdir -p "$work/gh/acme" && git init -q --bare "$work/gh/acme/app.git"
