@@ -8,6 +8,7 @@ Read this first. A new or moved document needs the four-key header; then run `ai
 - Ghost-run escape (LANE_EPOCH): [plan and STATUS](plan_ghost-run-epoch.md).
 - DeepSeek reviewer consolidation: [plan and STATUS](plan_deepseek-harness-openrouter.md).
 - Reviewer savings without quality loss: [plan and STATUS](plan_reviewer-quality-cost.md).
+- Harness sensors (proof-of-done, repeat-failure stop, destructive-command guard; #2835): [plan and STATUS](plan_harness-sensors.md).
 - Reviewer system: advisory, one rotating CI reviewer (owner ruling 2026-10-29). Plan + STATUS: [plan_skinny-review.md](plan_skinny-review.md); checklist: [docs/reviewer-enforcement-inventory-2026-10-29.md](docs/reviewer-enforcement-inventory-2026-10-29.md).
 - Merge-blocking checks: only data-safety gates block a merge; everything else is advisory (owner ruling 2026-10-30). Plan + STATUS: [plan_lean-required-checks.md](plan_lean-required-checks.md).
 
