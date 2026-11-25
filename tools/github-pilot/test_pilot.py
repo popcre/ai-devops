@@ -15,6 +15,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
@@ -41,6 +42,33 @@ def _free_port():
 def _window(consumed=100, bucket="core", principals=(("m1", "p1"),)):
     return {"bucket": bucket, "reset": 7200, "start": 3600, "limit": 5000,
             "consumed": consumed, "principals": list(principals)}
+
+
+class FixtureArgumentTests(unittest.TestCase):
+    def test_fields_headers_and_method(self):
+        from fixtures import fake_gh
+        with mock.patch.object(fake_gh, "request", return_value=(200, {}, b"")) as request:
+            fake_gh.main(["api", "-H", "Accept: fixture", "pulls", "-f", "head=01",
+                          "-F", "draft=true", "-X", "PATCH"])
+            request.assert_called_once_with("PATCH", "pulls", {"head": "01", "draft": True},
+                                            {"Accept": "fixture"})
+            fake_gh.main(["api", "pulls?state=open", "-X", "GET", "-f", "head=a b"])
+            request.assert_called_with("GET", "pulls?state=open&head=a+b", None, {})
+            fake_gh.main(["api", "pulls", "--raw-field", "head=a"])
+            request.assert_called_with("POST", "pulls", {"head": "a"}, {})
+
+
+@unittest.skipUnless(outage, "requires fcntl")
+class AuditPathTests(unittest.TestCase):
+    def test_relative_chdir_and_resolved_write(self):
+        with tempfile.NamedTemporaryFile(mode="w") as trace:
+            trace.write('10 chdir("../.." <unfinished ...>\n'
+                        '10 <... chdir resumed>) = 0\n'
+                        '10 mkdir("outside", 0700) = 0\n'
+                        '10 openat(AT_FDCWD</tmp>, "alias", O_WRONLY) = 4</outside/file>\n')
+            trace.flush()
+            report = outage.audit(trace.name, "/tmp/drill", ["/tmp"])
+        self.assertEqual(report["writes_outside_scratch"], ["/outside", "/outside/file"])
 
 
 class QuotaTests(unittest.TestCase):

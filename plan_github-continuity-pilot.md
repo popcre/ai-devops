@@ -15,7 +15,7 @@ Executed November 25, 2026 on edge-dev3. Findings: [docs/verification/github-pil
 
 | Step | State | Evidence |
 |---|---|---|
-| 1. Select sample | ✅ done 2026-11-25 | Six complete days (Nov 19–24); peak core hour Nov 19 2:08 PM EST; timing day Nov 23 (11 PRs); 22 of 50 live requests spent |
+| 1. Select sample | ✅ done 2026-11-25 | Six complete days (Nov 19–24); peak core hour Nov 19 2:08 PM EST; timing day Nov 23 (11 PRs); see findings for the reported request breakdown and reconciliation gap |
 | 2. Offline recovery | ⚠️ done, gate failed 2026-11-25 | Recovery, journal and one-PR checks pass; slow GitHub makes three startup tools exceed 5 s (one hangs). Drafts #2879/#2880 closed unmerged |
 | 3. Shared notifications | ⏸ not run 2026-11-25 | Core hour inconclusive (S=0, U=4,165 of 4,165); GraphQL ruled out. Live listener proof stays open on #2869 |
 | 4. Check delays | ✅ diagnosis 2026-11-25 | Required check ~15 s, queue-to-merge 0.9 min, 0 ejections; slow PRs waited before entering the queue. No matched pairs |

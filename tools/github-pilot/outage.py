@@ -627,15 +627,15 @@ class Drill:
         self.result["checks"]["reconcile_a"] = {"rebased": a2 != a1, "test_exit": rerun_a.returncode}
         self.record("a", a2, "main")
         conflict = self.sh("git", "-C", self.ws["b"], "rebase", "-q", "--onto", a2, a1, check=False)
-        conflicted = conflict.returncode != 0
-        if conflicted:
-            self.sh("git", "-C", self.ws["b"], "rebase", "--abort")
+        unmerged = self.sh("git", "-C", self.ws["b"], "diff", "--name-only", "--diff-filter=U")
+        if conflict.returncode == 0 or unmerged.stdout.splitlines() != ["shared.txt"]:
+            raise RuntimeError("expected a rebase conflict in shared.txt")
         data = journal_read(self.journal_path("b"))
         data["items"]["pilot/b"]["state"] = "pending_conflict"
         data["items"]["pilot/b"]["depends_on"]["commit"] = a2
         journal_write(self.journal_path("b"), data)
         b_state = self.worker("b", "conflict_pending")
-        self.result["checks"]["conflict_stays_pending"] = conflicted and b_state == "pending_conflict"
+        self.result["checks"]["conflict_stays_pending"] = b_state == "pending_conflict"
         # 6. A: lost response after create, then interrupt before marking delivered
         open(os.path.join(self.srv_root, "lose_next_create"), "w").close()
         self.worker("a", "lost_response")
@@ -644,7 +644,6 @@ class Drill:
         for proc in procs:
             self.finish(proc, "a", "concurrent_restart")
         # 7. resolve B's conflict, rerun its test, then submit after A
-        self.sh("git", "-C", self.ws["b"], "rebase", "-q", "--onto", a2, a1, check=False)
         with open(os.path.join(self.ws["b"], "shared.txt"), "w") as handle:
             handle.write("line one\nline two\nline three\nline four from upstream\nline four from b\n")
         self.sh("git", "-C", self.ws["b"], "add", "shared.txt")
@@ -730,7 +729,14 @@ def audit(trace, root_cwd, allowed):
         return any(path == a or path.startswith(a.rstrip("/") + "/") for a in allowed)
 
     with open(trace, errors="replace") as handle:
+        pending = {}
         for line in handle:
+            if line.rstrip().endswith("<unfinished ...>"):
+                pending[line.split()[0]] = line.split("<unfinished ...>")[0]
+                continue
+            resumed = re.match(r"^(\d+)\s+<\.\.\. \w+ resumed>(.*)", line)
+            if resumed and resumed[1] in pending:
+                line = pending.pop(resumed[1]) + resumed[2]
             m = FORK.match(line)
             if m:
                 cwd[m.group(2)] = cwd.get(m.group(1), root_cwd)
@@ -751,7 +757,8 @@ def audit(trace, root_cwd, allowed):
             if m:
                 pid, dirfd, path, flags = m.groups()
                 if any(f in flags for f in ("O_WRONLY", "O_RDWR", "O_CREAT", "O_TRUNC")) and not line.rstrip().endswith(("ENOENT (No such file or directory)", "EACCES (Permission denied)", "EROFS (Read-only file system)")):
-                    full = absolute(pid, path, dirfd)
+                    opened = re.search(r"\s=\s+\d+<(/[^>]+)>$", line.rstrip())
+                    full = opened[1] if opened else absolute(pid, path, dirfd)
                     if not ok(full):
                         bad_write.append(full)
                 continue
@@ -795,7 +802,10 @@ def main(argv):
         finally:
             drill.stop()
     elif cmd == "audit":
-        print(json.dumps(audit(argv[2], argv[3], argv[4:]), sort_keys=True))
+        result = audit(argv[2], argv[3], argv[4:])
+        print(json.dumps(result, sort_keys=True))
+        if result["non_local_destinations"] or result["writes_outside_scratch_count"]:
+            sys.exit(1)
     else:
         sys.exit(__doc__)
 

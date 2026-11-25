@@ -7,12 +7,15 @@ public host. Connection refusal, HTTP errors and slow answers surface the way
 gh surfaces them: an error on stderr and a non-zero exit.
 """
 
+import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import urllib.error
 import urllib.request
+import urllib.parse
 
 API = os.environ.get("PILOT_API", "http://127.0.0.1:9")
 REPO = os.environ.get("PILOT_REPO", "pilot-owner/pilot-repo")
@@ -23,11 +26,11 @@ def fail(message, code=1):
     sys.exit(code)
 
 
-def request(method, path, body=None):
+def request(method, path, body=None, headers=None):
     url = API.rstrip("/") + "/api/" + path.lstrip("/")
     data = None if body is None else json.dumps(body).encode()
     req = urllib.request.Request(url, data=data, method=method,
-                                 headers={"Content-Type": "application/json"})
+                                 headers={"Content-Type": "application/json", **(headers or {})})
     try:
         with urllib.request.urlopen(req) as resp:  # no client timeout, like gh
             return resp.status, dict(resp.headers), resp.read()
@@ -76,28 +79,45 @@ def main(args):
         print("Logged in to fixture host")
         return
     if args[0] == "api":
-        rest = args[1:]
-        method = option(rest, "-X") or option(rest, "--method") or "GET"
-        jq = option(rest, "--jq") or option(rest, "-q")
-        include = "--include" in rest or "-i" in rest
-        skip = {"-X", "--method", "--jq", "-q", "-H", "--header", "--hostname",
-                "-f", "-F", "--field", "--raw-field", "--cache", "--template", "-t"}
-        path = None
-        i = 0
-        while i < len(rest):
-            item = rest[i]
-            if item in skip:
-                i += 2
-                continue
-            if item.startswith("-"):
-                i += 1
-                continue
-            path = item
-            break
-        if path is None:
-            fail("api: missing path")
-        status, headers, body = request(method, path)
-        emit(body, jq, (status, headers) if include else None)
+        parser = argparse.ArgumentParser(prog="gh api", allow_abbrev=False)
+        parser.add_argument("path")
+        parser.add_argument("-X", "--method")
+        parser.add_argument("-q", "--jq")
+        parser.add_argument("--paginate", action="store_true")  # fixture responses have one page
+        parser.add_argument("--hostname")  # transport always uses the fixture
+        parser.add_argument("-i", "--include", action="store_true")
+        parser.add_argument("-H", "--header", action="append", default=[])
+        parser.add_argument("-f", "--raw-field", action="append", default=[])
+        parser.add_argument("-F", "--field", action="append", default=[])
+        opts = parser.parse_args(args[1:])
+        fields = {}
+        for typed, items in ((False, opts.raw_field), (True, opts.field)):
+            for item in items:
+                key, sep, value = item.partition("=")
+                if not sep or not key:
+                    fail("api: expected key=value")
+                if typed:
+                    if value in ("true", "false", "null"):
+                        value = json.loads(value)
+                    elif re.fullmatch(r"-?[0-9]+", value):
+                        value = int(value)
+                    elif value.startswith("@"):
+                        fail("api: file fields unsupported by fixture")
+                fields[key] = value
+        headers = {}
+        for item in opts.header:
+            key, sep, value = item.partition(":")
+            if not sep or not key:
+                fail("api: expected header name and value")
+            headers[key] = value.strip()
+        method = (opts.method or ("POST" if fields else "GET")).upper()
+        path = opts.path
+        if method == "GET" and fields:
+            query = {k: v if isinstance(v, str) else json.dumps(v) for k, v in fields.items()}
+            path += ("&" if "?" in path else "?") + urllib.parse.urlencode(query)
+            fields.clear()
+        status, headers, body = request(method, path, fields or None, headers)
+        emit(body, opts.jq, (status, headers) if opts.include else None)
         return
     if args[0] == "pr":
         sub = args[1] if len(args) > 1 else ""

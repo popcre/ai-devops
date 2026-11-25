@@ -25,13 +25,13 @@ Complete New York days with records from both machines: November 19–24, 2026 (
 
 - Quota hour: November 19, 2026, 2:08–3:08 PM EST (GitHub's own rolling window), REST core, 4,165 of 5,000 used.
 - Timing day: November 23, 2026, the day with the most distinct non-prose PRs (11).
-- Live request budget: 50 extra requests reserved as 10 discovery, 12 drafts and cleanup, 8 status, 20 timing. Spent 19 (discovery 3, timing 3, drafts and cleanup 11, status 2); no allocation overran. Delivering these findings used the normal pull-request path and is outside the pilot budget.
+- Live request budget: 50 extra requests reserved as 10 discovery, 12 drafts and cleanup, 8 status, 20 timing. The reported subtotals (discovery 3, timing 3, drafts and cleanup 11, status 2) sum to 19. The original plan status recorded 22. No per-request ledger was retained in the repository, so the actual spend and allocation compliance are unverified. Delivering these findings used the normal pull-request path and is outside the pilot budget.
 
 ## 1. Work through an outage (fixture, network-isolated)
 
 The drill ran the real toolkit entry points in two disposable workspaces inside a network namespace that only had loopback. HOME and temporary storage were private, the toolkit was mounted read-only, and every connection and write was traced. Audit: destinations only loopback and local sockets; 0 writes outside scratch storage. The fixture gh holds no credential.
 
-Entry points, two workspaces, seconds (target: a clear deferred or blocked answer within 5 s):
+Timings below are observations from one fixture run, with one invocation per workspace and mode. The five-second verdict applies to that run. To repeat the measurement, run `tools/github-pilot/run_drill.sh TOOLKIT OUTDIR` in the isolated Linux environment and inspect each delay row in `drill.json` under `entry_points` for seconds, watchdog termination and target status.
 
 | Tool | Healthy | Refused | 503 | Slow (30 s per answer) |
 |---|---|---|---|---|
@@ -42,7 +42,7 @@ Entry points, two workspaces, seconds (target: a clear deferred or blocked answe
 
 † The healthy memory-sync control reached the test hub (clone and fetch succeeded) and then stopped on a check that the private test home is toolkit-managed. That stop is unrelated to the network, so its healthy time is not a comparable baseline.
 
-No mode pushed anything, overrode a collision or skipped a visibility check. The failures are responsiveness only: workspace status exceeds 5 s even when healthy, and three tools wait without limit on a slow GitHub, which the plan counts as a failed continuity trial.
+No mode pushed anything, overrode a collision or skipped a visibility check. The failures are responsiveness only: workspace status exceeds 5 s even when healthy, and three tools exceeded the target with delayed fixture responses, which the plan counts as a failed continuity trial.
 
 Local work and recovery, both workspaces:
 
