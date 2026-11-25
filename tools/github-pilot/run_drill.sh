@@ -16,23 +16,23 @@ exec env -i PATH=/usr/local/bin:/usr/bin:/bin HOME="$HOST_HOME" TOOLKIT="$TOOLKI
 set -euo pipefail
 ip link set lo up
 mount --bind "$OUT" "$OUT"
-mount -t tmpfs tmpfs /tmp
-mkdir -p /tmp/out-bind
-mount --bind "$OUT" /tmp/out-bind
+export TMPDIR=/tmp
+mount -t tmpfs tmpfs "$TMPDIR"
+mkdir -p "$TMPDIR/out-bind"
+mount --bind "$OUT" "$TMPDIR/out-bind"
 mount -t tmpfs tmpfs "$HOME"
 mount --bind "$TOOLKIT" "$TOOLKIT"
 mount -o remount,bind,ro "$TOOLKIT"
-export TMPDIR=/tmp
-mkdir -p /tmp/drill
-cd /tmp/drill
+mkdir -p "$TMPDIR/drill"
+cd "$TMPDIR/drill"
 chmod +x "$TOOLKIT/tools/github-pilot/fixtures/fake_gh.py" 2>/dev/null || true
-cp "$TOOLKIT/tools/github-pilot/fixtures/fake_gh.py" /tmp/fake_gh && chmod +x /tmp/fake_gh
+cp "$TOOLKIT/tools/github-pilot/fixtures/fake_gh.py" "$TMPDIR/fake_gh" && chmod +x "$TMPDIR/fake_gh"
 set +e
-strace -f -y -qq -s 256 -o /tmp/trace \
+strace -f -y -qq -s 256 -o "$TMPDIR/trace" \
   -e trace=connect,sendto,sendmsg,openat,open,creat,rename,renameat,renameat2,unlink,unlinkat,mkdir,mkdirat,link,symlink,truncate,chdir,fchdir,clone,clone3,fork,vfork \
-  env PILOT_OUT=/tmp/out-bind python3 -B "$TOOLKIT/tools/github-pilot/outage.py" drill /tmp/drill "$TOOLKIT" /tmp/fake_gh 18080 \
-  > /tmp/out-bind/drill.json 2> /tmp/out-bind/drill.err
-echo "drill_exit=$?" >> /tmp/out-bind/drill.err
-python3 -B "$TOOLKIT/tools/github-pilot/outage.py" audit /tmp/trace /tmp/drill /tmp "$HOME" /dev \
-  > /tmp/out-bind/audit.json
+  env PILOT_OUT="$TMPDIR/out-bind" python3 -B "$TOOLKIT/tools/github-pilot/outage.py" drill "$TMPDIR/drill" "$TOOLKIT" "$TMPDIR/fake_gh" 18080 \
+  > "$TMPDIR/out-bind/drill.json" 2> "$TMPDIR/out-bind/drill.err"
+echo "drill_exit=$?" >> "$TMPDIR/out-bind/drill.err"
+python3 -B "$TOOLKIT/tools/github-pilot/outage.py" audit "$TMPDIR/trace" "$TMPDIR/drill" "$TMPDIR" "$HOME" /dev \
+  > "$TMPDIR/out-bind/audit.json"
 '
