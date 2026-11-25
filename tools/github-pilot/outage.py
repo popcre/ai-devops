@@ -127,7 +127,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._json(200, {"id": 424242, "login": "pilot-fixture"})
         elif path == "rate_limit":
             res = {b: {"limit": 5000, "remaining": 4990, "reset": now + 3600, "used": 10}
-                   for b in ("core", "graphql", "search")}
+                   for b in ("core", "graphql", "search", "code_search")}
             self._json(200, {"resources": res, "rate": res["core"]},
                        {"x-ratelimit-limit": "5000", "x-ratelimit-remaining": "4990",
                         "x-ratelimit-reset": str(now + 3600), "x-ratelimit-resource": "core"})
