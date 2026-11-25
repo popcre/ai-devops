@@ -37,9 +37,11 @@ bash "$tool" run >"$work/out1" 2>&1; check "first run exits 0" '[ $? -eq 0 ]'
 check "mirror has full history and tags" '[ "$(git -C "$work/root/mirrors/acme/app.git" rev-list --all --count)" = 2 ] && git -C "$work/root/mirrors/acme/app.git" rev-parse -q --verify v1 >/dev/null'
 check "issues pages merged into one array" '[ "$(jq length "$work/root/meta/acme/app/issues.json")" = 2 ]'
 check "bundle restores the repository" 'git clone -q "$work/root/bundles/acme/app.bundle" "$work/restored" 2>/dev/null && cmp -s "$work/src/f" "$work/restored/f"'
-check "NAS copy has mirror and meta" '[ -d "$work/nas/mirrors/acme/app.git" ] && [ -f "$work/nas/meta/acme/app/issues.json" ]'
+check "NAS copy has bundle and meta" '[ -f "$work/nas/bundles/acme/app.bundle" ] && [ -f "$work/nas/meta/acme/app/issues.json" ]'
 check "Dropbox copy has bundle and meta" '[ -f "$work/dropbox/bundles/acme/app.bundle" ] && [ -f "$work/dropbox/meta/acme/app/pulls.json" ]'
 check "check reports fresh success" 'bash "$tool" --check | grep -q "^OK"'
+
+check "NAS bundle restores" 'git clone -q "$work/nas/bundles/acme/app.bundle" "$work/r2" 2>/dev/null'
 
 # A branch deleted on GitHub must stay in the backup.
 ( cd "$work/src" && git push -q origin HEAD:refs/heads/side && git push -q origin --delete side ) 2>/dev/null

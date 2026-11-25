@@ -10,6 +10,7 @@
 # Where it goes (three copies):
 #   1. local drive   $GITHUB_BACKUP_ROOT   (default /mnt/secondary-hdd/github-backup)
 #   2. Synology NAS  $GITHUB_BACKUP_NAS    (default edgesynology1:/volume1/homes/ai/github-backup)
+#      bundles + metadata only (tar over ssh; the NAS refuses rsync).
 #   3. Dropbox       $GITHUB_BACKUP_DROPBOX (default ~/Dropbox/backups/github)
 #      bundles + metadata only; Dropbox keeps its own version history.
 #
@@ -101,15 +102,18 @@ do_run() {
   log "local copy: $((total - failed))/$total repositories complete"
 
   local copies_ok=1
-  local nas_err="$ROOT/.nas-rsync.err"
-  local mk=(mkdir -p "$NAS")
-  case "$NAS" in *:*) mk=(ssh -o BatchMode=yes -o ConnectTimeout=20 "${NAS%%:*}" "mkdir -p '${NAS#*:}'") ;; esac
-  if "${mk[@]}" 2>"$nas_err" &&
-     rsync -a --timeout=600 -e 'ssh -o BatchMode=yes -o ConnectTimeout=20' \
-       --exclude .lock --exclude .nas-rsync.err "$ROOT/" "$NAS/" 2>>"$nas_err"; then
-    log "NAS copy: ok"
+  # NAS: Synology refuses rsync for non-privileged accounts, so changed bundle
+  # and metadata files are streamed with tar over ssh. A stamp marks the last
+  # successful copy; only files newer than it are sent.
+  local nas_err="$ROOT/.nas.err" stamp="$ROOT/.nas-stamp" started="$ROOT/.nas-stamp.new" files="$ROOT/.nas-files"
+  : > "$started"
+  ( cd "$ROOT" && if [ -f "$stamp" ]; then find bundles meta repos.tsv -type f -newer "$stamp"; else find bundles meta repos.tsv -type f; fi ) > "$files"
+  local dest="${NAS#*:}" sink=(sh -c)
+  case "$NAS" in *:*) sink=(ssh -o BatchMode=yes -o ConnectTimeout=20 "${NAS%%:*}") ;; esac
+  if { [ ! -s "$files" ] || tar -C "$ROOT" -cf - -T "$files" | "${sink[@]}" "mkdir -p '$dest' && tar -xf - -C '$dest'"; } 2>"$nas_err"; then
+    mv -f "$started" "$stamp"; log "NAS copy: ok ($(wc -l < "$files") changed files)"
   else
-    log "ERROR NAS copy failed: $(grep -v -i -E 'post-quantum|store now|pq.html|server may' "$nas_err" | tail -2)"; copies_ok=0
+    rm -f "$started"; log "ERROR NAS copy failed: $(grep -v -i -E 'post-quantum|store now|pq.html|server may' "$nas_err" | tail -2)"; copies_ok=0
   fi
   if mkdir -p "$DROPBOX" && rsync -a --delete-after "$ROOT/bundles/" "$DROPBOX/bundles/" &&
      rsync -a --delete-after "$ROOT/meta/" "$DROPBOX/meta/"; then log "Dropbox copy: ok"

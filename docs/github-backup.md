@@ -17,7 +17,7 @@ the `popcre` organization.
 | Copy | Location | Contents |
 |---|---|---|
 | Local drive | `/mnt/secondary-hdd/github-backup` | git mirrors (+ wikis), bundles, metadata JSON |
-| Synology NAS | `edgesynology1:/volume1/homes/ai/github-backup` | same as local |
+| Synology NAS | `edgesynology1:/volume1/homes/ai/github-backup` | bundles + metadata JSON (sent with tar over ssh; the NAS refuses rsync for this account) |
 | Dropbox | `~/Dropbox/backups/github` | bundles + metadata JSON (Dropbox keeps version history) |
 
 Metadata per repository (`meta/<owner>/<repo>/`): issues, issue comments,
