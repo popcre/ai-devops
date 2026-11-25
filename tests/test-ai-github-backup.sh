@@ -17,12 +17,13 @@ export GITHUB_BACKUP_GIT_BASE="$work/gh" GITHUB_BACKUP_GH="$work/stub/gh"
 # Fake GitHub: one repository with two commits and a tag.
 mkdir -p "$work/gh/acme" && git init -q --bare "$work/gh/acme/app.git"
 git clone -q "$work/gh/acme/app.git" "$work/src" 2>/dev/null
-( cd "$work/src" && echo a > f && git add f && git commit -qm one && git tag v1 && echo b >> f && git commit -qam two && git push -q origin HEAD --tags ) 2>/dev/null
+( cd "$work/src" && echo a > f && git add f && git commit -qm one && git tag v1 && echo b >> f && git commit -qam two && git push -q origin HEAD --tags && git push -q origin HEAD:refs/pull/1/head ) 2>/dev/null
 
 cat > "$work/stub/gh" <<'EOF'
 #!/usr/bin/env bash
 [ "$1" = api ] || exit 1; shift
 [ "$1" = --paginate ] && shift
+[ -n "${GITHUB_BACKUP_FAIL_META:-}" ] && case "$1" in repos/*) exit 1 ;; esac
 case "$1" in
   user/repos*) printf 'acme/app\tfalse\n' ;;
   repos/acme/app) echo '{"full_name":"acme/app"}' ;;
@@ -54,6 +55,17 @@ rm -f "$work/root/last-success"
 GITHUB_BACKUP_NAS="/proc/nope/nas" bash "$tool" run >/dev/null 2>&1; check "NAS failure exits nonzero" '[ $? -ne 0 ]'
 check "failed run records no success" '[ ! -f "$work/root/last-success" ] && jq -e ".status==\"failed\"" "$work/root/last-run.json" >/dev/null'
 check "check fails with no success" '! bash "$tool" --check >/dev/null'
+
+# A failing API call must not wipe the last good metadata.
+GITHUB_BACKUP_FAIL_META=1 bash "$tool" run >/dev/null 2>&1
+check "failed metadata fetch keeps last good repo.json and issues.json" 'jq -e .full_name "$work/root/meta/acme/app/repo.json" >/dev/null && [ "$(jq length "$work/root/meta/acme/app/issues.json")" = 2 ]'
+check "no temp files leak into copied trees" '! find "$work/root/meta" "$work/nas" -name "*.tmp" | grep -q .'
+
+# A sharply shrunk repository list fails the run.
+printf 'acme/app\tfalse\n%.0s' 1 2 3 4 5 6 7 8 9 10 > "$work/root/repos.tsv"
+bash "$tool" run >/dev/null 2>&1; check "repository list shrink fails the run" '[ $? -ne 0 ]'
+GITHUB_BACKUP_ACCEPT_SHRINK=1 bash "$tool" run >/dev/null 2>&1; check "accepted shrink succeeds" '[ $? -eq 0 ]'
+check "open-PR refs are mirrored" 'git -C "$work/root/mirrors/acme/app.git" rev-parse -q --verify refs/pull/1/head >/dev/null'
 
 check "install skips on another host" 'GITHUB_BACKUP_HOST=not-this-host bash "$tool" --install | grep -q "^SKIP"'
 

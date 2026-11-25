@@ -6,7 +6,9 @@
 #   - a full git mirror (all branches, tags, history) and the wiki if present
 #   - issues, pull requests, all comments, review comments, releases, labels
 #     and milestones as JSON (GitHub-only data that a git clone never has)
-#   - a single-file git bundle (restorable with `git clone <bundle>`)
+#   - a single-file git bundle (restorable with `git clone <bundle>`), plus a
+#     wiki bundle and all Git LFS objects (lfs/<owner>/<repo>/objects)
+#   - open-PR commits (refs/pull/*) are kept in the mirror and bundle
 # Where it goes (three copies):
 #   1. local drive   $GITHUB_BACKUP_ROOT   (default /mnt/secondary-hdd/github-backup)
 #   2. Synology NAS  $GITHUB_BACKUP_NAS    (default edgesynology1:/volume1/homes/ai/github-backup)
@@ -43,12 +45,19 @@ export AI_GH_CALLER=ai-github-backup
 log() { printf '%s %s\n' "$(date '+%F %T')" "$*"; }
 
 # Save one paginated API list to a file as a single JSON array.
+# Never truncates the last good file: writes go to $ROOT/.work and replace the
+# target only after the whole download and conversion succeed.
 save_list() { # endpoint outfile
-  local tmp="$2.tmp"
-  if "$GH" api --paginate "$1" > "$tmp" 2>/dev/null && jq -s 'add // []' "$tmp" > "$2"; then
-    rm -f "$tmp"; return 0
+  local raw="$ROOT/.work/raw.$$" out="$ROOT/.work/out.$$"
+  if "$GH" api --paginate "$1" > "$raw" 2>/dev/null && jq -s 'add // []' "$raw" > "$out"; then
+    mv -f "$out" "$2"; rm -f "$raw"; return 0
   fi
-  rm -f "$tmp"; return 1
+  rm -f "$raw" "$out"; return 1
+}
+save_one() { # endpoint outfile
+  local out="$ROOT/.work/one.$$"
+  if "$GH" api "$1" > "$out" 2>/dev/null && jq -e . "$out" >/dev/null 2>&1; then mv -f "$out" "$2"; return 0; fi
+  rm -f "$out"; return 1
 }
 
 backup_repo() { # owner/name has_wiki
@@ -58,7 +67,7 @@ backup_repo() { # owner/name has_wiki
   if [ -d "$mirror" ]; then
     before="$(git -C "$mirror" for-each-ref --format='%(objectname) %(refname)' | sha1sum)"
     # No --prune: a branch deleted on GitHub stays in the backup.
-    git -C "$mirror" fetch --quiet --force "$url" '+refs/heads/*:refs/heads/*' '+refs/tags/*:refs/tags/*' || rc=1
+    git -C "$mirror" fetch --quiet --force "$url" '+refs/heads/*:refs/heads/*' '+refs/tags/*:refs/tags/*' '+refs/pull/*:refs/pull/*' || rc=1
   else
     before=""
     git clone --quiet --mirror "$url" "$mirror" || rc=1
@@ -68,13 +77,31 @@ backup_repo() { # owner/name has_wiki
     if [ ! -s "$bundle" ] || [ "$before" != "$after" ]; then
       if git -C "$mirror" rev-parse --verify -q HEAD >/dev/null || [ -n "$(git -C "$mirror" for-each-ref --count=1)" ]; then
         git -C "$mirror" bundle create --quiet "$bundle.tmp" --all 2>/dev/null && mv -f "$bundle.tmp" "$bundle" || { rm -f "$bundle.tmp"; rc=1; }
+      else
+        : > "$bundle.empty"   # GitHub repository has no commits; nothing to bundle
       fi
+    fi
+    # Git LFS: bundles hold only pointers, so fetch every LFS object and keep
+    # a copy under lfs/ that goes to the NAS and Dropbox with the bundles.
+    if git -C "$mirror" grep -q 'filter=lfs' HEAD -- .gitattributes 2>/dev/null ||
+       [ -d "$mirror/lfs/objects" ]; then
+      if git -C "$mirror" lfs fetch --all --quiet "$url" >/dev/null 2>&1; then
+        mkdir -p "$ROOT/lfs/$full" && cp -a -u "$mirror/lfs/objects" "$ROOT/lfs/$full/" || rc=1
+      else log "WARN $full: Git LFS fetch failed"; rc=1; fi
     fi
   fi
   if [ "$wiki" = true ]; then
     local wm="$ROOT/mirrors/$full.wiki.git"
-    if [ -d "$wm" ]; then git -C "$wm" fetch --quiet --force origin '+refs/*:refs/*' 2>/dev/null || true
+    # GitHub reports has_wiki=true for repos that never made a wiki page, so a
+    # first clone that finds nothing is normal; a known wiki that stops
+    # updating is a failure.
+    if [ -d "$wm" ]; then
+      git -C "$wm" fetch --quiet --force origin '+refs/*:refs/*' 2>/dev/null || { log "WARN $full: wiki update failed"; rc=1; }
     else git clone --quiet --mirror "$GIT_BASE/$full.wiki.git" "$wm" 2>/dev/null || rm -rf "$wm"; fi
+    if [ -d "$wm" ] && [ -n "$(git -C "$wm" for-each-ref --count=1)" ]; then
+      git -C "$wm" bundle create --quiet "$bundle.wiki.tmp" --all 2>/dev/null && mv -f "$bundle.wiki.tmp" "${bundle%.bundle}.wiki.bundle" ||
+        { rm -f "$bundle.wiki.tmp"; log "WARN $full: wiki bundle failed"; rc=1; }
+    fi
   fi
   local ep
   for ep in "issues?state=all&per_page=100:issues" "issues/comments?per_page=100:issue-comments" \
@@ -82,7 +109,7 @@ backup_repo() { # owner/name has_wiki
             "releases?per_page=100:releases" "labels?per_page=100:labels" "milestones?state=all&per_page=100:milestones"; do
     save_list "repos/$full/${ep%%:*}" "$meta/${ep##*:}.json" || { log "WARN $full: could not save ${ep##*:}"; rc=1; }
   done
-  "$GH" api "repos/$full" > "$meta/repo.json" 2>/dev/null || rc=1
+  save_one "repos/$full" "$meta/repo.json" || { log "WARN $full: could not save repo settings"; rc=1; }
   return "$rc"
 }
 
@@ -93,10 +120,19 @@ do_run() {
   export GIT_TERMINAL_PROMPT=0
   git config --global --get-all credential.https://github.com.helper >/dev/null 2>&1 ||
     export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=credential.https://github.com.helper GIT_CONFIG_VALUE_0="!\"$GH\" auth git-credential"
-  local list="$ROOT/repos.tsv" failed=0 total=0 full wiki
+  local list="$ROOT/repos.tsv" failed=0 total=0 full wiki prev=0
+  mkdir -p "$ROOT/.work"; rm -f "$ROOT/.work/"*
+  [ -f "$list" ] && prev="$(wc -l < "$list")"
   "$GH" api --paginate 'user/repos?affiliation=owner,organization_member&per_page=100' \
     -q '.[] | "\(.full_name)\t\(.has_wiki)"' > "$list.tmp" && [ -s "$list.tmp" ] && mv -f "$list.tmp" "$list" ||
     { log "ERROR could not list repositories"; return 1; }
+  # Fail loudly if the repository list shrinks sharply (lost access, token
+  # scope change): a quietly smaller backup must never report success.
+  local now_count; now_count="$(wc -l < "$list")"
+  if [ "$prev" -gt 0 ] && [ $((now_count * 10)) -lt $((prev * 9)) ] && [ "${GITHUB_BACKUP_ACCEPT_SHRINK:-}" != 1 ]; then
+    log "ERROR repository list shrank from $prev to $now_count; set GITHUB_BACKUP_ACCEPT_SHRINK=1 once to accept"
+    cp -f "$list" "$list.shrunk"; failed=$((failed + 1))
+  fi
   while IFS=$'\t' read -r full wiki; do
     total=$((total + 1))
     backup_repo "$full" "$wiki" </dev/null || { failed=$((failed + 1)); log "FAIL $full"; }
@@ -109,7 +145,7 @@ do_run() {
   # successful copy; only files newer than it are sent.
   local nas_err="$ROOT/.nas.err" stamp="$ROOT/.nas-stamp" started="$ROOT/.nas-stamp.new" files="$ROOT/.nas-files"
   : > "$started"
-  ( cd "$ROOT" && if [ -f "$stamp" ]; then find bundles meta repos.tsv -type f -newer "$stamp"; else find bundles meta repos.tsv -type f; fi ) > "$files"
+  ( cd "$ROOT" && if [ -f "$stamp" ]; then find bundles meta lfs repos.tsv -type f -newer "$stamp" 2>/dev/null; else find bundles meta lfs repos.tsv -type f 2>/dev/null; fi ) > "$files"
   local dest="${NAS#*:}" sink=(sh -c)
   case "$NAS" in *:*) sink=(ssh -o BatchMode=yes -o ConnectTimeout=20 "${NAS%%:*}") ;; esac
   if { [ ! -s "$files" ] || tar -C "$ROOT" -cf - -T "$files" | "${sink[@]}" "mkdir -p '$dest' && tar -xf - -C '$dest'"; } 2>"$nas_err"; then
@@ -118,7 +154,8 @@ do_run() {
     rm -f "$started"; log "ERROR NAS copy failed: $(grep -v -i -E 'post-quantum|store now|pq.html|server may' "$nas_err" | tail -2)"; copies_ok=0
   fi
   if mkdir -p "$DROPBOX" && rsync -a --delete-after "$ROOT/bundles/" "$DROPBOX/bundles/" &&
-     rsync -a --delete-after "$ROOT/meta/" "$DROPBOX/meta/"; then log "Dropbox copy: ok"
+     rsync -a --delete-after "$ROOT/meta/" "$DROPBOX/meta/" &&
+     { [ ! -d "$ROOT/lfs" ] || rsync -a "$ROOT/lfs/" "$DROPBOX/lfs/"; }; then log "Dropbox copy: ok"
   else log "ERROR Dropbox copy failed"; copies_ok=0; fi
 
   local status=ok
@@ -136,10 +173,23 @@ do_check() {
   echo "OK last GitHub backup succeeded ${age}h ago ($(jq -r '"\(.repos) repositories"' "$ROOT/last-run.json" 2>/dev/null))"
 }
 
+# Called by systemd when the nightly run fails: open (or comment on) one issue
+# so the failure is visible on GitHub the same day, not only via --check.
+do_alert() {
+  local repo="${GITHUB_BACKUP_ALERT_REPO:-popcre/ai-devops}" title="GitHub backup failed on $BACKUP_HOST"
+  local body; body="$(printf 'The nightly GitHub backup failed at %s.\n\n```\n%s\n```\n\nLast log lines:\n```\n%s\n```\n\n-- ai-github-backup on %s' \
+    "$(TZ=America/New_York date '+%F %-I:%M %p %Z')" "$(cat "$ROOT/last-run.json" 2>/dev/null)" \
+    "$(journalctl --user -u "$unit.service" -n 15 --no-pager -o cat 2>/dev/null)" "$(hostname)")"
+  local n; n="$("$GH" issue list --repo "$repo" --state open --search "\"$title\" in:title" --json number -q '.[0].number' 2>/dev/null)"
+  if [ -n "$n" ]; then "$GH" issue comment "$n" --repo "$repo" --body "$body" >/dev/null
+  else "$GH" issue create --repo "$repo" --title "$title" --body "$body" >/dev/null; fi
+}
+
 do_install() {
   [ "$(hostname)" = "$BACKUP_HOST" ] || { echo "SKIP GitHub backup runs only on $BACKUP_HOST"; return 0; }
   mkdir -p "$unit_dir"
-  printf '[Unit]\nDescription=Nightly backup of all GitHub repositories (ai-devops)\n\n[Service]\nType=oneshot\nExecStart=/usr/bin/env bash "%s" run\nNice=19\nIOSchedulingClass=idle\nTimeoutStartSec=6h\n' "$self" > "$unit_dir/$unit.service"
+  printf '[Unit]\nDescription=Nightly backup of all GitHub repositories (ai-devops)\nOnFailure=%s-alert.service\n\n[Service]\nType=oneshot\nExecStart=/usr/bin/env bash "%s" run\nNice=19\nIOSchedulingClass=idle\nTimeoutStartSec=6h\n' "$unit" "$self" > "$unit_dir/$unit.service"
+  printf '[Unit]\nDescription=Report a failed GitHub backup\n\n[Service]\nType=oneshot\nExecStart=/usr/bin/env bash "%s" --alert\n' "$self" > "$unit_dir/$unit-alert.service"
   printf '[Unit]\nDescription=Nightly GitHub backup\n\n[Timer]\nOnCalendar=*-*-* 02:15:00\nRandomizedDelaySec=900\nPersistent=true\n\n[Install]\nWantedBy=timers.target\n' > "$unit_dir/$unit.timer"
   systemctl --user daemon-reload && systemctl --user enable --now "$unit.timer" >/dev/null || return 1
   echo "OK GitHub backup timer installed (nightly 02:15 local)"
@@ -149,6 +199,7 @@ case "${1:-}" in
   run) do_run ;;
   --check) do_check ;;
   --install) do_install ;;
-  --uninstall) systemctl --user disable --now "$unit.timer" >/dev/null 2>&1; rm -f "$unit_dir/$unit".{timer,service}; echo "OK GitHub backup timer removed (backups left in place)" ;;
+  --alert) do_alert ;;
+  --uninstall) systemctl --user disable --now "$unit.timer" >/dev/null 2>&1; rm -f "$unit_dir/$unit".{timer,service} "$unit_dir/$unit-alert.service"; echo "OK GitHub backup timer removed (backups left in place)" ;;
   *) sed -n '2,26p' "$0"; exit 2 ;;
 esac
