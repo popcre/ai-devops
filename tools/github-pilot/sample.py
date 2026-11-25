@@ -156,6 +156,28 @@ def windows(snapshots):
     return sorted(out, key=lambda w: (w["start"], w["bucket"]))
 
 
+ALLOCATIONS = {"discovery": 10, "drafts": 12, "status": 8, "timing": 20}
+REQUEST_LINE = re.compile(r"^\* Request to (\S+)", re.M)
+
+
+def count_exchanges(debug_text):
+    """HTTP exchanges in GH_DEBUG=api output: one per request line, so redirects,
+    retries and pages each count. Only the method-free URL path is kept."""
+    return [re.sub(r"^https://[^/]+/|\?.*$", "", url) for url in REQUEST_LINE.findall(debug_text)]
+
+
+def check_budget(rows, allocations=ALLOCATIONS):
+    """Sum a live-request ledger per allocation; report any allocation overrun."""
+    spent = collections.Counter()
+    for row in rows:
+        spent[row["alloc"]] += int(row["cost"])
+    unknown = sorted(set(spent) - set(allocations))
+    over = {k: spent[k] - v for k, v in allocations.items() if spent[k] > v}
+    return {"spent": dict(spent), "total": sum(spent.values()),
+            "limit": sum(allocations.values()), "over": over, "unknown_allocations": unknown,
+            "ok": not over and not unknown and sum(spent.values()) <= sum(allocations.values())}
+
+
 def is_status(r):
     op = r.get("operation") or ""
     return op in STATUS_OPERATIONS or (r.get("caller") in STATUS_CALLERS and op in {"api.graphql", "repo.view"})
@@ -295,7 +317,7 @@ def main(argv=None):
         return {"bucket": w["bucket"], "start": iso(w["start"]), "reset": iso(w["reset"]),
                 "limit": w["limit"], "consumed": w["consumed"], "fraction": round(w["fraction"], 4),
                 "snapshots": w["snapshots"], "machines": w["machines"],
-                "identities": len({p for _, p in w["principals"]}), "max_gap_s": w["max_gap_s"]}
+                "machine_principals": len(w["principals"]), "max_gap_s": w["max_gap_s"]}
 
     report = {
         "schema": 1,
