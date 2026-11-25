@@ -1,0 +1,160 @@
+#!/usr/bin/env bash
+# ai-nas — reach the Synology NAS connector (synology-monitor / nas-mcp) on
+# demand from ANY repository, without it loading in every session.
+#
+# WHY THIS EXISTS. The synology-monitor MCP server is always-on only in its own
+# repository ($McpProjectScope in bin/setup-machine.ps1). Other repositories
+# need it seldom (owner, 2026-11-25), so it must not start a process in every
+# session there. This command opens one connection through the same protected
+# launcher (token resolved from 1Password at launch, never in argv or output),
+# runs one request, and closes it.
+#
+# Usage:
+#   ai-nas tools                         list the server's tools
+#   ai-nas call <tool> ['<json-args>']   call one tool, print its text result
+#   options: --timeout SECONDS (default 180)
+#
+# Examples:
+#   ai-nas call check_disk_space '{"target":"edgesynology1"}'
+#   ai-nas call tool_search '{"query":"sharesync"}'
+#   ai-nas call invoke_tool '{"name":"<op>","target":"both","args":{}}'
+#
+# Exit: 0 ok, 1 tool/server error, 2 usage, 3 connection or timeout failure.
+# AI_NAS_LAUNCHER overrides the launcher command (tests only).
+set -euo pipefail
+
+die() { printf 'ai-nas: %s\n' "$*" >&2; exit 2; }
+usage() { sed -n '12,18p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+
+timeout=180
+args=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --timeout) [ $# -ge 2 ] || die "--timeout needs a value"; timeout="$2"; shift 2 ;;
+    -h|--help) usage ;;
+    *) args+=("$1"); shift ;;
+  esac
+done
+set -- "${args[@]+"${args[@]}"}"
+[ $# -ge 1 ] || usage
+case "$timeout" in ''|*[!0-9]*) die "--timeout must be whole seconds" ;; esac
+
+mode="$1"; tool=""; targs="{}"
+case "$mode" in
+  tools) [ $# -eq 1 ] || usage ;;
+  call)
+    [ $# -ge 2 ] && [ $# -le 3 ] || usage
+    tool="$2"; targs="${3:-{\}}" ;;
+  *) usage ;;
+esac
+
+URL="https://nas-mcp.designflow.app/mcp"
+REF="op://vibe_coding/f335s4oy3m6n74jmwj74hunrtu/nas_token"
+cfg="$HOME/.config/ai-devops"
+if [ -n "${AI_NAS_LAUNCHER:-}" ]; then
+  launcher="$AI_NAS_LAUNCHER"
+elif [ -f "$cfg/mcp-remote-launch.sh" ]; then
+  launcher="sh|$cfg/mcp-remote-launch.sh|$URL|$REF"
+elif [ -f "$cfg/mcp-remote-launch.cmd" ]; then
+  launcher="cmd|/c|$(cygpath -w "$cfg/mcp-remote-launch.cmd" 2>/dev/null || echo "$cfg/mcp-remote-launch.cmd")|$URL|$REF"
+else
+  printf 'ai-nas: no remote MCP launcher under %s; run the ai-devops installer\n' "$cfg" >&2; exit 3
+fi
+
+PY=""
+for c in python3 python; do
+  if command -v "$c" >/dev/null 2>&1 && "$c" -c 'import sys; sys.exit(sys.version_info < (3, 8))' 2>/dev/null; then PY="$c"; break; fi
+done
+[ -n "$PY" ] || { printf 'ai-nas: python 3.8+ is required\n' >&2; exit 3; }
+
+exec "$PY" -I - "$launcher" "$mode" "$tool" "$targs" "$timeout" <<'PY'
+import json, queue, subprocess, sys, threading, time
+
+launcher, mode, tool, targs, timeout = sys.argv[1:6]
+cmd = launcher.split("|")
+deadline = time.monotonic() + int(timeout)
+try:
+    call_args = json.loads(targs)
+    if not isinstance(call_args, dict):
+        raise ValueError("must be a JSON object")
+except ValueError as exc:
+    print("ai-nas: tool arguments are not a JSON object: %s" % exc, file=sys.stderr)
+    sys.exit(2)
+
+try:
+    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE, text=True, encoding="utf-8", bufsize=1)
+except OSError as exc:
+    print("ai-nas: cannot start launcher: %s" % exc, file=sys.stderr)
+    sys.exit(3)
+
+lines, errs = queue.Queue(), []
+threading.Thread(target=lambda: [lines.put(l) for l in proc.stdout] and None, daemon=True).start()
+def _err():
+    for l in proc.stderr:
+        errs.append(l.rstrip())
+        del errs[:-20]
+threading.Thread(target=_err, daemon=True).start()
+
+def fail(msg, code=3):
+    try:
+        proc.kill()
+    except OSError:
+        pass
+    print("ai-nas: " + msg, file=sys.stderr)
+    tail = [l for l in errs if "bearer" not in l.lower() and "authorization" not in l.lower()][-5:]
+    for l in tail:
+        print("  " + l[:300], file=sys.stderr)
+    sys.exit(code)
+
+def send(obj):
+    try:
+        proc.stdin.write(json.dumps(obj) + "\n")
+        proc.stdin.flush()
+    except OSError:
+        fail("connection closed while sending")
+
+def wait_for(rid):
+    while True:
+        left = deadline - time.monotonic()
+        if left <= 0:
+            fail("timed out after %ss" % timeout)
+        try:
+            line = lines.get(timeout=min(left, 1))
+        except queue.Empty:
+            if proc.poll() is not None and lines.empty():
+                fail("connection closed (launcher exit %s)" % proc.returncode)
+            continue
+        try:
+            msg = json.loads(line)
+        except ValueError:
+            continue
+        if msg.get("id") == rid:
+            if "error" in msg:
+                fail("server error: %s" % json.dumps(msg["error"])[:500], 1)
+            return msg.get("result", {})
+
+send({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+    "protocolVersion": "2025-06-18", "capabilities": {},
+    "clientInfo": {"name": "ai-nas", "version": "1"}}})
+wait_for(1)
+send({"jsonrpc": "2.0", "method": "notifications/initialized"})
+if mode == "tools":
+    send({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
+    for t in wait_for(2).get("tools", []):
+        print("%s\t%s" % (t.get("name"), (t.get("description") or "").split("\n")[0][:160]))
+    code = 0
+else:
+    send({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+          "params": {"name": tool, "arguments": call_args}})
+    res = wait_for(2)
+    for c in res.get("content", []):
+        print(c.get("text") if c.get("type") == "text" else json.dumps(c))
+    code = 1 if res.get("isError") else 0
+try:
+    proc.stdin.close()
+    proc.wait(timeout=5)
+except Exception:
+    proc.kill()
+sys.exit(code)
+PY

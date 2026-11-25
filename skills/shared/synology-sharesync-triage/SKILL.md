@@ -5,7 +5,7 @@ description: Diagnose and repair Synology Drive ShareSync stalls, repeated-file 
 
 # Synology ShareSync Triage
 
-Prove whether the fault is pairing, transport, live transfer, or destination queue state. Prefer exact paths, hashes, log lines, and database rows over guesses. Use the configured `synology-monitor` MCP for read-only evidence when it exposes the needed data; use the managed NAS SSH aliases only when deeper inspection is required.
+Prove whether the fault is pairing, transport, live transfer, or destination queue state. Prefer exact paths, hashes, log lines, and database rows over guesses. Use the `synology-monitor` MCP for read-only evidence when it exposes the needed data (outside its own repository it is not loaded; call it on demand with `ai-nas call <tool> '<json>'`); use the managed NAS SSH aliases only when deeper inspection is required.
 
 ## Workflow
 
