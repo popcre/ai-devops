@@ -45,7 +45,9 @@ there is no key to store.
 ## Debate is the default
 
 Every opinion, review, or second opinion is a **debate**, not a lookup, unless
-the user asks only for a one-line fact or for `implement`. Two models agreeing
+the request is `implement`, or a factual lookup with nothing to judge (such as
+"which file defines X?"). Anything asking whether something is right, safe,
+better, or done is a debate. Two models agreeing
 because the second anchored on the first is worth nothing; the value is real
 independence, then real argument.
 

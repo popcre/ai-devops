@@ -28,7 +28,9 @@ ai-muse store-key [--if-missing]                  # installer use: key from 1Pas
 ## Debate is the default
 
 Every opinion, review, or second opinion is a **debate**, not a lookup, unless
-the user asks only for a one-line fact or for `implement`. Two models agreeing
+the request is `implement`, or a factual lookup with nothing to judge (such as
+"which file defines X?"). Anything asking whether something is right, safe,
+better, or done is a debate. Two models agreeing
 because the second anchored on the first is worth nothing; the value is real
 independence, then real argument.
 
@@ -87,7 +89,7 @@ Every brief carries all of this, every time:
 Never put a secret, token, connection string, credential, or `.env` value in a
 brief. Point at facts, not credentials.
 
-Report Muse's view, say whether you agree, and push back with evidence when
-you do not. Exit code 3 means Muse was unavailable; use another second-opinion
+Run every opinion as the debate above; it is the only reporting rule.
+Exit code 3 means Muse was unavailable; use another second-opinion
 tool instead of retrying in a loop. The implementer edits files but cannot run
 commands, so run the tests yourself after applying its diff.
