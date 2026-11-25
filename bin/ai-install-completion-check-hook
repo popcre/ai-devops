@@ -225,16 +225,32 @@ fi
 # ---------------------------------------------------------------------------
 settings="$claude_home/settings.json"
 
+# Since #2835 the Claude registration passes --sensors (proof-of-done) and has
+# no `2>/dev/null || true` wrapper. That wrapper turned the hook's exit 2 into
+# exit 0 and threw its reason away, so the intended hard block never fired. The
+# hook is fail-open inside, so no wrapper is needed. An old registration is
+# upgraded in place. Undo: docs/harness-sensors.md.
+cmd='bash "$HOME/.config/ai-devops/completion-check-hook" --sensors'
+events_json='["UserPromptSubmit", "PostToolUse", "PostToolUseFailure", "Stop"]'
+# 0 = every event carries exactly the current command; 1 = registered in an
+# older form (DRIFT); 2 = missing from at least one event.
+registration_state() {
+  jq -r --arg m "$marker" --arg cmd "$cmd" --argjson events "$events_json" '. as $cfg |
+    [$events[] as $event |
+      ($cfg.hooks[$event] // []) | map(.hooks // []) | flatten |
+      map(.command // "") | map(select(contains($m)))] as $per |
+    if ($per | flatten | length) == 0 then "missing"
+    elif ($per | all(length > 0)) and ($per | flatten | all(. == $cmd)) then "current"
+    else "drift" end' "$settings" 2>/dev/null
+}
+
 if (( check_only )); then
   [[ -f "$dest" ]] || { echo "ERROR completion-check hook script not installed"; exit 1; }
   [[ -f "$settings" ]] || { echo "ERROR no $settings"; exit 1; }
-  if jq -e --arg m "$marker" '. as $cfg |
-      ["UserPromptSubmit", "PostToolUse", "Stop"] as $events |
-      [$events[] as $event |
-        ($cfg.hooks[$event] // []) | map(.hooks // []) | flatten |
-        map(.command // "") | any(contains($m))] | all' "$settings" >/dev/null 2>&1; then
-    echo "OK completion-check hook already registered"; exit 0
-  fi
+  case "$(registration_state)" in
+    current) echo "OK completion-check hook already registered"; exit 0 ;;
+    drift) echo "DRIFT completion-check hook registered in an older form (no --sensors, or its exit status swallowed); rerun the installer"; exit 1 ;;
+  esac
   echo "ERROR completion-check hook not registered in $settings"; exit 1
 fi
 
@@ -253,11 +269,7 @@ if ! jq -e 'type == "object"' "$settings" >/dev/null 2>&1; then
   exit 1
 fi
 
-if jq -e --arg m "$marker" '. as $cfg |
-      ["UserPromptSubmit", "PostToolUse", "Stop"] as $events |
-      [$events[] as $event |
-        ($cfg.hooks[$event] // []) | map(.hooks // []) | flatten |
-        map(.command // "") | any(contains($m))] | all' "$settings" >/dev/null 2>&1; then
+if [[ "$(registration_state)" == current ]]; then
   echo "OK completion-check hook already registered"
   exit 0
 fi
@@ -265,12 +277,15 @@ fi
 backup="$settings.aidevops.bak"
 [[ -f "$backup" ]] || cp "$settings" "$backup"
 
-cmd='bash "$HOME/.config/ai-devops/completion-check-hook" 2>/dev/null || true'
 tmp="$settings.tmp.$$"
-if ! jq --arg cmd "$cmd" --arg marker "$marker" '
+if ! jq --arg cmd "$cmd" --arg marker "$marker" --argjson events "$events_json" '
       .hooks //= {} |
-      reduce ["UserPromptSubmit", "PostToolUse", "Stop"][] as $event (.;
+      reduce $events[] as $event (.;
         .hooks[$event] //= [] |
+        # Upgrade an older registration in place; never touch other hooks.
+        .hooks[$event] |= map(if (.hooks | type) == "array"
+          then .hooks |= map(if ((.command // "") | contains($marker)) then .command = $cmd else . end)
+          else . end) |
         if ((.hooks[$event] | map(.hooks // []) | flatten |
              map(.command // "") | any(contains($marker))))
         then .

@@ -96,6 +96,71 @@ check "Windows shell spellings match the Unix verdict on every shell case ($pari
 allows "a here-document fed to a quoted Unix path keeps its old verdict" $'"/bin/bash" <<\'EOF\'\nwhile true; do gh pr view 1; sleep 9; done\nEOF'
 
 
+# --- destructive-command guard (#2835) ------------------------------------------
+# Real temp git repos: D is dirty, C is clean, "D S" has a space and is dirty.
+G="$TMP/guard"; mkdir -p "$G"
+mkrepo() { git init -q "$1" && git -C "$1" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init \
+  && printf 'x\n' >"$1/f" && git -C "$1" add f && git -C "$1" -c user.email=t@t -c user.name=t commit -q -m f; }
+D="$G/dirty"; C="$G/clean"; DS="$G/dirty space"
+mkrepo "$D"; mkrepo "$C"; mkrepo "$DS"; mkdir -p "$D/sub" "$G/norepo"
+printf 'changed\n' >"$D/f"; printf 'changed\n' >"$DS/f"
+# gfire <cwd> <command>: prints the exit status; stderr in $TMP/gerr.
+gfire() { jq -nc --arg c "$2" --arg d "$1" '{tool_name:"Bash",cwd:$d,tool_input:{command:$c}}' | HOME="$G/home" bash "$HOOK" 2>"$TMP/gerr" >/dev/null; echo $?; }
+grefuses() { local n="$1" d="$2"; shift 2; local c; for c in "$@"; do GC="$c" GD="$d"; check "guard refuses: $n [$c]" "[ \"\$(gfire \"\$GD\" \"\$GC\")\" = 2 ] && grep -q '^Blocked' \"$TMP/gerr\""; done; }
+gallows() { local n="$1" d="$2"; shift 2; local c; for c in "$@"; do GC="$c" GD="$d"; check "guard allows: $n [$c]" "[ \"\$(gfire \"\$GD\" \"\$GC\")\" = 0 ]"; done; }
+mkdir -p "$G/home"
+
+grefuses "reset-hard dirty refused" "$D" 'git reset --hard' 'git reset --hard HEAD~1'
+gallows "reset-hard clean allowed" "$C" 'git reset --hard'
+grefuses "reset-hard quoted -C refused" "$C" "git -C \"$DS\" reset --hard"
+grefuses "reset-hard chained cd refused" "$C" "cd \"$G\" && cd dirty && git reset --hard" "cd $D/sub && cd .. && git reset --hard"
+gallows "reset-hard -C overrides cd" "$C" "cd \"$D\" && git -C \"$C\" reset --hard"
+grefuses "reset-hard unknown dir refused" "$C" 'cd "$(pick)" && git reset --hard' 'cd "$SOMEWHERE" && git reset --hard'
+grefuses "reset-hard status error refused" "$C" "git -C \"$G/norepo\" reset --hard"
+grefuses "reset-hard in bash -c refused" "$D" "bash -c 'git reset --hard'" "sh -lc 'cd $D && git reset --hard'" "eval 'git reset --hard'"
+grefuses "reset-hard windows spelling refused" "$D" 'GIT.EXE reset --hard' '"C:/Program Files/Git/bin/git.exe" reset --hard'
+grefuses "reset-hard after a keyword or env prefix refused" "$D" 'if true; then git reset --hard; fi' 'GIT_TRACE=0 git reset --hard'
+grefuses "reset-hard in a heredoc fed to bash refused" "$D" $'bash <<\'EOF\'\ngit reset --hard\nEOF'
+gallows "operators in message allowed" "$D" 'git commit -m "a && b; rm -rf /"'
+gallows "reset-hard in message allowed" "$D" 'git commit -m "undo git reset --hard"' "git commit -m 'git push --force'"
+gallows "force in heredoc allowed" "$D" $'cat >notes.md <<\'EOF\'\ngit push --force origin main\nrm -rf ~\nEOF'
+gallows "rm in echo allowed" "$D" 'echo "rm -rf ~"' "printf '%s' 'git clean -fdx'"
+grefuses "restore worktree dirty refused" "$D" 'git restore .' 'git restore f' 'git checkout .' 'git checkout -- f' 'git checkout -f main'
+grefuses "restore staged+worktree refused" "$D" 'git restore --staged --worktree .' 'git restore -SW .'
+gallows "restore staged allowed" "$D" 'git restore --staged .' 'git restore -S f' 'git checkout main' 'git checkout -b feature'
+grefuses "clean forced refused" "$C" 'git clean -fdx' 'git clean --force -d' 'git clean -df' 'git -C . clean -xf'
+gallows "clean dry-run allowed" "$C" 'git clean -n' 'git clean -nd'
+grefuses "push force refused" "$C" 'git push -f origin b' 'git push --force origin b' 'git push -uf origin b' 'git push --force=yes origin b'
+grefuses "push plus refspec refused" "$C" 'git push origin +b' 'git push origin +HEAD:main'
+gallows "push lease allowed" "$C" 'git push --force-with-lease origin b' 'git push --force-if-includes --force-with-lease origin b' 'git push origin b' 'git push -u origin HEAD'
+grefuses "rm home/root spellings refused" "$C" 'rm -rf /' 'rm -fr ~' 'rm -r -f "$HOME"' 'rm -rf ${HOME}' 'rm -rf "$HOME/"' "rm -rf ''\"\$HOME\"" 'rm -Rf ~/' 'rm --recursive --force /' 'rm -rf -- ~'
+gallows "rm single-quoted literal allowed" "$C" "rm -rf '\$HOME'"
+gallows "rm quoted tilde allowed" "$C" 'rm -rf "~"'
+grefuses "rm git dir refused" "$C" 'rm -rf .git' 'rm -rf repo/.git' 'rm -rf repo/.git/'
+gallows "rm cleanup allowed" "$C" 'rm -rf "$TMPDIR/x"' 'rm -rf .claude/worktrees/old' 'rm -rf "$tmp"' 'rm -rf build dist' 'rm -r ~' 'rm -f ~/.cache/x' 'rm -rf node_modules/*'
+grefuses "rm star refused" "$C" 'rm -rf *' 'rm -rf ./*' 'rm -rf ~/*' 'rm -rf /*'
+grefuses "rm root normalized refused" "$C" 'rm -rf //' 'rm -rf /./' 'rm -rf .' 'rm -rf ..' 'rm -rf ../..'
+gallows "guard parse error allowed" "$D" 'git reset --hard "unterminated'
+gallows "ordinary git and rm commands allowed" "$D" 'git status' 'git log --oneline -3' 'git diff' 'rm -f f.tmp' 'git stash list'
+check "a refusal names the safe alternative" "gfire \"$D\" 'git reset --hard' >/dev/null; grep -q 'WIP commit' \"$TMP/gerr\""
+check "a force-push refusal names --force-with-lease" "gfire \"$C\" 'git push -f' >/dev/null; grep -q 'force-with-lease' \"$TMP/gerr\""
+check "reset-hard on a dirty repo leaves the change in place" "grep -q changed \"$D/f\""
+
+mkdir -p "$G/home/.config/ai-devops"; : >"$G/home/.config/ai-devops/destructive-guard.off"
+gallows "off switch file disables the guard" "$D" 'git reset --hard' 'rm -rf ~'
+rm -f "$G/home/.config/ai-devops/destructive-guard.off"
+grefuses "removing the off switch turns the guard back on" "$D" 'git reset --hard'
+# Fail-open: no python3 on PATH, or only a Windows Store alias.
+GNOPY="$TMP/gnopy"; mkdir -p "$GNOPY"
+for t in bash jq awk grep sed tr cat; do p="$(command -v "$t")" && ln -sf "$p" "$GNOPY/$t"; done
+jq -nc --arg d "$D" '{tool_name:"Bash",cwd:$d,tool_input:{command:"git reset --hard"}}' | PATH="$GNOPY" "$GNOPY/bash" "$HOOK" >/dev/null 2>&1
+check "guard python3 missing allowed" "[ \$? -eq 0 ]"
+GWA="$TMP/gwa/WindowsApps"; mkdir -p "$GWA"; printf '#!/bin/sh\necho Blocked: alias ran\n' >"$GWA/python3"; chmod +x "$GWA/python3"
+jq -nc --arg d "$D" '{tool_name:"Bash",cwd:$d,tool_input:{command:"git reset --hard"}}' | PATH="$GWA:$GNOPY" "$GNOPY/bash" "$HOOK" >/dev/null 2>&1
+check "guard never runs a WindowsApps python3 alias" "[ \$? -eq 0 ]"
+# Windows payload cwd: backslashes and a drive letter are normalized, not crashed on.
+check "a Windows payload cwd does not crash the guard" "[ \"\$(gfire 'C:\\\\Users\\\\x\\\\repo' 'git status')\" = 0 ]"
+
 # --- installer -----------------------------------------------------------------
 CH="$TMP/claudehome"; mkdir -p "$CH"
 printf '{"theme":"dark","hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"echo pre-existing"}]}]}}\n' > "$CH/settings.json"

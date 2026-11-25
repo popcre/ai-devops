@@ -1,0 +1,26 @@
+{
+  "session_id": "FIXTURE",
+  "transcript_path": "/home/USER/.claude/projects/FIXTURE/FIXTURE.jsonl",
+  "cwd": "/tmp/FIXTURE/cap/repo",
+  "scratchpad_dir": "/tmp/FIXTURE",
+  "prompt_id": "FIXTURE-PROMPT",
+  "permission_mode": "bypassPermissions",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "true",
+    "description": "Run the no-op true command"
+  },
+  "tool_response": {
+    "stdout": "",
+    "stderr": "",
+    "interrupted": false,
+    "isImage": false,
+    "noOutputExpected": false
+  },
+  "tool_use_id": "FIXTURE-TOOL",
+  "duration_ms": 70
+}

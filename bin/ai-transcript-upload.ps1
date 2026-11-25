@@ -270,7 +270,7 @@ if ($defaultAntigravity) {
       $tf = Join-Path $dir.FullName '.system_generated\logs\transcript.jsonl'
       if (Test-Path -LiteralPath $tf -PathType Leaf) {
         $fi = Get-Item -LiteralPath $tf -Force
-        Copy-TranscriptFile $fi (Join-Path $D "antigravity\sessions\$($dir.Name).jsonl") (Join-Path $D ".partial\antigravity\sessions\$($dir.Name).jsonl")
+        Copy-TranscriptFile $fi (Join-Path $D ('antigravity\sessions\' + $dir.Name + '.jsonl')) (Join-Path $D ('.partial\antigravity\sessions\' + $dir.Name + '.jsonl'))
       }
     }
   }

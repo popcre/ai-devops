@@ -22,8 +22,39 @@
 # ends on waiting language is allowed. The existing issue/PR is the card.
 #
 # Full context: plan_completion-honesty-enforcement.md in u2giants/ai-devops.
+#
+# --sensors (Claude only; #2835, plan_harness-sensors.md): proof-of-done.
+#   Every tool call appends one line, "<time> <class> <ok|fail>", to a
+#   per-session turn log that each new prompt clears. Classes:
+#     mutation      Write/Edit/MultiEdit/NotebookEdit outside scratch and memory
+#                   folders, apply_patch, git merge/rebase/cherry-pick
+#     publish       git add/commit/push (counts as "changed things", but does not
+#                   undo an earlier passing check: it does not change content)
+#     verification  a Bash call whose exit status belongs to a real check
+#                   (tests, --check, ai-pr-wait, gh pr checks, curl --fail ...)
+#                   joined only by && (a pipe needs set -o pipefail first)
+#     inspection    everything else
+#   At Stop, a turn that changed things and has no passing check after the last
+#   content change is blocked once if it claims completion, or if it closes with
+#   no word that the work is unverified, pending or open. The block is a real
+#   exit 2. A turn whose check passed after the last change is never nudged.
+#   Known limit: a passing check unrelated to the deliverable still counts; the
+#   written rule covers relevance. Shell commands that edit files (sed -i, mv,
+#   rm) are not seen as content changes.
+#   Without --sensors (ZCode, Antigravity) the behavior is exactly the old one.
+#   Turn it off: touch ~/.config/ai-devops/proof-of-done.off (docs/harness-sensors.md).
 
 set -u
+sensors=0
+[[ "${1:-}" == "--sensors" ]] && sensors=1
+# Off switches (docs/harness-sensors.md). A file's existence is the switch, so it
+# survives every reinstall and needs no settings edit:
+#   proof-of-done.off   behave exactly as without --sensors
+#   promise-block.off   an empty promise gets the JSON nudge only, no exit 2
+switch_dir="$HOME/.config/ai-devops"
+[[ -e "$switch_dir/proof-of-done.off" ]] && sensors=0
+promise_hard=1
+[[ -e "$switch_dir/promise-block.off" ]] && promise_hard=0
 
 payload="$(cat 2>/dev/null || true)"
 [[ -n "$payload" ]] || exit 0
@@ -36,6 +67,168 @@ state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/ai-devops/completion-check"
 action_dir="$state_dir/actions"
 action_file="$action_dir/$safe_session"
 action_marker="$action_file.action"
+turn_log="$state_dir/turns/$safe_session"
+
+# Print "verification" when a Bash command's exit status belongs to a real check,
+# else "inspection". Embedded on purpose: installers copy this one file. Python
+# because quote-aware splitting in sed/awk is where earlier guards went wrong.
+# python3 missing, a Windows Store alias, or any error means "inspection".
+classify_check() {
+  local py
+  py="$(command -v python3 2>/dev/null || true)"
+  case "$py" in ""|*WindowsApps*) echo inspection; return 0 ;; esac
+  AI_SENSOR_CMD="$1" "$py" -I - <<'PY' 2>/dev/null || echo inspection
+import os, re, sys
+
+def tokenize(s):
+    toks, word, i, n = [], None, 0, len(s)
+    def add(t, k):
+        nonlocal word
+        if word is None:
+            word = []
+        if word and word[-1][1] == k == 'bare':
+            word[-1] = (word[-1][0] + t, k)
+        else:
+            word.append((t, k))
+    def flush():
+        nonlocal word
+        if word is not None:
+            toks.append(('word', word))
+        word = None
+    while i < n:
+        c = s[i]
+        if c in ' \t':
+            flush(); i += 1; continue
+        if c == '\n':
+            flush(); toks.append(('op', ';')); i += 1; continue
+        if c == '#' and word is None:
+            j = s.find('\n', i); i = n if j < 0 else j; continue
+        if c == "'":
+            j = s.find("'", i + 1)
+            if j < 0:
+                raise ValueError('unterminated quote')
+            add(s[i + 1:j], 'single'); i = j + 1; continue
+        if c == '"':
+            i += 1; buf = ''
+            while True:
+                if i >= n:
+                    raise ValueError('unterminated quote')
+                d = s[i]
+                if d == '\\' and i + 1 < n and s[i + 1] in '"\\$`\n':
+                    buf += s[i + 1]; i += 2; continue
+                if d == '"':
+                    i += 1; break
+                buf += d; i += 1
+            add(buf, 'double'); continue
+        if c == '\\':
+            if i + 1 < n and s[i + 1] != '\n':
+                add(s[i + 1], 'single')
+            i += 2; continue
+        if s.startswith('&&', i) or s.startswith('||', i) or s.startswith(';;', i):
+            flush(); toks.append(('op', s[i:i + 2])); i += 2; continue
+        if c in ';&|()':
+            if c == '&' and word and word[-1][1] == 'bare' and word[-1][0].endswith(('>', '<')):
+                add('&', 'bare'); i += 1; continue
+            if c == '&' and s.startswith('&>', i):
+                add('&>', 'bare'); i += 2; continue
+            flush(); toks.append(('op', c)); i += 1; continue
+        add(c, 'bare'); i += 1
+    flush()
+    return toks
+
+def text(w):
+    return ''.join(t for t, _ in w)
+
+def strip_prefix(ws):
+    while ws:
+        w0 = ws[0]
+        if re.match(r'^[A-Za-z_][A-Za-z0-9_]*=', w0):
+            ws = ws[1:]; continue
+        if w0 in ('time', 'env', 'command'):
+            ws = ws[1:]; continue
+        if w0 == 'timeout':
+            ws = ws[1:]
+            while ws and ws[0].startswith('-'):
+                ws = ws[1:]
+            ws = ws[1:]; continue
+        break
+    return ws
+
+def name(w):
+    b = re.split(r'[\\/]', w)[-1].lower()
+    return b[:-4] if b.endswith('.exe') else b
+
+def is_check(ws):
+    ws = strip_prefix(ws)
+    if not ws:
+        return False
+    w0, args = ws[0], ws[1:]
+    n0 = name(w0)
+    a1 = args[0] if args else ''
+    if n0 == 'pytest':
+        return True
+    if n0 in ('python', 'python3', 'py') and len(args) >= 2 and args[0] == '-m' and args[1] in ('pytest', 'unittest'):
+        return True
+    if re.search(r'(^|/)tests/', w0) and not w0.startswith('-'):
+        return True
+    if n0 in ('bash', 'sh', 'pwsh', 'powershell') and args and re.search(r'(^|[\\/])tests[\\/]', a1):
+        return True
+    if n0 in ('npm', 'pnpm', 'yarn') and (a1 == 'test' or (a1 == 'run' and len(args) > 1 and args[1] == 'test')):
+        return True
+    if n0 in ('go', 'cargo', 'dotnet') and a1 == 'test':
+        return True
+    if n0 == 'make' and a1 in ('test', 'check'):
+        return True
+    if n0 == 'ai-task-gates' and a1 == 'check':
+        return True
+    if n0 == 'ai-pr-wait':
+        return True
+    if n0 == 'g' + 'h' and args[:2] == ['pr', 'checks']:
+        return True
+    if n0 == 'git' and 'diff' in args and '--exit-code' in args:
+        return True
+    if n0.startswith('ai-') and '--check' in args:
+        return True
+    if n0 == 'curl' and any(a in ('--fail', '--fail-with-body') or re.fullmatch(r'-[A-Za-z]*f[A-Za-z]*', a) for a in args):
+        return True
+    return False
+
+def verdict(cmd):
+    toks = tokenize(cmd)
+    links, cur = [], [[]]
+    for kind, v in toks:
+        if kind == 'op':
+            if v == '&&':
+                links.append(cur); cur = [[]]
+            elif v == '|':
+                cur.append([])
+            else:
+                return False
+        else:
+            cur[-1].append(text(v))
+    links.append(cur)
+    pipefail, found = False, False
+    for link in links:
+        if any(not part for part in link):
+            return False
+        first = link[0]
+        if first[0] in ('!', 'if', 'while', 'until', 'for', 'case', '{', 'select'):
+            return False
+        if first[0] == 'set' and 'pipefail' in first:
+            pipefail = True
+        if len(link) > 1 and not pipefail:
+            return False
+        if any(is_check(part) for part in link):
+            found = True
+    return found
+
+try:
+    print('verification' if verdict(os.environ.get('AI_SENSOR_CMD', '')) else 'inspection')
+except Exception:
+    print('inspection')
+PY
+}
+
 case "$event" in
   UserPromptSubmit)
     # Claude is told the date but never the clock time, so sessions guessed
@@ -46,8 +239,43 @@ case "$event" in
     mkdir -p "$action_dir" 2>/dev/null || exit 0
     rm -f "$action_marker" 2>/dev/null || true
     printf 'no-action\n' >"$action_file.tmp.$$" 2>/dev/null && mv "$action_file.tmp.$$" "$action_file" 2>/dev/null || true
+    (( sensors )) && { rm -f "$turn_log" 2>/dev/null || true; }
     exit 0 ;;
-  PostToolUse)
+  PostToolUse|PostToolUseFailure)
+    if (( sensors )); then
+      # Proof-of-done event log. A failed Bash call arrives ONLY as
+      # PostToolUseFailure (captured: tests/fixtures/hooks/).
+      status=ok; [[ "$event" == PostToolUseFailure ]] && status=fail
+      s_tool="$(printf '%s' "$payload" | jq -r '.tool_name // empty' 2>/dev/null || true)"
+      s_class=inspection
+      case "$s_tool" in
+        Write|Edit|MultiEdit|NotebookEdit)
+          s_path="$(printf '%s' "$payload" | jq -r '.tool_input.file_path // .tool_input.notebook_path // empty' 2>/dev/null || true)"
+          s_class=mutation
+          # Scratch, reviewer briefs, memory and plan-mode files are not deliverables.
+          case "$s_path" in
+            /tmp/*|"${TMPDIR:-/nonexistent-tmpdir}"/*|*/.claude/projects/*|*/.claude/plans/*) s_class=inspection ;;  # temp-hygiene: allow (matching paths, not writing)
+          esac ;;
+        Bash)
+          s_cmd="$(printf '%s' "$payload" | jq -r '.tool_input.command // .tool_input.cmd // empty' 2>/dev/null || true)"
+          if printf '%s' "$s_cmd" | grep -Eiq '(^|[;&|[:space:]])(apply_patch|git[[:space:]]+(merge|rebase|cherry-pick|pull))([;&|[:space:]]|$)'; then
+            s_class=mutation
+          elif printf '%s' "$s_cmd" | grep -Eiq '(^|[;&|[:space:]])git[[:space:]]+(add|commit|push)([;&|[:space:]]|$)'; then
+            s_class=publish
+          fi
+          s_check="$(classify_check "$s_cmd")"
+          ;;
+      esac
+      mkdir -p "${turn_log%/*}" 2>/dev/null || true
+      seq="${EPOCHREALTIME:-}"; seq="${seq/./}"
+      [[ "$seq" =~ ^[0-9]+$ ]] || seq="$(date +%s%6N 2>/dev/null || date +%s)"
+      # One short printf per line: an O_APPEND write of this size is atomic, so
+      # parallel tool completions never lose or interleave an event.
+      [[ "$s_class" != inspection ]] && printf '%s %s %s\n' "$seq" "$s_class" "$status" >>"$turn_log" 2>/dev/null
+      [[ "${s_check:-}" == verification ]] && printf '%s verification %s\n' "$((seq + 1))" "$status" >>"$turn_log" 2>/dev/null
+      [[ "$event" == PostToolUseFailure ]] && exit 0
+    fi
+    [[ "$event" == PostToolUse ]] || exit 0
     mkdir -p "$action_dir" 2>/dev/null || exit 0
     tool_name="$(printf '%s' "$payload" | jq -r '.tool_name // empty' 2>/dev/null || true)"
     case "$tool_name" in
@@ -161,7 +389,44 @@ for claim in "${COMPLETION_CLAIMS[@]}"; do
 done
 
 match_kind="completion"
-if [[ -z "$matched" ]]; then
+
+# Proof-of-done (--sensors only). changed = any mutation or publish this prompt;
+# verified = a passing check came after the last content change.
+if (( sensors )); then
+  changed=0; verified=0
+  if [[ -s "$turn_log" ]]; then
+    read -r changed verified < <(awk '
+      $2 == "mutation" || $2 == "publish" { ch = 1 }
+      $2 == "mutation" && $1 + 0 > lm { lm = $1 + 0 }
+      $2 == "verification" && $3 == "ok" && $1 + 0 > lv { lv = $1 + 0; seen = 1 }
+      END { print (ch ? 1 : 0), ((seen && lv > lm) ? 1 : 0) }' "$turn_log" 2>/dev/null || echo "0 0")
+  fi
+  if (( verified )) && [[ -n "$matched" ]]; then
+    exit 0
+  fi
+  if (( changed )) && (( ! verified )); then
+    if [[ -n "$matched" ]]; then
+      match_kind="unverified"
+    else
+      future_hit=""
+      for commitment in "${FUTURE_COMMITMENTS[@]}"; do
+        if [[ "$lower" == *"$commitment"* ]]; then future_hit=1; break; fi
+      done
+      escaped=""
+      for word in "unverified" "not verified" "not tested" "untested" "still open" "not done" "pending" "not checked"; do
+        if [[ "$lower" == *"$word"* ]]; then escaped=1; break; fi
+      done
+      printf '%s\n' "$closing" | grep -Eq '\?[[:space:]]*$' && escaped=1
+      if [[ -z "$future_hit" && -z "$escaped" ]]; then
+        match_kind="unverified"; matched="closing with no check"
+      fi
+    fi
+  fi
+fi
+
+if [[ "$match_kind" == "unverified" ]]; then
+  :
+elif [[ -z "$matched" ]]; then
   for commitment in "${FUTURE_COMMITMENTS[@]}"; do
     if [[ "$lower" == *"$commitment"* ]]; then matched="$commitment"; break; fi
   done
@@ -198,7 +463,9 @@ printf '%s\n' "$prompt" >>"$state_file" 2>/dev/null || exit 0
 # Keep the file small; only the recent turns of this session matter.
 tail -n 50 "$state_file" >"$state_file.tmp" 2>/dev/null && mv "$state_file.tmp" "$state_file" 2>/dev/null || true
 
-if [[ "$match_kind" == "future" ]]; then
+if [[ "$match_kind" == "unverified" ]]; then
+  reason="This turn changed things and its closing reads as finished (\"$matched\"), but no command that could fail checked the result after the last change. Run a check now (a test, a --check, ai-pr-wait, curl --fail on the live page) or say plainly what is unverified. This fires once per request."
+elif [[ "$match_kind" == "future" ]]; then
   reason="You committed to an action in this reply (\"$matched\") but the turn shows no implementation, test, or other execution action. Either perform it now, or state plainly that it is not started and why."
 else
   reason="This turn ends by claiming completion (\"$matched\"). Before it does: name every deliverable this request asked for and check each one against something real — a file that exists, a command's output, a live result. Preparation is not delivery: groundwork for a deliverable that does not exist yet is PENDING. If any deliverable is unfinished and nothing blocks it, you are already authorized — keep working instead of ending the turn. If everything genuinely checks out, say so again and this will not fire twice."
@@ -222,7 +489,7 @@ jq -nc --arg r "$reason" '{
 # 206 catches in 94 sessions showed the JSON nudge was being talked past). Exit
 # 2 makes Claude Code stop the turn and feed the reason back on stderr. The
 # re-entry guard above still limits it to once per prompt, so it cannot loop.
-if [[ "$match_kind" == "future" ]]; then
+if [[ ( "$match_kind" == "future" && "$promise_hard" == 1 ) || "$match_kind" == "unverified" ]]; then
   printf '%s\n' "$reason" >&2
   exit 2
 fi
