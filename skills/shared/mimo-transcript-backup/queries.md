@@ -48,6 +48,7 @@ GROUP BY 1 ORDER BY 1 DESC;
 
 ## Public-repo discipline
 
-Query results may contain prompt text and tool output. Keep raw rows in the
-private transcripts checkout only. Summaries that leave that checkout must be
-aggregates (counts, dates, tool names) — never verbatim transcript bytes.
+Query results may contain prompt text and tool output. Keep raw rows local or
+in private storage only; never paste them into any public repository, issue,
+log, or prompt. Summaries that leave local storage must be aggregates (counts,
+dates, tool names) — never verbatim transcript bytes.

@@ -112,11 +112,13 @@ limit 25;
 
 ## Prompt-shape analysis on the rollout JSONL (not SQL)
 
-The raw model I/O lives beside the DB in `model-io-sess_<uuid>.jsonl` — one
-JSON object per line. Count request sizes per session file:
+The raw model I/O lives beside the DB in `model-io-session_*.jsonl` and
+`model-io-sess_*.jsonl` — one JSON object per line. Count request sizes per
+session file:
 
 ```bash
-for f in rollout/model-io-sess_*.jsonl; do
+for f in rollout/model-io-session_*.jsonl rollout/model-io-sess_*.jsonl; do
+  [ -e "$f" ] || continue
   printf '%s %s\n' "$(wc -l < "$f")" "$(basename "$f")"
 done | sort -rn | head -20
 ```

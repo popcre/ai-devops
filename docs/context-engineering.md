@@ -139,23 +139,24 @@ single-session and 5.7% lifetime savings recorded in
 on this evidence.
 
 What *is* a repository problem is the skill index. Of 46 installed skills, 23
-were invoked in the ten-day window. Fourteen of the unused ones are rare
+were invoked in the ten-day window. Fourteen of the unused ones were rare
 procedures - portal scrapers, one-off audits, and new-project rituals - that
-Albert only ever starts deliberately. Each now carries
-`disable-model-invocation: true` in its frontmatter, which keeps it out of the
-startup skill listing entirely.
+Albert only ever starts deliberately, and later frozen or SQL-mining skills joined
+them. Each carries `disable-model-invocation: true` in its frontmatter, which
+keeps it out of the startup skill listing entirely.
 
 Nothing was moved, renamed, or deleted. A manual-only skill is still installed,
 still appears in the slash-command menu, and still runs in full when invoked by
 name. To put one back in the automatic index, delete its
-`disable-model-invocation` line and reinstall. The sixteen are:
+`disable-model-invocation` line and reinstall. The nineteen are:
 `ai-development-pipeline`, `cicd-rules-audit`, `design-handoff-implement`,
-`designflow-human-qa`, `human-app-qa`, `item-description-taxonomy`,
+`designflow-human-qa`, `gemini-code-delegation` (while frozen),
+`human-app-qa`, `item-description-taxonomy`,
 `kimi-code-delegation` (while suspended),
-`licensor-incremental-capture`, `new-app-setup`,
+`licensor-incremental-capture`, `mimo-transcript-backup`, `new-app-setup`,
 `paramount-creative-library-scrape`, `peanuts-scrape`, `repo-bug-audit`,
 `repo-docs-overhaul`, `sesame-workshop-scrape`, `strawberry-shortcake-scrape`,
-`typesafe-ai`.
+`typesafe-ai`, `zcode-transcript-backup`.
 `tests/test-mcp-skill-drift.ps1` fails if this list and the skills carrying the
 flag ever disagree; `designflow-human-qa` silently lost its flag once (#703).
 

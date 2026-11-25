@@ -145,10 +145,10 @@ preservation), MCP servers in `~/.zcode/cli/config.json` via
   --no-browser` plus browser authorization
   ([diagnosis and repair proof](../tests/verification/zcode-windows-2026-11-04/README.md)).
 - **Transcripts:** ZCode keeps sessions in SQLite (`~/.zcode/cli/db/`) +
-  rollout JSONL; back them up and mine them by SQL with the
-  `zcode-transcript-backup` skill (private repo destination only;
-  on `hetz` the owner ruled 2026-10-29 that all transcripts go to
-  Dropbox instead — see
+  rollout JSONL; mine a local copy by SQL with the
+  `zcode-transcript-backup` skill (routine session exports go to Dropbox via
+  `ai-transcript-upload`, and on `hetz` the owner ruled 2026-10-29 that all
+  transcripts go to Dropbox instead — see
   [skills/shared/transcript-to-dropbox](../skills/shared/transcript-to-dropbox/SKILL.md)).
 
 ## MiMo (Windows)
@@ -183,8 +183,9 @@ no config-file hook surface).
   is `~/.config/mimocode/skills/` only (never `~/.agents/skills`). Qualification
   facts: `tests/verification/mimo-windows-2026-09-23/README.md`.
 - **Transcripts:** MiMoCode keeps sessions in SQLite
-  (`~/.local/share/mimocode/mimocode.db`); back them up and mine them by SQL
-  with the `mimo-transcript-backup` skill (private repo destination only).
+  (`~/.local/share/mimocode/mimocode.db`); mine a local copy by SQL with the
+  `mimo-transcript-backup` skill (the private Git transcript repo is frozen;
+  daily MiMo uploads stopped 2026-11-24).
 
 ## Google Antigravity (Windows)
 
