@@ -151,23 +151,39 @@ PY
   check "pull uploads the other host's ZCode sessions" '[ -s "$zp/ai/zcode/sessions/ses_1.jsonl" ] && grep -q "errors=0" "$zp/.upload-last.txt"'
   check "pull with no ZCode under one account is not an error" '[ ! -e "$zp/root/zcode" ]'
   check "ZCode database itself is not uploaded" '[ -z "$(find "$zd" -name "*.sqlite")" ]'
-  # MiMo: same tables, its own database and folder.
+  # MiMo: no longer exported or uploaded; pre-existing Dropbox files remain untouched.
   mkdir -p "$zh/.local/share/mimocode"; cp "$zh/.zcode/cli/db/db.sqlite" "$zh/.local/share/mimocode/mimocode.db"
+  mkdir -p "$zd/ai/chat_transcripts/hostz/mimo/sessions"
+  printf 'keep-mimo\n' > "$zd/ai/chat_transcripts/hostz/mimo/sessions/old.jsonl"
   HOME="$zh" AI_TRANSCRIPT_UPLOAD_STATE_DIR="$work/zstate" bash "$up" --dropbox "$zd" --host hostz >/dev/null
-  check "MiMo sqlite sessions reach the upload folder" '[ -s "$zd/ai/chat_transcripts/hostz/mimo/sessions/ses_1.jsonl" ]'
-  check "MiMo database itself is not uploaded" '[ -z "$(find "$zd" -name "*.db")" ]'
+  check "MiMo sqlite sessions are not uploaded" '[ -z "$(find "$zd/ai/chat_transcripts/hostz/mimo" -name "ses_*.jsonl")" ]'
+  check "existing MiMo files in Dropbox are kept" 'cmp -s <(printf "keep-mimo\n") "$zd/ai/chat_transcripts/hostz/mimo/sessions/old.jsonl"'
   printf 'not a database
 ' > "$zh/.local/share/mimocode/mimocode.db"
-  check "a failed MiMo export reports an error" '! HOME="$zh" AI_TRANSCRIPT_UPLOAD_STATE_DIR="$work/zstate" bash "$up" --dropbox "$zd" --host hostz >/dev/null'
+  check "a broken MiMo database is ignored without error" 'HOME="$zh" AI_TRANSCRIPT_UPLOAD_STATE_DIR="$work/zstate" bash "$up" --dropbox "$zd" --host hostz >/dev/null'
   rm -f "$zh/.local/share/mimocode/mimocode.db"
   printf 'not a database
 ' > "$zh/.zcode/cli/db/db.sqlite"
   check "a failed ZCode export reports an error" '! HOME="$zh" AI_TRANSCRIPT_UPLOAD_STATE_DIR="$work/zstate" bash "$up" --dropbox "$zd" --host hostz >/dev/null'
+  # Antigravity: only brain/<cid>/.system_generated/logs/transcript.jsonl is uploaded, following symlinks.
+  agh="$work/aghome"; mkdir -p "$agh/.gemini/antigravity" "$work/agreal/cid-1/.system_generated/logs" "$work/agreal/cid-hot/.system_generated/logs"
+  ln -s "$work/agreal" "$agh/.gemini/antigravity/brain"
+  printf '{"type":"USER_INPUT"}\n' > "$work/agreal/cid-1/.system_generated/logs/transcript.jsonl"
+  printf '{"type":"USER_INPUT"}\n' > "$work/agreal/cid-1/.system_generated/logs/transcript_full.jsonl"
+  printf 'artifact\n' > "$work/agreal/cid-1/notes.md"
+  old "$work/agreal/cid-1/.system_generated/logs/transcript.jsonl" "$work/agreal/cid-1/.system_generated/logs/transcript_full.jsonl" "$work/agreal/cid-1/notes.md"
+  printf '{"type":"USER_INPUT"}\n' > "$work/agreal/cid-hot/.system_generated/logs/transcript.jsonl"
+  agdb="$work/agdb"; mkdir -p "$agdb/ai/chat_transcripts"
+  HOME="$agh" AI_TRANSCRIPT_UPLOAD_STATE_DIR="$work/agstate" bash "$up" --dropbox "$agdb" --host hostag >/dev/null
+  check "Antigravity transcript.jsonl reaches antigravity/sessions/<id>.jsonl" 'cmp -s "$work/agreal/cid-1/.system_generated/logs/transcript.jsonl" "$agdb/ai/chat_transcripts/hostag/antigravity/sessions/cid-1.jsonl"'
+  check "Antigravity skips transcript_full.jsonl and artifacts" '[ ! -e "$agdb/ai/chat_transcripts/hostag/antigravity/sessions/transcript_full.jsonl" ] && [ -z "$(find "$agdb/ai/chat_transcripts/hostag/antigravity" -name "*.md" -o -name "*transcript_full*")" ]'
+  check "Antigravity keeps hot-file rule" '[ ! -e "$agdb/ai/chat_transcripts/hostag/antigravity/sessions/cid-hot.jsonl" ] && grep -q "skipped_hot=1 errors=0" "$agdb/ai/chat_transcripts/hostag/.upload-last.txt"'
 else
   skip "ZCode export checks" "python3 not installed"
 fi
 
-check "ps1 exports the MiMo database" 'grep -Fq ".local\share\mimocode\mimocode.db" "$here/../bin/ai-transcript-upload.ps1"'
+check "ps1 no longer exports MiMo" '! grep -Fq "mimocode.db" "$here/../bin/ai-transcript-upload.ps1"'
+check "ps1 exports Antigravity brain transcripts" 'grep -Fq ".gemini\antigravity\brain" "$here/../bin/ai-transcript-upload.ps1"'
 check "ps1 names the checkout exporter path" 'grep -Fq "tools\transcript_store\zcode_export.py" "$here/../bin/ai-transcript-upload.ps1"'
 
 # Windows twin, when PowerShell is available (CI Linux runners may lack it).
@@ -196,6 +212,20 @@ if command -v pwsh >/dev/null 2>&1; then
 ' >> "$ps1main"
   LOCALAPPDATA="$wla" pwsh -NoProfile -File "$wla/ai-devops/ai-transcript-upload.ps1" -DropboxRoot "$wdb" -HostName hostw -Map "$work/wlink=claude/projects" >/dev/null 2>&1
   check "ps1: a broken main is refused and logged" '! grep -q "^function {" "$wla/ai-devops/ai-transcript-upload.ps1" && grep -q "self_update=failed" "$W/.upload-last.txt"'
+  # Default mode under pwsh: Antigravity uploaded, MiMo ignored and existing MiMo kept.
+  wprof="$work/wprof"; mkdir -p "$wprof/.gemini/antigravity/brain/ag-1/.system_generated/logs" "$wprof/.gemini/antigravity/brain/ag-hot/.system_generated/logs" "$wprof/.local/share/mimocode"
+  printf '{"type":"USER_INPUT"}\n' > "$wprof/.gemini/antigravity/brain/ag-1/.system_generated/logs/transcript.jsonl"
+  printf '{"type":"USER_INPUT"}\n' > "$wprof/.gemini/antigravity/brain/ag-1/.system_generated/logs/transcript_full.jsonl"
+  old "$wprof/.gemini/antigravity/brain/ag-1/.system_generated/logs/transcript.jsonl" "$wprof/.gemini/antigravity/brain/ag-1/.system_generated/logs/transcript_full.jsonl"
+  printf '{"type":"USER_INPUT"}\n' > "$wprof/.gemini/antigravity/brain/ag-hot/.system_generated/logs/transcript.jsonl"
+  printf 'not a db\n' > "$wprof/.local/share/mimocode/mimocode.db"
+  wdb2="$work/wdb2"; mkdir -p "$wdb2/ai/chat_transcripts/hostw2/mimo/sessions"
+  printf 'keep-mimo\n' > "$wdb2/ai/chat_transcripts/hostw2/mimo/sessions/old.jsonl"
+  USERPROFILE="$wprof" LOCALAPPDATA="$work/lad2" pwsh -NoProfile -File "$here/../bin/ai-transcript-upload.ps1" -DropboxRoot "$wdb2" -HostName hostw2 >/dev/null 2>&1
+  W2="$wdb2/ai/chat_transcripts/hostw2"
+  check "ps1: default mode uploads Antigravity transcript.jsonl" 'cmp -s "$wprof/.gemini/antigravity/brain/ag-1/.system_generated/logs/transcript.jsonl" "$W2/antigravity/sessions/ag-1.jsonl"'
+  check "ps1: skips transcript_full.jsonl and hot Antigravity files" '[ ! -e "$W2/antigravity/sessions/ag-hot.jsonl" ] && [ -z "$(find "$W2/antigravity" -name "*transcript_full*")" ]'
+  check "ps1: ignores MiMo database and preserves existing MiMo files" 'cmp -s <(printf "keep-mimo\n") "$W2/mimo/sessions/old.jsonl" && grep -q "skipped_hot=1 errors=0" "$W2/.upload-last.txt"'
 else
   skip "ps1 checks" "pwsh not installed"
 fi

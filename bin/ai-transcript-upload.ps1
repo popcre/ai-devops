@@ -168,31 +168,30 @@ foreach ($m in $Map) {
 $Root = Join-Path $DropboxRoot 'ai\chat_transcripts'
 if (-not (Test-Path -LiteralPath $Root)) { Write-Error "ai-transcript-upload: $Root not found (Dropbox missing?)"; exit 1 }
 $scanned = 0; $copied = 0; $hot = 0; $errors = 0
-if ($Map.Count -eq 0) {
-  # ZCode and MiMo keep sessions in sqlite: export them to session files, then copy those like any other.
-  $Map = @()
-  foreach ($z in @(@('ZCode', 'zcode', '.zcode\cli\db\db.sqlite'), @('MiMo', 'mimo', '.local\share\mimocode\mimocode.db'))) {
-    $zdb = Join-Path $env:USERPROFILE $z[2]
-    $zstage = Join-Path $StateDir "$($z[1])-export"
-    if (Test-Path -LiteralPath $zdb) {
-      $py = Get-Command python, python3 -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
-      $zrc = 1
-      if ($py) {
-        $prior = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
-        & $py.Source $Exporter $zdb $zstage 2>$null | Out-Null
-        $zrc = $LASTEXITCODE; $ErrorActionPreference = $prior
-      }
-      if ($zrc -ne 0) {
-        $errors++
-        New-Item -ItemType Directory -Force -Path $StateDir | Out-Null
-        Add-Content -LiteralPath (Join-Path $StateDir 'transcript-upload-errors.log') -Value ("{0} {1} export failed (exit {2})" -f [DateTime]::UtcNow.ToString('s'), $z[0], $zrc)
-      }
+$defaultAntigravity = $false
+  if ($Map.Count -eq 0) {
+  # ZCode keeps sessions in sqlite: export them to session files, then copy those like any other.
+  $zdb = Join-Path $env:USERPROFILE '.zcode\cli\db\db.sqlite'
+  $zstage = Join-Path $StateDir 'zcode-export'
+  if (Test-Path -LiteralPath $zdb) {
+    $py = Get-Command python, python3 -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    $zrc = 1
+    if ($py) {
+      $prior = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+      & $py.Source $Exporter $zdb $zstage 2>$null | Out-Null
+      $zrc = $LASTEXITCODE; $ErrorActionPreference = $prior
     }
-    $Map += "$zstage=$($z[1])/sessions"
+    if ($zrc -ne 0) {
+      $errors++
+      New-Item -ItemType Directory -Force -Path $StateDir | Out-Null
+      Add-Content -LiteralPath (Join-Path $StateDir 'transcript-upload-errors.log') -Value ("{0} ZCode export failed (exit {1})" -f [DateTime]::UtcNow.ToString('s'), $zrc)
+    }
   }
-  $Map += @("$env:USERPROFILE\.claude\projects=claude\projects",
+  $Map = @("$zstage=zcode/sessions",
+            "$env:USERPROFILE\.claude\projects=claude\projects",
             "$env:USERPROFILE\.codex\sessions=codex\sessions",
             "$env:USERPROFILE\.codex\archived_sessions=codex\archived_sessions")
+  $defaultAntigravity = $true
 }
 $D = Join-Path $Root $HostName
 $now = [DateTime]::UtcNow
@@ -216,6 +215,40 @@ function Resolve-Source([string]$p) {
   return $null
 }
 
+function Copy-TranscriptFile([System.IO.FileInfo]$f, [string]$destPath, [string]$partPath) {
+  $script:scanned++
+  try {
+    if (($now - $f.LastWriteTimeUtc).TotalMinutes -lt $HotMinutes) { $script:hot++; return }
+    # .NET calls with \\?\ paths, so destinations over 260 characters work in PowerShell 5.1.
+    $dest = LongPath $destPath
+    $srcL = LongPath $f.FullName
+    $di = New-Object System.IO.FileInfo $dest
+    if ($di.Exists -and $di.Length -eq $f.Length -and $f.LastWriteTimeUtc -le $di.LastWriteTimeUtc) { return }
+    $part = LongPath $partPath
+    [void][System.IO.Directory]::CreateDirectory([System.IO.Path]::GetDirectoryName($part))
+    [void][System.IO.Directory]::CreateDirectory([System.IO.Path]::GetDirectoryName($dest))
+    $want = $f.Length; $done = $false
+    for ($try = 1; $try -le 2 -and -not $done; $try++) {
+      [System.IO.File]::Copy($srcL, $part, $true)
+      [System.IO.File]::SetLastWriteTimeUtc($part, $f.LastWriteTimeUtc)
+      $got = (New-Object System.IO.FileInfo $part).Length
+      $now2 = (New-Object System.IO.FileInfo $srcL).Length
+      if ($got -eq $want -and $now2 -eq $want) {
+        # File.Replace rejects \\?\ paths on .NET Framework; replace = delete the old copy, then rename.
+        if ([System.IO.File]::Exists($dest)) { [System.IO.File]::Delete($dest) }
+        [System.IO.File]::Move($part, $dest)
+        $done = $true; $script:copied++
+      } else {
+        [System.IO.File]::Delete($part); $want = $now2
+      }
+    }
+  } catch {
+    $script:errors++
+    New-Item -ItemType Directory -Force -Path $StateDir | Out-Null
+    Add-Content -LiteralPath (Join-Path $StateDir 'transcript-upload-errors.log') -Value ("{0} {1}: {2}" -f [DateTime]::UtcNow.ToString('s'), $f.FullName, $_.Exception.Message) -Encoding UTF8
+  }
+}
+
 foreach ($m in $Map) {
   $eq = $m.IndexOf('=')
   $src = Resolve-Source $m.Substring(0, $eq)
@@ -225,37 +258,20 @@ foreach ($m in $Map) {
   $partDir = Join-Path (Join-Path $D '.partial') $rel
   $srcFull = (Get-Item -LiteralPath $src -Force).FullName.TrimEnd('\')
   foreach ($f in (Get-ChildItem -LiteralPath $src -Recurse -File -Force -ErrorAction SilentlyContinue)) {
-    $scanned++
-    try {
-      $r = $f.FullName.Substring($srcFull.Length).TrimStart('\')
-      if (($now - $f.LastWriteTimeUtc).TotalMinutes -lt $HotMinutes) { $hot++; continue }
-      # .NET calls with \\?\ paths, so destinations over 260 characters work in PowerShell 5.1.
-      $dest = LongPath (Join-Path $destDir $r)
-      $srcL = LongPath $f.FullName
-      $di = New-Object System.IO.FileInfo $dest
-      if ($di.Exists -and $di.Length -eq $f.Length -and $f.LastWriteTimeUtc -le $di.LastWriteTimeUtc) { continue }
-      $part = LongPath (Join-Path $partDir $r)
-      [void][System.IO.Directory]::CreateDirectory([System.IO.Path]::GetDirectoryName($part))
-      [void][System.IO.Directory]::CreateDirectory([System.IO.Path]::GetDirectoryName($dest))
-      $want = $f.Length; $done = $false
-      for ($try = 1; $try -le 2 -and -not $done; $try++) {
-        [System.IO.File]::Copy($srcL, $part, $true)
-        [System.IO.File]::SetLastWriteTimeUtc($part, $f.LastWriteTimeUtc)
-        $got = (New-Object System.IO.FileInfo $part).Length
-        $now2 = (New-Object System.IO.FileInfo $srcL).Length
-        if ($got -eq $want -and $now2 -eq $want) {
-          # File.Replace rejects \\?\ paths on .NET Framework; replace = delete the old copy, then rename.
-          if ([System.IO.File]::Exists($dest)) { [System.IO.File]::Delete($dest) }
-          [System.IO.File]::Move($part, $dest)
-          $done = $true; $copied++
-        } else {
-          [System.IO.File]::Delete($part); $want = $now2
-        }
+    $r = $f.FullName.Substring($srcFull.Length).TrimStart('\')
+    Copy-TranscriptFile $f (Join-Path $destDir $r) (Join-Path $partDir $r)
+  }
+}
+if ($defaultAntigravity) {
+  $agBrain = Resolve-Source (Join-Path $env:USERPROFILE '.gemini\antigravity\brain')
+  if ($agBrain) {
+    foreach ($dir in (Get-ChildItem -LiteralPath $agBrain -Directory -Force -ErrorAction SilentlyContinue)) {
+      if ($dir.Name -notmatch '^[A-Za-z0-9._-]+$' -or $dir.Name -in @('.','..')) { continue }
+      $tf = Join-Path $dir.FullName '.system_generated\logs\transcript.jsonl'
+      if (Test-Path -LiteralPath $tf -PathType Leaf) {
+        $fi = Get-Item -LiteralPath $tf -Force
+        Copy-TranscriptFile $fi (Join-Path $D "antigravity\sessions\$($dir.Name).jsonl") (Join-Path $D ".partial\antigravity\sessions\$($dir.Name).jsonl")
       }
-    } catch {
-      $errors++
-      New-Item -ItemType Directory -Force -Path $StateDir | Out-Null
-      Add-Content -LiteralPath (Join-Path $StateDir 'transcript-upload-errors.log') -Value ("{0} {1}: {2}" -f [DateTime]::UtcNow.ToString('s'), $f.FullName, $_.Exception.Message) -Encoding UTF8
     }
   }
 }

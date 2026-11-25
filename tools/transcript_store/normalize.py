@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Normalize one Claude, Codex, Grok or Kimi ``.jsonl`` transcript (plan step 2).
+"""Normalize one Claude, Codex, Grok, Kimi or Antigravity ``.jsonl`` transcript (plan step 2).
 
 Issue popcre/ai-devops#2050 (stage B, #2060). Python 3.10+, stdlib only.
 
@@ -228,8 +228,52 @@ def _kimi_turn(obj: dict):
     return None  # thinking, tool output and step markers
 
 
+_AG_META_RX = re.compile(r"<(?:ADDITIONAL_METADATA|USER_SETTINGS_CHANGE)>.*?</(?:ADDITIONAL_METADATA|USER_SETTINGS_CHANGE)>", re.DOTALL)
+_AG_REQ_TAG_RX = re.compile(r"</?USER_REQUEST>")
+_AG_PATH_KEYS = ("Path", "AbsolutePath", "DirectoryPath", "TargetFile", "SearchPath", "Cwd", "cwd", "path")
+
+
+def _clean_antigravity_user(text: str) -> str:
+    text = _AG_META_RX.sub("", text)
+    text = _AG_REQ_TAG_RX.sub("", text)
+    return text.strip()
+
+
+def _antigravity_turn(obj: dict):
+    """Antigravity transcript.jsonl: USER_INPUT and PLANNER_RESPONSE only."""
+    kind = obj.get("type")
+    if kind == "USER_INPUT":
+        if obj.get("source") and obj.get("source") != "USER_EXPLICIT":
+            return None
+        raw = obj.get("content")
+        text = _clean_antigravity_user(raw) if isinstance(raw, str) else ""
+        return "user", text, []
+    if kind == "PLANNER_RESPONSE":
+        raw = obj.get("content")
+        text = raw if isinstance(raw, str) else ""
+        tools = [str(tc["name"]) for tc in (obj.get("tool_calls") or []) if isinstance(tc, dict) and tc.get("name")]
+        return "assistant", text, tools
+    return None  # thinking, tool output (GENERIC), SYSTEM_MESSAGE, CHECKPOINT, ERROR_MESSAGE
+
+
+def _antigravity_cwd(obj: dict) -> str | None:
+    for tc in obj.get("tool_calls") or []:
+        if not isinstance(tc, dict):
+            continue
+        args = tc.get("args")
+        if not isinstance(args, dict):
+            continue
+        for k in _AG_PATH_KEYS:
+            v = args.get(k)
+            if isinstance(v, str) and derive_repo(v) != "unknown":
+                return v
+    return None
+
+
 def _turn(obj: dict):
     kind = obj.get("type")
+    if kind in ("USER_INPUT", "PLANNER_RESPONSE"):
+        return _antigravity_turn(obj)
     if kind in ("context.append_message", "context.append_loop_event"):
         return _kimi_turn(obj)
     if "message" in obj:
@@ -314,7 +358,7 @@ def parse_file(path, machine: str | None = None, rel_path: str | None = None) ->
             bytes_parsed = end
             continue
         bytes_parsed = end
-        ts = _iso(obj.get("timestamp") or obj.get("_audit_timestamp") or obj.get("time"))
+        ts = _iso(obj.get("timestamp") or obj.get("_audit_timestamp") or obj.get("time") or obj.get("created_at"))
         if obj.get("type") == "session_meta" and isinstance(obj.get("payload"), dict):
             p = obj["payload"]
             meta["session_id"] = meta["session_id"] or p.get("id")
@@ -332,6 +376,8 @@ def parse_file(path, machine: str | None = None, rel_path: str | None = None) ->
             meta["parent_session_id"] = obj["parentSessionId"]
         if obj.get("type") == "profile.bind" and not meta["cwd"]:
             meta["cwd"] = (obj.get("environmentDisclosure") or {}).get("cwd")
+        if obj.get("type") == "PLANNER_RESPONSE" and not meta["cwd"]:
+            meta["cwd"] = _antigravity_cwd(obj)
         got = _turn(obj)
         if got is None:
             continue
@@ -361,6 +407,8 @@ def parse_file(path, machine: str | None = None, rel_path: str | None = None) ->
     elif p.name == "wire.jsonl" and len(p.parents) > 2:  # <session>/agents/<agent>/
         agent = p.parent.name
         meta["session_id"] = meta["session_id"] or p.parents[2].name + ("" if agent == "main" else f"-{agent}")
+    elif p.name == "transcript.jsonl" and len(p.parents) > 2 and p.parent.name == "logs" and p.parents[1].name == ".system_generated":
+        meta["session_id"] = meta["session_id"] or p.parents[2].name
     if not meta["session_id"]:
         meta["session_id"] = p.stem
     if conversation and not meta["last_ts"]:  # never a dateless conversation
