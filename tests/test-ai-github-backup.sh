@@ -12,7 +12,7 @@ work="$(mktemp -d)"; trap 'rm -rf "$work"' EXIT
 export HOME="$work/home"; mkdir -p "$HOME" "$work/stub"
 export GIT_CONFIG_GLOBAL="$work/gitconfig"; printf '[user]\n\tname=t\n\temail=t@t\n[credential "https://github.com"]\n\thelper=\n' > "$GIT_CONFIG_GLOBAL"
 export GITHUB_BACKUP_ROOT="$work/root" GITHUB_BACKUP_NAS="$work/nas" GITHUB_BACKUP_DROPBOX="$work/dropbox"
-export GITHUB_BACKUP_GIT_BASE="$work/gh" GITHUB_BACKUP_GH="$work/stub/gh"
+export ALERT_LOG="$work/alert.log" GITHUB_BACKUP_GIT_BASE="$work/gh" GITHUB_BACKUP_GH="$work/stub/gh"
 
 # Fake GitHub: one repository with two commits and a tag.
 mkdir -p "$work/gh/acme" && git init -q --bare "$work/gh/acme/app.git"
@@ -21,6 +21,13 @@ git clone -q "$work/gh/acme/app.git" "$work/src" 2>/dev/null
 
 cat > "$work/stub/gh" <<'EOF'
 #!/usr/bin/env bash
+if [ "$1" = issue ]; then
+  case "$2" in
+    list) printf '%s' "${GH_ISSUES:-[]}" | jq -r "${12}" ;;
+    *) echo "issue $2 $3" >> "$ALERT_LOG" ;;
+  esac
+  exit 0
+fi
 [ "$1" = api ] || exit 1; shift
 [ "$1" = --paginate ] && shift
 [ -n "${GITHUB_BACKUP_FAIL_META:-}" ] && case "$1" in repos/*) exit 1 ;; esac
@@ -63,9 +70,19 @@ check "no temp files leak into copied trees" '! find "$work/root/meta" "$work/na
 
 # A sharply shrunk repository list fails the run.
 printf 'acme/app\tfalse\n%.0s' 1 2 3 4 5 6 7 8 9 10 > "$work/root/repos.tsv"
+echo 10 > "$work/root/.repo-count"
 bash "$tool" run >/dev/null 2>&1; check "repository list shrink fails the run" '[ $? -ne 0 ]'
+bash "$tool" run >/dev/null 2>&1; check "shrink still fails the next night" '[ $? -ne 0 ]'
 GITHUB_BACKUP_ACCEPT_SHRINK=1 bash "$tool" run >/dev/null 2>&1; check "accepted shrink succeeds" '[ $? -eq 0 ]'
 check "open-PR refs are mirrored" 'git -C "$work/root/mirrors/acme/app.git" rev-parse -q --verify refs/pull/1/head >/dev/null'
+
+# Alert: opens an issue when none is open, comments when one is.
+: > "$work/alert.log"
+GH_ISSUES='[]' bash "$tool" --alert >/dev/null 2>&1
+check "alert creates an issue when none is open" 'grep -q "^issue create" "$work/alert.log"'
+: > "$work/alert.log"
+GH_ISSUES='[{"number":7}]' bash "$tool" --alert >/dev/null 2>&1
+check "alert comments on the open issue" 'grep -q "^issue comment 7" "$work/alert.log"'
 
 check "install skips on another host" 'GITHUB_BACKUP_HOST=not-this-host bash "$tool" --install | grep -q "^SKIP"'
 

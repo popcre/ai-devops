@@ -70,21 +70,23 @@ backup_repo() { # owner/name has_wiki
     git -C "$mirror" fetch --quiet --force "$url" '+refs/heads/*:refs/heads/*' '+refs/tags/*:refs/tags/*' '+refs/pull/*:refs/pull/*' || rc=1
   else
     before=""
-    git clone --quiet --mirror "$url" "$mirror" || rc=1
+    git clone --quiet --mirror "$url" "$mirror" &&
+      git -C "$mirror" fetch --quiet --force "$url" '+refs/pull/*:refs/pull/*' || rc=1
   fi
   if [ "$rc" -eq 0 ]; then
     after="$(git -C "$mirror" for-each-ref --format='%(objectname) %(refname)' | sha1sum)"
     if [ ! -s "$bundle" ] || [ "$before" != "$after" ]; then
       if git -C "$mirror" rev-parse --verify -q HEAD >/dev/null || [ -n "$(git -C "$mirror" for-each-ref --count=1)" ]; then
-        git -C "$mirror" bundle create --quiet "$bundle.tmp" --all 2>/dev/null && mv -f "$bundle.tmp" "$bundle" || { rm -f "$bundle.tmp"; rc=1; }
+        git -C "$mirror" bundle create --quiet "$bundle.tmp" --all 2>/dev/null && mv -f "$bundle.tmp" "$bundle" && rm -f "$bundle.empty" || { rm -f "$bundle.tmp"; rc=1; }
       else
         : > "$bundle.empty"   # GitHub repository has no commits; nothing to bundle
       fi
     fi
     # Git LFS: bundles hold only pointers, so fetch every LFS object and keep
     # a copy under lfs/ that goes to the NAS and Dropbox with the bundles.
-    if git -C "$mirror" grep -q 'filter=lfs' HEAD -- .gitattributes 2>/dev/null ||
-       [ -d "$mirror/lfs/objects" ]; then
+    local refs=(); mapfile -t refs < <(git -C "$mirror" for-each-ref --format='%(objectname)' refs/heads refs/tags | sort -u)
+    if [ -d "$mirror/lfs/objects" ] || { [ "${#refs[@]}" -gt 0 ] &&
+       git -C "$mirror" grep -q 'filter=lfs' "${refs[@]}" -- .gitattributes '**/.gitattributes' 2>/dev/null; }; then
       if git -C "$mirror" lfs fetch --all --quiet "$url" >/dev/null 2>&1; then
         mkdir -p "$ROOT/lfs/$full" && cp -a -u "$mirror/lfs/objects" "$ROOT/lfs/$full/" || rc=1
       else log "WARN $full: Git LFS fetch failed"; rc=1; fi
@@ -97,7 +99,14 @@ backup_repo() { # owner/name has_wiki
     # updating is a failure.
     if [ -d "$wm" ]; then
       git -C "$wm" fetch --quiet --force origin '+refs/*:refs/*' 2>/dev/null || { log "WARN $full: wiki update failed"; rc=1; }
-    else git clone --quiet --mirror "$GIT_BASE/$full.wiki.git" "$wm" 2>/dev/null || rm -rf "$wm"; fi
+    else
+      local werr
+      if ! werr="$(git clone --quiet --mirror "$GIT_BASE/$full.wiki.git" "$wm" 2>&1)"; then
+        rm -rf "$wm"
+        case "$werr" in *"not found"*|*"does not appear to be a git repository"*) ;;  # no wiki pages yet
+          *) log "WARN $full: wiki clone failed"; rc=1 ;; esac
+      fi
+    fi
     if [ -d "$wm" ] && [ -n "$(git -C "$wm" for-each-ref --count=1)" ]; then
       git -C "$wm" bundle create --quiet "$bundle.wiki.tmp" --all 2>/dev/null && mv -f "$bundle.wiki.tmp" "${bundle%.bundle}.wiki.bundle" ||
         { rm -f "$bundle.wiki.tmp"; log "WARN $full: wiki bundle failed"; rc=1; }
@@ -122,7 +131,11 @@ do_run() {
     export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=credential.https://github.com.helper GIT_CONFIG_VALUE_0="!\"$GH\" auth git-credential"
   local list="$ROOT/repos.tsv" failed=0 total=0 full wiki prev=0
   mkdir -p "$ROOT/.work"; rm -f "$ROOT/.work/"*
-  [ -f "$list" ] && prev="$(wc -l < "$list")"
+  # Baseline = repository count of the last run that was not a shrink; it
+  # does not move down until a drop is accepted, so a missed alert cannot
+  # quietly become the new normal.
+  [ -f "$ROOT/.repo-count" ] && prev="$(cat "$ROOT/.repo-count")"
+  [ "$prev" -gt 0 ] 2>/dev/null || { [ -f "$list" ] && prev="$(wc -l < "$list")"; }
   "$GH" api --paginate 'user/repos?affiliation=owner,organization_member&per_page=100' \
     -q '.[] | "\(.full_name)\t\(.has_wiki)"' > "$list.tmp" && [ -s "$list.tmp" ] && mv -f "$list.tmp" "$list" ||
     { log "ERROR could not list repositories"; return 1; }
@@ -131,7 +144,9 @@ do_run() {
   local now_count; now_count="$(wc -l < "$list")"
   if [ "$prev" -gt 0 ] && [ $((now_count * 10)) -lt $((prev * 9)) ] && [ "${GITHUB_BACKUP_ACCEPT_SHRINK:-}" != 1 ]; then
     log "ERROR repository list shrank from $prev to $now_count; set GITHUB_BACKUP_ACCEPT_SHRINK=1 once to accept"
-    cp -f "$list" "$list.shrunk"; failed=$((failed + 1))
+    failed=$((failed + 1))
+  else
+    echo "$now_count" > "$ROOT/.repo-count"
   fi
   while IFS=$'\t' read -r full wiki; do
     total=$((total + 1))
@@ -180,7 +195,7 @@ do_alert() {
   local body; body="$(printf 'The nightly GitHub backup failed at %s.\n\n```\n%s\n```\n\nLast log lines:\n```\n%s\n```\n\n-- ai-github-backup on %s' \
     "$(TZ=America/New_York date '+%F %-I:%M %p %Z')" "$(cat "$ROOT/last-run.json" 2>/dev/null)" \
     "$(journalctl --user -u "$unit.service" -n 15 --no-pager -o cat 2>/dev/null)" "$(hostname)")"
-  local n; n="$("$GH" issue list --repo "$repo" --state open --search "\"$title\" in:title" --json number -q '.[0].number' 2>/dev/null)"
+  local n; n="$("$GH" issue list --repo "$repo" --state open --search "\"$title\" in:title" --json number -q '.[0].number // empty' 2>/dev/null)"
   if [ -n "$n" ]; then "$GH" issue comment "$n" --repo "$repo" --body "$body" >/dev/null
   else "$GH" issue create --repo "$repo" --title "$title" --body "$body" >/dev/null; fi
 }
