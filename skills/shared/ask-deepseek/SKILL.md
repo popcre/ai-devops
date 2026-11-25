@@ -61,7 +61,8 @@ independence, then real argument.
    "I have no independent read; DeepSeek's answer stands unopposed."
 2. **Send the brief plus your position**, labelled as one input to weigh and
    *not* the expected answer. Tell DeepSeek to reason from the material first
-   and say plainly if you are wrong. State that this is read-only.
+   and say plainly if you are wrong. Put the position inside the brief
+   file itself. State that this is read-only.
    `ai-deepseek-agent send "<brief>" [--file plan.md]`
 3. **Report two separate things:** what DeepSeek said, faithfully (keep the
    parts that hurt your position), then whether you agree, point by point. If

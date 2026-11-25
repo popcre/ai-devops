@@ -15,24 +15,31 @@ debate below is run honestly.
 private-copy and verdict machinery as `ai-glm`, `ai-muse` and
 `ai-antigravity`. Every call runs on a private copy of the repository (HEAD
 plus uncommitted changes, no git remote); your checkout is never touched.
-Read-only calls run Codex's `read-only` sandbox; `implement` runs
-`workspace-write` inside the private writable copy. Named sessions continue the
-same Codex thread (`codex exec resume`). Codex is not a CI reviewer.
+`new`, `ask` and `review` run Codex's `read-only` sandbox; `implement` runs
+`workspace-write` inside the private writable copy. A session keeps its mode:
+continue a read-only session with `ask` and an implement session with
+`implement`; mixing them is refused. Named sessions continue the same Codex
+thread (`codex exec resume`) on the copy made when they started, so start a new
+name after the repository changes. Codex is not a CI reviewer.
+
+The copy holds tracked files and untracked files that git does not ignore.
+Anything Codex reads may be sent to the model, so keep secrets out of tracked
+files as well as out of briefs.
 
 ```bash
-ai-codex doctor [--live]                         # codex CLI present; --live makes one tiny call
+ai-codex doctor [--live]                         # codex CLI present; --live makes a tiny call (up to 3 tries)
 ai-codex ask "Is this retry loop bounded?"       # one-shot read-only question about the current repo
 ai-codex new <name> --prompt-file "$brief"       # start a named read-only session
 ai-codex ask <name> --prompt-file "$next"        # continue that same thread
-ai-codex review --repo . --base origin/main      # review the diff; ends with a VERDICT line
+ai-codex review --repo . --base origin/main      # review the diff; exit 3 if no VERDICT line
 ai-codex implement <name> --prompt-file "$task"  # edits in a private writable copy; prints the diff
 ai-codex diff <name> | git apply                 # take the implementation into your checkout
-ai-codex list | show <name> | transcript <name> | abort <name> | delete <name>
+ai-codex list | show <name> | transcript <name> | abort <name> | delete <name>   # abort exits 1 if a process survives
 ```
 
-Reasoning effort: the standing rule is `low` by default, `medium` allowed,
-never `high` or `none`. Set `AI_CODEX_EFFORT=medium` for judgement work such as
-a debate; `AI_CODEX_MODEL` overrides the model. Sign-in is the Codex CLI's own;
+Reasoning effort follows the standing rule: `ai-codex` uses `low` unless
+`AI_CODEX_EFFORT=medium` is set, and refuses any other value. Use `medium` for
+judgement work such as a debate; `AI_CODEX_MODEL` overrides the model. Sign-in is the Codex CLI's own;
 there is no key to store.
 
 ## Debate is the default
@@ -48,7 +55,8 @@ independence, then real argument.
    "I have no independent read; Codex's answer stands unopposed."
 2. **Send the brief plus your position**, labelled as one input to weigh and
    *not* the expected answer. Tell Codex to reason from the material first
-   and say plainly if you are wrong. State that this is read-only.
+   and say plainly if you are wrong. Put the position inside the brief
+   file itself. State that this is read-only.
    `ai-codex new <name> --prompt-file "$brief"`
 3. **Report two separate things:** what Codex said, faithfully (keep the
    parts that hurt your position), then whether you agree, point by point. If

@@ -47,7 +47,10 @@ FAKE = textwrap.dedent("""\
             fh.write("made by fake\\n")
     sid = "--session" in args and args[args.index("--session") + 1] or "ses_fake1"
     print(json.dumps({"type": "step_start", "sessionID": sid, "part": {}}))
-    print(json.dumps({"type": "text", "sessionID": sid, "part": {"text": "ANSWER for: " + prompt.splitlines()[0]}}))
+    text = "ANSWER for: " + prompt.splitlines()[0]
+    if mode == "verdict":
+        text += "\\nVERDICT: APPROVE"
+    print(json.dumps({"type": "text", "sessionID": sid, "part": {"text": text}}))
 """)
 
 
@@ -150,7 +153,19 @@ class SecondOpinion(unittest.TestCase):
         self.assertEqual(self.run_tool("muse", "delete", "s1").returncode, 0)
         self.assertEqual(self.run_tool("muse", "list").stdout, "")
 
+    def test_review_without_verdict_is_incomplete(self):
+        r = self.run_tool("stepfun", "review", "--base", "HEAD")
+        self.assertEqual(r.returncode, 3)
+        self.assertIn("without a VERDICT", r.stderr)
+
+    def test_session_mode_mismatch_is_refused(self):
+        self.assertEqual(self.run_tool("muse", "new", "ro", "q").returncode, 0)
+        r = self.run_tool("muse", "implement", "ro", "change it")
+        self.assertEqual(r.returncode, 2)
+
     def test_review_includes_diff(self):
+        with open(os.path.join(self.state, "mode"), "w") as fh:
+            fh.write("verdict")
         r = self.run_tool("stepfun", "review", "--base", "HEAD")
         self.assertEqual(r.returncode, 0, r.stderr)
         prompt = self.calls()[0]["prompt"]
@@ -454,6 +469,12 @@ class CodexSecondOpinion(AntigravitySecondOpinion):
         self.assertIn("CODEX_NEW.txt", r.stdout)
         self.assertFalse(os.path.exists(os.path.join(self.repo, "CODEX_NEW.txt")))
         self.assertIn('sandbox_mode="workspace-write"', self.calls()[0]["args"])
+
+    def test_effort_defaults_low_and_refuses_high(self):
+        self.assertEqual(self.run_tool("codex", "ask", "hello").returncode, 0)
+        self.assertIn('model_reasoning_effort="low"', self.calls()[0]["args"])
+        self.env["AI_CODEX_EFFORT"] = "high"
+        self.assertEqual(self.run_tool("codex", "ask", "hello again").returncode, 2)
 
     def test_failed_turn_is_unavailable(self):
         with open(os.path.join(self.state, "mode"), "w") as fh:

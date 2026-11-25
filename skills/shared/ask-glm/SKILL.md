@@ -39,7 +39,8 @@ independence, then real argument.
    "I have no independent read; GLM's answer stands unopposed."
 2. **Send the brief plus your position**, labelled as one input to weigh and
    *not* the expected answer. Tell GLM to reason from the material first
-   and say plainly if you are wrong. State that this is read-only.
+   and say plainly if you are wrong. Put the position inside the brief
+   file itself. State that this is read-only.
    `ai-glm new <name> --prompt-file "$brief"`
 3. **Report two separate things:** what GLM said, faithfully (keep the
    parts that hurt your position), then whether you agree, point by point. If

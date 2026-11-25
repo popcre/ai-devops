@@ -455,9 +455,11 @@ def run_codex_turn(provider, sdir, meta, prompt, spec):
             "-c", 'approval_policy="never"']
     if spec.get("model"):
         opts += ["-m", spec["model"]]
-    effort = os.environ.get("AI_CODEX_EFFORT")
-    if effort:
-        opts += ["-c", f'model_reasoning_effort="{effort}"']
+    # Owner rule: low by default, medium allowed, never high or none.
+    effort = os.environ.get("AI_CODEX_EFFORT") or "low"
+    if effort not in ("low", "medium"):
+        die(f"{provider}: AI_CODEX_EFFORT must be low or medium, not {effort!r}.", 2)
+    opts += ["-c", f'model_reasoning_effort="{effort}"']
     resume = meta.get("session")
     if resume:
         cmd = [codex, "exec", "resume", *opts, resume, "-"]
@@ -472,6 +474,8 @@ def run_codex_turn(provider, sdir, meta, prompt, spec):
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                             encoding="utf-8", errors="replace",
                             start_new_session=hasattr(os, "killpg"))
+    meta["child_pid"] = proc.pid
+    save_meta(sdir, meta)
     try:
         out, err = proc.communicate(full_prompt, timeout=timeout)
     except subprocess.TimeoutExpired:
@@ -479,6 +483,7 @@ def run_codex_turn(provider, sdir, meta, prompt, spec):
         meta.update(state="failed", updated=time.time())
         save_meta(sdir, meta)
         die(f"{provider}: no answer within {timeout}s.", 3)
+    meta.pop("child_pid", None)
     sid, texts, errors, completed = resume, [], [], False
     for line in out.splitlines():
         try:
@@ -829,6 +834,10 @@ def main(argv):
                 die(f"session {name} is bound to route {bound}; explicit selection is sticky.", 2)
             sdir = os.path.join(STATE, p, name)
             meta = load_meta(sdir)
+            if (cmd == "implement") != (meta.get("mode") == "implement"):
+                die(f"session {name} is {meta.get('mode')}; use "
+                    f"{'implement' if meta.get('mode') == 'implement' else 'ask'} to continue it, "
+                    "or start a new name.", 2)
             if billing_id and billing_id != meta.get("billing_id"):
                 die("the billing probe is bound to its original session identifier", 2)
         else:
@@ -868,7 +877,11 @@ def main(argv):
         sdir, meta = start(p, None, repo, False, base,
                            route=route,
                            billing_id=billing_id)
-        print(run_opencode(p, sdir, meta, prompt, route=route))
+        answer = run_opencode(p, sdir, meta, prompt, route=route)
+        print(answer)
+        if not __import__("re").search(r"^VERDICT: (APPROVE|REJECT|REVISE)\s*$",
+                                       answer.strip().splitlines()[-1] if answer.strip() else ""):
+            die(f"{p}: review ended without a VERDICT line; treat it as incomplete.", 3)
         return 0
 
     if cmd == "list":
@@ -901,15 +914,38 @@ def main(argv):
             git(meta["work"], "add", "-A", check=False)
             sys.stdout.write(git(meta["work"], "diff", "--cached", "HEAD"))
         elif cmd == "abort":
-            pid = meta.get("pid")
-            if pid and meta.get("state") == "running":
-                try:
-                    os.kill(pid, signal.SIGTERM)
-                except OSError:
-                    pass
+            stopped = True
+            if meta.get("state") == "running":
+                child = meta.get("child_pid")
+                if child:
+                    try:
+                        if hasattr(os, "killpg"):
+                            os.killpg(child, signal.SIGTERM)
+                        else:
+                            subprocess.run(["taskkill", "/PID", str(child), "/T", "/F"],
+                                           capture_output=True)
+                    except OSError:
+                        pass
+                pid = meta.get("pid")
+                if pid:
+                    try:
+                        os.kill(pid, signal.SIGTERM)
+                    except OSError:
+                        pass
+                time.sleep(1)
+                for check in (child, pid):
+                    if check and hasattr(os, "killpg"):
+                        try:
+                            os.kill(check, 0)
+                            stopped = False
+                        except OSError:
+                            pass
             meta.update(state="aborted", updated=time.time())
             save_meta(sdir, meta)
-            print(f"{args.text[0]}: aborted")
+            print(f"{args.text[0]}: aborted" if stopped else
+                  f"{args.text[0]}: abort sent, but a process is still running")
+            if not stopped:
+                return 1
         elif cmd == "delete":
             for d, dirs, files in os.walk(sdir):
                 for x in dirs + files:
