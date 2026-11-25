@@ -482,7 +482,26 @@ class CodexSecondOpinion(AntigravitySecondOpinion):
         r = self.run_tool("codex", "ask", "hello")
         self.assertEqual(r.returncode, 3)
 
+    def test_abort_keeps_running_state_when_engine_survives(self):
+        import signal as _s
+        self.assertEqual(self.run_tool("codex", "new", "ab", "q").returncode, 0)
+        sdir = os.path.join(self.env["AI_SECOND_OPINION_HOME"], "codex", "ab")
+        child = subprocess.Popen(["sleep", "30"], start_new_session=True)
+        try:
+            meta = json.load(open(os.path.join(sdir, "meta.json")))
+            meta.update(state="running", child_pid=child.pid, pid=None)
+            json.dump(meta, open(os.path.join(sdir, "meta.json"), "w"))
+            _s.signal(_s.SIGTERM, _s.SIG_DFL)
+            # Ignore TERM in the child so it survives the abort.
+            os.kill(child.pid, _s.SIGSTOP)
+            r = self.run_tool("codex", "abort", "ab")
+        finally:
+            child.kill()
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertEqual(json.load(open(os.path.join(sdir, "meta.json")))["state"], "running")
+
     def test_doctor_and_store_key_and_auth_error(self):
+        """Codex has no key file; the auth-error path is test_failed_turn_is_unavailable."""
         r = self.run_tool("codex", "store-key")
         self.assertEqual(r.returncode, 0, r.stderr)
         r = self.run_tool("codex", "doctor")
