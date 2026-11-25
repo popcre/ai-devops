@@ -1,6 +1,6 @@
 ---
 name: codex-handoff
-description: "Hand a substantial implementation, ops, or verification task to Codex (GPT-5.x), drive it to completion, and verify. Use for \"use codex\", \"have codex do X\", \"hand this off to codex\", \"use the codex-cli MCP\", \"delegate this to gpt-5\", or long autonomous second-engine work. Opinions go to codex-second-opinion."
+description: "Hand a substantial implementation, ops, or verification task to Codex (GPT-5.x), drive it to completion, and verify. Use for \"use codex\", \"have codex do X\", \"hand this off to codex\", \"use the codex-cli MCP\", \"delegate this to gpt-5\", or long autonomous second-engine work. Opinions, reviews and small changes go to ask-codex."
 ---
 
 # codex-handoff
@@ -31,7 +31,7 @@ wired to Codex's **own** `codex mcp-server` (tools: `codex`, `codex-reply`) by
 Practically, for long autonomous handoffs `codex exec` is still the right
 transport — it backgrounds cleanly, captures a report with `-o`, and survives a
 dead session, none of which an MCP call does. Use the MCP for short interactive
-exchanges (and see `codex-second-opinion` for the debate loop, which uses
+exchanges (and see `ask-codex` for the debate loop, which uses
 `codex-reply` for its rebuttal round). Note that Claude Code on Windows has no
 `codex-cli` MCP at all — the Windows script targets Claude Desktop — so a Windows
 Claude Code session correctly lands on `codex exec` every time.

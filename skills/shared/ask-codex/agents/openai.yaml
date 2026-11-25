@@ -1,0 +1,4 @@
+interface:
+  display_name: "Ask Codex"
+  short_description: "Debate, review, or delegate work to Codex"
+  default_prompt: "Use $ask-codex to debate this with a read-only Codex second opinion."

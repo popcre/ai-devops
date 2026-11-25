@@ -48,6 +48,37 @@ ai-deepseek cleanup <task>                                       # refuses unlan
 Ship the landed branch from your own worktree under the repository's normal
 rules. DeepSeek's report is a claim, not proof.
 
+## Debate is the default
+
+Every opinion, review, or second opinion is a **debate**, not a lookup, unless
+the user asks only for a one-line fact or for `implement`. Two models agreeing
+because the second anchored on the first is worth nothing; the value is real
+independence, then real argument.
+
+1. **Commit to your own position first.** Before DeepSeek sees anything, write
+   your claim, reasoning, confidence, and what would change your mind to
+   `<scratchpad>/claude-position.md`. With no real position, say so plainly:
+   "I have no independent read; DeepSeek's answer stands unopposed."
+2. **Send the brief plus your position**, labelled as one input to weigh and
+   *not* the expected answer. Tell DeepSeek to reason from the material first
+   and say plainly if you are wrong. State that this is read-only.
+   `ai-deepseek-agent send "<brief>" [--file plan.md]`
+3. **Report two separate things:** what DeepSeek said, faithfully (keep the
+   parts that hurt your position), then whether you agree, point by point. If
+   it changed your mind, say so and stop.
+4. **Rebut only real disagreement**, in the same session so it argues with its
+   own reasoning: `ai-deepseek-agent reply <session-id> "<rebuttal>"`. Name the claim you reject, give the evidence it
+   lacked, and ask whether that changes its verdict; tell it not to split the
+   difference to be agreeable. Use `templates/delegation/debate-turn.md` for
+   the turn. **Cap at two rounds.**
+5. **Close with one verdict:** *Agreed* (note when it merely confirmed),
+   *DeepSeek conceded*, *Claude conceded* (and what moved you), or *Still split*
+   with the crux and what would settle it. Then recommend what to do.
+
+Never read DeepSeek's answer before writing your position, fold because it
+sounds confident, soften its disagreement, run a debate with write access, or
+report "we agree" when you are still split.
+
 ## Brief content — the other model gets nothing but this
 
 DeepSeek starts with **zero knowledge of this session**. Standard: **a

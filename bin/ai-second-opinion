@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ai-second-opinion: one simple OpenCode path for GLM, Muse and StepFun (#2074).
+"""ai-second-opinion: one simple path for GLM, Muse, StepFun, DeepSeek, Antigravity and Codex (#2074).
 
   ai-second-opinion PROVIDER new NAME [--repo DIR] (--prompt-file F | TEXT...)
   ai-second-opinion PROVIDER ask [NAME] [--repo DIR] (--prompt-file F | TEXT...)
@@ -8,7 +8,7 @@
   ai-second-opinion PROVIDER list | show NAME | transcript NAME | diff NAME
   ai-second-opinion PROVIDER abort NAME | delete NAME | doctor [--live] | store-key
 
-PROVIDER is glm, muse or stepfun (deepseek also works; the candidate
+PROVIDER is glm, muse, stepfun, deepseek, antigravity or codex (the candidate
 openrouter providers hy4-openrouter and muse-openrouter work too). Provider
 facts, key lookup and the OpenCode binary come from bin/ai-review-simple, so
 the advisory CI reviewer and these second opinions share one definition.
@@ -441,6 +441,67 @@ def run_antigravity_turn(provider, sdir, meta, prompt, spec):
     return answer, sid, ev_err, err, proc.returncode
 
 
+def run_codex_turn(provider, sdir, meta, prompt, spec):
+    """One OpenAI Codex turn via `codex exec --json`, resumed by thread id.
+
+    Read-only sessions run Codex's read-only sandbox on the read-only private
+    copy; implement runs workspace-write inside the private writable copy."""
+    codex = ars.resolve_codex()
+    if not codex:
+        die(f"{provider}: codex CLI not found.", 3)
+    sandbox = "workspace-write" if meta.get("mode") == "implement" else "read-only"
+    timeout = int(os.environ.get("AI_SECOND_OPINION_TIMEOUT") or spec["timeout"])
+    opts = ["--json", "--skip-git-repo-check", "-c", f'sandbox_mode="{sandbox}"',
+            "-c", 'approval_policy="never"']
+    if spec.get("model"):
+        opts += ["-m", spec["model"]]
+    effort = os.environ.get("AI_CODEX_EFFORT")
+    if effort:
+        opts += ["-c", f'model_reasoning_effort="{effort}"']
+    resume = meta.get("session")
+    if resume:
+        cmd = [codex, "exec", "resume", *opts, resume, "-"]
+        full_prompt = prompt
+    else:
+        cmd = [codex, "exec", *opts, "-C", meta["work"], "-"]
+        prefix = AGY_WRITE_PREFIX if meta.get("mode") == "implement" else AGY_READ_PREFIX
+        full_prompt = prefix + prompt
+    meta.update(state="running", pid=os.getpid(), updated=time.time())
+    save_meta(sdir, meta)
+    proc = subprocess.Popen(cmd, cwd=meta["work"], stdin=subprocess.PIPE,
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                            encoding="utf-8", errors="replace",
+                            start_new_session=hasattr(os, "killpg"))
+    try:
+        out, err = proc.communicate(full_prompt, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        kill_process_tree(proc)
+        meta.update(state="failed", updated=time.time())
+        save_meta(sdir, meta)
+        die(f"{provider}: no answer within {timeout}s.", 3)
+    sid, texts, errors, completed = resume, [], [], False
+    for line in out.splitlines():
+        try:
+            ev = json.loads(line)
+        except ValueError:
+            continue
+        kind = ev.get("type")
+        if kind == "thread.started":
+            sid = sid or ev.get("thread_id")
+        elif kind == "item.completed" and (ev.get("item") or {}).get("type") == "agent_message":
+            texts.append(ev["item"].get("text") or "")
+        elif kind == "turn.completed":
+            completed = True
+        elif kind in ("error", "turn.failed"):
+            errors.append(str(ev.get("message") or (ev.get("error") or {}).get("message") or ev))
+    # A progress message followed by a failure is not an answer.
+    answer = ars.redact((texts[-1] if texts and completed else "").strip())
+    with open(os.path.join(sdir, "transcript.md"), "a", encoding="utf-8") as fh:
+        fh.write(f"\n\n## Request ({time.strftime('%Y-%m-%d %H:%M:%S')})\n\n{prompt}\n"
+                 f"\n## {provider}\n\n{answer}\n")
+    return answer, sid, "\n".join(errors), err, proc.returncode
+
+
 def sanitized_replay(meta):
     """Visible turns only (request + final answer), never tool records or
     private reasoning, for a cross-route Muse continuation (plan section 9)."""
@@ -496,9 +557,9 @@ def run_opencode(provider, sdir, meta, prompt, route=None):
     if effective:
         spec = ars.spec_for(provider, effective)
     with SessionLock(sdir):
-        if spec.get("engine") == "antigravity":
-            answer, sid, ev_err, err, rc = run_antigravity_turn(
-                provider, sdir, meta, prompt, spec)
+        if spec.get("engine") in ("antigravity", "codex"):
+            runner = run_codex_turn if spec["engine"] == "codex" else run_antigravity_turn
+            answer, sid, ev_err, err, rc = runner(provider, sdir, meta, prompt, spec)
             if not answer:
                 problem = ars.redact("\n".join(x for x in (ev_err, (err or "")[-2000:])
                                                if x.strip()))
@@ -685,7 +746,7 @@ def start(provider, name, repo, writable, base=None, route=None, billing_id=None
             else ars.PROVIDERS[provider])
     cache = RR.cache_fields(initial_route, top, name) if initial_route else None
     affinity_id = billing_id or RR.cache_affinity_id(initial_route or spec.get("route"), top, name)
-    if spec.get("engine") == "antigravity":
+    if spec.get("engine") in ("antigravity", "codex"):
         os.makedirs(os.path.join(sdir, "home"), exist_ok=True)
     else:
         write_config(sdir, provider, agent, WRITE_AGENT if writable else READ_AGENT, spec=spec,
@@ -864,6 +925,9 @@ def main(argv):
         if p == "antigravity":
             print("antigravity: uses agy OAuth sign-in (run 'agy' to log in); no API key file needed.")
             return 0
+        if p == "codex":
+            print("codex: uses the Codex CLI's own sign-in; no API key file needed.")
+            return 0
         if_missing = "--if-missing" in argv
         if if_missing and ars.read_key(p):
             print(f"{p}: key store already present")
@@ -900,6 +964,10 @@ def main(argv):
             agy = ars.resolve_antigravity()
             print(f"agy: {agy or 'MISSING'}")
             ok &= bool(agy)
+        elif ars.PROVIDERS[p].get("engine") == "codex":
+            codex = ars.resolve_codex()
+            print(f"codex: {codex or 'MISSING'}")
+            ok &= bool(codex)
         else:
             oc = ars.resolve_opencode()
             print(f"opencode: {oc or 'MISSING'}")
@@ -907,7 +975,7 @@ def main(argv):
             has_key = bool(ars.read_key(p))
             print(f"{p} key: {'present' if has_key else 'MISSING'}")
             ok &= has_key
-        print(f"model: {ars.PROVIDERS[p]['model']}")
+        print(f"model: {ars.PROVIDERS[p]['model'] or '(codex default)'}")
         if ok and args.live:
             import tempfile
             diagnostic_path = doctor_diagnostics(p, STATE)

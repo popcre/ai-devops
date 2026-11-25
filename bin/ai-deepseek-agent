@@ -4,7 +4,7 @@
 # This is NOT a one-shot diff reviewer. Claude and Codex use it to actually
 # talk back and forth with DeepSeek about anything -- a plan, a design, a
 # piece of code, an environment/config question, a debugging theory, a
-# disagreement -- the same way codex-second-opinion lets Claude debate Codex.
+# disagreement -- the same way ask-codex lets Claude debate Codex.
 # New ordinary conversations run in the read-only DeepSeek Harness through
 # OpenRouter and resume its saved session. Existing direct API conversations
 # keep their stored history and transport. A local

@@ -156,7 +156,7 @@ Shared/client name collisions fail before anything is copied.
 | "write the plan for this — but the session implementing it won't have any of this context" | `implementation-plan-writer` — say "write an implementation plan" |
 | "@design.zip read the README in full… recreate these screens in our stack" | `design-handoff-implement` — attach the zip |
 | "read the entire codebase and tell me if you find any bugs" | `repo-bug-audit` — say "audit the codebase" |
-| "run all of this by codex and tell me what it says and if you agree — if you disagree, give it your reasoning and see if it changes its opinion" | `codex-second-opinion` — say "run this by codex" |
+| "run all of this by codex and tell me what it says and if you agree — if you disagree, give it your reasoning and see if it changes its opinion" | `ask-codex` — say "run this by codex" |
 | "find all Claude Code transcripts on this machine → claude_chats/<machine>" | `claude-transcript-backup` |
 | The full "CI/CD/DevOps Operating Rules" paste (8+ times) | `cicd-rules-audit` — say "audit CI/CD against our rules" |
 | The "AI TASK SPEC: Repository Documentation Maintenance" paste (new apps / big changes) | `repo-docs-overhaul` — say "do a full documentation overhaul" |
