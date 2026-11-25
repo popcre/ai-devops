@@ -933,15 +933,19 @@ def main(argv):
                     except OSError:
                         pass
                 time.sleep(1)
-                for check in (child, pid):
-                    if check and hasattr(os, "killpg"):
+                if hasattr(os, "killpg"):
+                    # The engine runs in its own process group: any member left is a survivor.
+                    probes = ([lambda: os.killpg(child, 0)] if child else []) + \
+                             ([lambda: os.kill(pid, 0)] if pid else [])
+                    for probe in probes:
                         try:
-                            os.kill(check, 0)
+                            probe()
                             stopped = False
                         except OSError:
                             pass
-            meta.update(state="aborted", updated=time.time())
-            save_meta(sdir, meta)
+            if stopped:
+                meta.update(state="aborted", updated=time.time())
+                save_meta(sdir, meta)
             print(f"{args.text[0]}: aborted" if stopped else
                   f"{args.text[0]}: abort sent, but a process is still running")
             if not stopped:
