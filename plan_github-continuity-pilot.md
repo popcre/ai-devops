@@ -1,25 +1,25 @@
 ---
 summary: Three bounded experiments for GitHub outages, shared PR status and slow checks.
 kind: plan
-status: open
+status: done
 read-when: Testing GitHub outage continuity, status request savings or check delays
 ---
 
 # Can work continue through a GitHub outage, and what slows down a busy day?
 
-Keep people working through interruptions and shorten delivery on ordinary days. [Execution handoff](HANDOFF.d/2026-11-25T1632Z-edge-dev3-codex-github-pilot.md).
+Keep people working through interruptions and shorten delivery on ordinary days. Execution handoff retired after the November 25, 2026 run (recoverable from git history).
 
 ## STATUS
 
-Start at step 1. Each row is open as of November 25, 2026. Update the row with a dated evidence path, run ID or reproducible command after execution.
+Executed November 25, 2026 on edge-dev3. Findings: [docs/verification/github-pilot.md](docs/verification/github-pilot.md). Harness: `python3 -m unittest discover -s tools/github-pilot`; isolated drill: `tools/github-pilot/run_drill.sh`.
 
 | Step | State | Evidence |
 |---|---|---|
-| 1. Select sample | ⬜ open | — |
-| 2. Offline recovery | ⬜ open | — |
-| 3. Shared notifications | ⬜ open | — |
-| 4. Check delays | ⬜ open | — |
-| 5. Decide and retire | ⬜ open | — |
+| 1. Select sample | ✅ done 2026-11-25 | Six complete days (Nov 19–24); peak core hour Nov 19 2:08 PM EST; timing day Nov 23 (11 PRs); 22 of 50 live requests spent |
+| 2. Offline recovery | ⚠️ done, gate failed 2026-11-25 | Recovery, journal and one-PR checks pass; slow GitHub makes three startup tools exceed 5 s (one hangs). Drafts #2879/#2880 closed unmerged |
+| 3. Shared notifications | ⏸ not run 2026-11-25 | Core hour inconclusive (S=0, U=4,165 of 4,165); GraphQL ruled out. Live listener proof stays open on #2869 |
+| 4. Check delays | ✅ diagnosis 2026-11-25 | Required check ~15 s, queue-to-merge 0.9 min, 0 ejections; slow PRs waited before entering the queue. No matched pairs |
+| 5. Decide and retire | ✅ done 2026-11-25 | Verdicts, cleanup receipts and limitations in the findings page |
 
 ## 1. Ultimate goal
 
