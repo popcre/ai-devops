@@ -216,6 +216,50 @@ try {
       Assert-True ($names[0].ToLowerInvariant().EndsWith("\agents\skills\alpha\skill.md") -and $names[0] -notmatch "~") `
         "short-spelled roots still write the key with every folder spelled out"
     }
+
+    # -- 10. An owned entry with a field beside "enable": that field stays ----
+    # ZCode may one day store more than "enable" in an entry. A disabled entry
+    # with such a field is already current; one that is still enabled is
+    # rewritten with the field kept (review finding #2806).
+    $f10 = New-Fixture "$tag-extra"
+    New-Skill $f10.Agents "beta"
+    New-Skill (Join-Path $f10.Home "skills") "epsilon" -Managed
+    New-Skill $f10.Agents "epsilon"
+    $alpha10 = [IO.Path]::GetFullPath((Join-Path $f10.Agents "alpha\SKILL.md"))
+    $beta10 = [IO.Path]::GetFullPath((Join-Path $f10.Agents "beta\SKILL.md"))
+    $epsilon10 = [IO.Path]::GetFullPath((Join-Path $f10.Agents "epsilon\SKILL.md"))
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $f10.Config) | Out-Null
+    @'
+{
+  "skill": {
+    "ALPHA": { "enable": false, "note": "kept", "pinned": 3 },
+    "BETA": { "note": "kept too", "enable": true },
+    "EPSILON": false
+  }
+}
+'@.Replace("ALPHA", $alpha10.Replace("\", "\\")).Replace("BETA", $beta10.Replace("\", "\\")).Replace("EPSILON", $epsilon10.Replace("\", "\\")) |
+      Set-Content -LiteralPath $f10.Config -Encoding utf8
+
+    $r = Invoke-Writer $engine "$tag-extra-dry" @("-ZCodeHome", $f10.Home, "-AgentsSkillsRoot", $f10.Agents, "-DryRun")
+    Assert-True ($r.Output -match [regex]::Escape("~ hide $beta10")) "dry run names the still-enabled entry it would switch off"
+    Assert-True ($r.Output -match [regex]::Escape("~ hide $epsilon10")) "dry run names the entry whose value is not an object"
+    Assert-True ($r.Output -notmatch [regex]::Escape("~ hide $alpha10")) "dry run leaves the disabled entry with extra fields alone"
+
+    $r = Invoke-Writer $engine "$tag-extra-write" @("-ZCodeHome", $f10.Home, "-AgentsSkillsRoot", $f10.Agents)
+    Assert-True ($r.ExitCode -eq 0) "extra-field scenario exits 0"
+    Assert-True ($r.Output -match "skill shadows configured: ~2; 3 hidden") "two entries rewritten, three hidden"
+    $config = Get-Content -Raw -LiteralPath $f10.Config | ConvertFrom-Json
+    $alpha = $config.skill.PSObject.Properties[$alpha10].Value
+    Assert-True (($alpha.PSObject.Properties.Name -join ",") -ceq "enable,note,pinned" -and $alpha.note -ceq "kept" -and $alpha.pinned -eq 3) "a disabled entry keeps its extra fields, untouched and in order"
+    $beta = $config.skill.PSObject.Properties[$beta10].Value
+    Assert-True (($beta.PSObject.Properties.Name -join ",") -ceq "note,enable" -and $beta.enable -eq $false -and $beta.note -ceq "kept too") "an enabled entry is switched off and keeps its field and its order"
+    $epsilon = $config.skill.PSObject.Properties[$epsilon10].Value
+    Assert-True (($epsilon.PSObject.Properties.Name -join ",") -ceq "enable" -and $epsilon.enable -eq $false) "an entry whose value is not an object becomes exactly { enable: false }"
+
+    $written = [IO.File]::ReadAllText($f10.Config)
+    $r = Invoke-Writer $engine "$tag-extra-again" @("-ZCodeHome", $f10.Home, "-AgentsSkillsRoot", $f10.Agents)
+    Assert-True ($r.Output -match "already current: 3 hidden") "an owned entry with an extra field is reported as already current"
+    Assert-True ([IO.File]::ReadAllText($f10.Config) -ceq $written) "that report rewrites nothing"
   }
 }
 finally {

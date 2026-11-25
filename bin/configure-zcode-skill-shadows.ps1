@@ -24,6 +24,8 @@
   that sits in ~/.zcode/skills-quarantine because the toolkit retired it. The
   entry is written while the pair exists and removed once it no longer does.
   Every other entry, and every other key of the file, is left untouched.
+  Inside an entry this writer owns, only "enable" is forced to false: a field
+  stored beside it is kept as it is (review finding #2806).
 
   Safety: an entry is written only when the two SKILL.md files are different
   files (final paths compared, links resolved). Disabling a path also disables
@@ -167,11 +169,29 @@ function New-DisabledValue {
   return [pscustomobject]@{ enable = $false }
 }
 
+# True when the value switches its skill off: an object whose "enable" is the
+# boolean false. Other fields may sit beside it; they are not this writer's.
 function Test-IsDisabledValue($Value) {
-  if ($null -eq $Value) { return $false }
-  $properties = @($Value.PSObject.Properties)
-  if ($properties.Count -ne 1) { return $false }
-  return ($properties[0].Name -eq "enable" -and $properties[0].Value -is [bool] -and -not $properties[0].Value)
+  if ($null -eq $Value -or $Value -isnot [System.Management.Automation.PSCustomObject]) { return $false }
+  foreach ($property in $Value.PSObject.Properties) {
+    if ($property.Name -eq "enable") { return ($property.Value -is [bool] -and -not $property.Value) }
+  }
+  return $false
+}
+
+# The value for an owned entry that is not switching its skill off yet: the
+# same fields in the same order, with "enable" false (added when absent). A
+# value that is not a JSON object, or none at all, starts from nothing.
+function ConvertTo-DisabledValue($Value) {
+  if ($null -eq $Value -or $Value -isnot [System.Management.Automation.PSCustomObject]) { return (New-DisabledValue) }
+  $copy = [ordered]@{}
+  $hasEnable = $false
+  foreach ($property in $Value.PSObject.Properties) {
+    if ($property.Name -eq "enable") { $copy["enable"] = $false; $hasEnable = $true }
+    else { $copy[$property.Name] = $property.Value }
+  }
+  if (-not $hasEnable) { $copy["enable"] = $false }
+  return [pscustomobject]$copy
 }
 
 function Read-ConfigDocument([string]$Path) {
@@ -256,10 +276,15 @@ if ($null -ne $skillProperty) {
       $removed += $property.Name
       continue
     }
-    if ($property.Name -cne $desired[$entryName] -or -not (Test-IsDisabledValue $property.Value)) {
+    $value = $property.Value
+    if (-not (Test-IsDisabledValue $value)) {
+      $value = ConvertTo-DisabledValue $value
+      $rewritten += $desired[$entryName]
+    } elseif ($property.Name -cne $desired[$entryName]) {
+      # The same entry under another spelling of its key: kept, under ours.
       $rewritten += $desired[$entryName]
     }
-    $next[$desired[$entryName]] = New-DisabledValue
+    $next[$desired[$entryName]] = $value
     $present[$entryName] = $true
   }
 }
