@@ -489,7 +489,8 @@ class Drill:
                        "within_target": (not killed) and elapsed <= TARGET,
                        "says_unknown": bool(re.search(r"unknown|unavailable|could not verify|defer", text, re.I)),
                        "pushed": bool(re.search(r"pushed|-> main", text))}
-                with open(os.path.join(self.s, "state", "out-%s-%s-%s.txt" % (label, ws_name, case)), "w") as h:
+                keep = os.environ.get("PILOT_OUT") or os.path.join(self.s, "state")
+                with open(os.path.join(keep, "out-%s-%s-%s.txt" % (label, ws_name, case)), "w") as h:
                     h.write(text[-4000:])
                 with lock:
                     rows.append(row)

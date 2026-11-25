@@ -48,3 +48,6 @@ tools/github-requests/pr-status-context text eol=lf
 *.pdf         binary
 *.zip         binary
 *.gz          binary
+
+# The pilot drill executes its fixtures directly on Linux test hosts.
+tools/github-pilot/** text eol=lf

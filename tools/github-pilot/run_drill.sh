@@ -30,7 +30,7 @@ cp "$TOOLKIT/tools/github-pilot/fixtures/fake_gh.py" /tmp/fake_gh && chmod +x /t
 set +e
 strace -f -y -qq -s 256 -o /tmp/trace \
   -e trace=connect,sendto,sendmsg,openat,open,creat,rename,renameat,renameat2,unlink,unlinkat,mkdir,mkdirat,link,symlink,truncate,chdir,fchdir,clone,clone3,fork,vfork \
-  python3 -B "$TOOLKIT/tools/github-pilot/outage.py" drill /tmp/drill "$TOOLKIT" /tmp/fake_gh 18080 \
+  env PILOT_OUT=/tmp/out-bind python3 -B "$TOOLKIT/tools/github-pilot/outage.py" drill /tmp/drill "$TOOLKIT" /tmp/fake_gh 18080 \
   > /tmp/out-bind/drill.json 2> /tmp/out-bind/drill.err
 echo "drill_exit=$?" >> /tmp/out-bind/drill.err
 python3 -B "$TOOLKIT/tools/github-pilot/outage.py" audit /tmp/trace /tmp/drill /tmp "$HOME" /dev \
