@@ -22,9 +22,9 @@ v2 rewritten 2026-11-24 11:20 PM EST after an Antigravity review.
 | 3 | Proof-of-done | ✅ code 2026-11-25 | `bin/ai-completion-check-hook --sensors`; `bash tests/test-ai-completion-check-hook.sh` (115 checks). Deviations below under "Build notes". |
 | 4 | Destructive-command guard | ✅ code 2026-11-25 | `bin/ai-pr-poll-guard-hook` (`destructive_guard`); every section 10 row is a named check in `bash tests/test-ai-pr-poll-guard-hook.sh` (146 checks). |
 | 5 | Docs | ✅ 2026-11-25 | `docs/harness-sensors.md` (what, signs of trouble, off switches, full undo), `docs/config-inventory.md`, hook headers, `AGENTS.md` router row. |
-| 6 | Protected install + live proof on edge-dev3 | ⬜ open | — |
+| 6 | Protected install + live proof on edge-dev3 | ✅ live proof 2026-11-25; ⚠️ full receipt pending | [`tests/verification/harness-sensors/2026-11-25-live.md`](tests/verification/harness-sensors/2026-11-25-live.md): all four outcomes on the installed hooks, `--check` DRIFT→OK. `update.sh` advanced the installed checkout to 91aca13d but stopped at the sudo-only protected config backup; the receipt waits on an interactive sudo. |
 
-**A fresh session starts at step 6** once the build PR is merged (find it on #2835).
+**Built, merged (#2854) and live on edge-dev3.** Only the edge-dev3 `update.sh` receipt (needs sudo) and other machines' next installs remain. If the checks slow work down, see `docs/harness-sensors.md`.
 
 ### Build notes (2026-11-25, deviations from the steps below)
 
