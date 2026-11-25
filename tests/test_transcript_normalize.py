@@ -261,6 +261,9 @@ class OtherClients(unittest.TestCase):
             "kimi index": {"sessionDir": "d", "sessionId": "k", "workDir": "w"},
             "claude metadata": {"type": "permission-mode", "permissionMode": "x", "sessionId": "s"},
             "workflow journal": {"type": "started", "agentId": "a", "key": "k"},
+            "antigravity generic": {"type": "GENERIC", "source": "MODEL", "content": "TOOL OUTPUT DUMP " * 3, "created_at": "2026-11-24T00:00:00Z"},
+            "antigravity system": {"type": "SYSTEM_MESSAGE", "source": "SYSTEM", "content": "SYSTEM NOTICE " * 3, "created_at": "2026-11-24T00:00:00Z"},
+            "antigravity checkpoint": {"type": "CHECKPOINT", "source": "SYSTEM", "content": "CHECKPOINT " * 3, "created_at": "2026-11-24T00:00:00Z"},
         }
         with tempfile.TemporaryDirectory() as tmp:
             for label, rec in records.items():
@@ -268,6 +271,66 @@ class OtherClients(unittest.TestCase):
                 self.assertFalse(r["conversation"], label)
                 self.assertEqual(r["turns"], [], label)
             self.assertFalse(normalize.parse_file(write(tmp, "empty.jsonl", [], trailing_newline=False))["conversation"])
+
+    def test_antigravity_turns_tools_repo_and_identity(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp) / "brain" / "ag-cid-1" / ".system_generated" / "logs"
+            d.mkdir(parents=True)
+            user_body = (
+                "<USER_REQUEST>\n"
+                + LONG
+                + " here "
+                + POSITIVES["github"]
+                + "\n</USER_REQUEST>\n"
+                "<ADDITIONAL_METADATA>\nThe current local time is: 2026-11-24T21:33:45-05:00.\n</ADDITIONAL_METADATA>\n"
+                "<USER_SETTINGS_CHANGE>\nModel Selection changed\n</USER_SETTINGS_CHANGE>"
+            )
+            p = write(d, "transcript.jsonl", [
+                json.dumps({"type": "USER_INPUT", "source": "USER_EXPLICIT", "created_at": "2026-11-24T10:00:00Z",
+                            "content": user_body}),
+                json.dumps({"type": "USER_INPUT", "source": "SYSTEM_INJECTED", "created_at": "2026-11-24T10:00:01Z",
+                            "content": "INJECTED USER MESSAGE LONG ENOUGH"}),
+                json.dumps({"type": "PLANNER_RESPONSE", "source": "MODEL", "created_at": "2026-11-24T10:00:02Z",
+                            "thinking": "PRIVATE THINKING TEXT",
+                            "tool_calls": [{"name": "read_file", "args": {"Path": "D:\\repos\\demo-app\\src\\a.py"}}]}),
+                json.dumps({"type": "GENERIC", "source": "MODEL", "created_at": "2026-11-24T10:00:03Z",
+                            "content": "TOOL OUTPUT DUMP " * 4}),
+                json.dumps({"type": "SYSTEM_MESSAGE", "source": "SYSTEM", "created_at": "2026-11-24T10:00:04Z",
+                            "content": "SYSTEM REMINDER " * 4}),
+                json.dumps({"type": "PLANNER_RESPONSE", "source": "MODEL", "created_at": "2026-11-24T10:00:05Z",
+                            "thinking": "MORE THINKING",
+                            "content": "I checked the pipeline and found the error.",
+                            "tool_calls": [{"name": "run_command", "args": {"CommandLine": "pytest"}}]}),
+            ])
+            r = normalize.parse_file(p)
+            self.assertTrue(r["conversation"])
+            self.assertEqual([t["role"] for t in r["turns"]], ["user", "assistant"])
+            self.assertEqual(r["turns"][0]["tools"], ["read_file"])
+            self.assertEqual(r["turns"][1]["tools"], ["run_command"])
+            self.assertEqual(r["redactions"], 1)
+            all_text = " ".join(t["text"] for t in r["turns"])
+            for leak in ("ADDITIONAL_METADATA", "USER_SETTINGS_CHANGE", "USER_REQUEST", "INJECTED USER",
+                         "PRIVATE THINKING", "MORE THINKING", "TOOL OUTPUT", "SYSTEM REMINDER", POSITIVES["github"]):
+                self.assertNotIn(leak, all_text)
+            self.assertIn("[REDACTED:github]", r["turns"][0]["text"])
+            self.assertEqual(r["meta"]["session_id"], "ag-cid-1")
+            self.assertEqual(r["meta"]["repo"], "demo-app")
+            self.assertEqual(r["meta"]["first_ts"], "2026-11-24T10:00:00Z")
+            self.assertEqual(r["meta"]["last_ts"], "2026-11-24T10:00:05Z")
+
+            # Uploaded filename antigravity/sessions/<cid>.jsonl infers session_id from stem and Linux repo paths.
+            up = Path(tmp) / "edge-dev" / "antigravity" / "sessions"
+            up.mkdir(parents=True)
+            up_file = write(up, "ag-cid-2.jsonl", [
+                json.dumps({"type": "USER_INPUT", "source": "USER_EXPLICIT", "created_at": "2026-11-24T11:00:00Z",
+                            "content": LONG}),
+                json.dumps({"type": "PLANNER_RESPONSE", "source": "MODEL", "created_at": "2026-11-24T11:00:05Z",
+                            "content": "Checking the Linux repository path now.",
+                            "tool_calls": [{"name": "find_by_name", "args": {"SearchPath": "/home/u/repos/linux-app"}}]}),
+            ])
+            r2 = normalize.parse_file(up_file)
+            self.assertEqual(r2["meta"]["session_id"], "ag-cid-2")
+            self.assertEqual(r2["meta"]["repo"], "linux-app")
 
 
 class Repo(unittest.TestCase):

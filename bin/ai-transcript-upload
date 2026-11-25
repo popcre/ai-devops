@@ -63,7 +63,7 @@ safe_rel() { case "/$1/" in //*|*/../*|*/./*) return 1 ;; esac; case "$1" in *[!
 
 orig_args=("$@")
 dropbox="${HOME}/Dropbox"; host="$(hostname 2>/dev/null || uname -n)"; host="${host%%.*}"
-hot_min=15; maps=(); pull=""; mode=run; with_pull=""
+hot_min=15; maps=(); pull=""; mode=run; with_pull=""; default_antigravity=0
 while (($#)); do
   case "$1" in
     --dropbox) dropbox="$2"; shift 2 ;;
@@ -214,22 +214,42 @@ copy_one() { # SRCFILE DEST PARTIAL SRCSIZE
   return 2
 }
 
+upload_file() { # SRCFILE DESTFILE PARTIALFILE
+  local f="$1" dest="$2" part="$3" s m ds dm rc
+  scanned=$((scanned + 1))
+  s="$(fsize "$f")"; m="$(fmtime "$f")"
+  [ -n "$s" ] && [ -n "$m" ] || { errors=$((errors + 1)); return 0; }
+  if (( now - m < hot_min * 60 )); then hot=$((hot + 1)); return 0; fi
+  if [ -e "$dest" ]; then
+    ds="$(fsize "$dest")"; dm="$(fmtime "$dest")"
+    [ "$ds" = "$s" ] && (( m <= ${dm:-0} )) && return 0
+  fi
+  copy_one "$f" "$dest" "$part" "$s"; rc=$?
+  case "$rc" in 0) copied=$((copied + 1)) ;; 2) ;; *) errors=$((errors + 1)) ;; esac
+}
+
 upload_tree() { # SRCDIR DESTDIR PARTIALDIR
-  local src="$1" dest="$2" part="$3" f rel s m ds dm rc
+  local src="$1" dest="$2" part="$3" f rel
   [ -d "$src" ] || return 0
   src="$(readlink -f -- "$src")"
   while IFS= read -r -d '' f; do
-    rel="${f#"$src"/}"; scanned=$((scanned + 1))
-    s="$(fsize "$f")"; m="$(fmtime "$f")"
-    [ -n "$s" ] && [ -n "$m" ] || { errors=$((errors + 1)); continue; }
-    if (( now - m < hot_min * 60 )); then hot=$((hot + 1)); continue; fi
-    if [ -e "$dest/$rel" ]; then
-      ds="$(fsize "$dest/$rel")"; dm="$(fmtime "$dest/$rel")"
-      [ "$ds" = "$s" ] && (( m <= ${dm:-0} )) && continue
-    fi
-    copy_one "$f" "$dest/$rel" "$part/$rel" "$s"; rc=$?
-    case "$rc" in 0) copied=$((copied + 1)) ;; 2) ;; *) errors=$((errors + 1)) ;; esac
+    rel="${f#"$src"/}"
+    upload_file "$f" "$dest/$rel" "$part/$rel"
   done < <(find -L "$src" -type f -print0 2>/dev/null)
+}
+
+upload_antigravity() { # HOSTFOLDER BRAINDIR
+  local folder="$1" brain="$2" d cid f
+  [ -d "$brain" ] || return 0
+  brain="$(readlink -f -- "$brain")"
+  for d in "$brain"/*; do
+    [ -d "$d" ] || continue
+    cid="$(basename -- "$d")"
+    safe_name "$cid" || continue
+    f="$d/.system_generated/logs/transcript.jsonl"
+    [ -f "$f" ] || continue
+    upload_file "$f" "$root/$folder/antigravity/sessions/$cid.jsonl" "$root/$folder/.partial/antigravity/sessions/$cid.jsonl"
+  done
 }
 
 write_log() { # HOSTFOLDER
@@ -256,18 +276,19 @@ if ((${#maps[@]} == 0)); then
   else
     maps=("$HOME/.claude/projects=claude/projects" "$HOME/.codex/sessions=codex/sessions"
           "$HOME/.codex/archived_sessions=codex/archived_sessions")
-    # ZCode and MiMo keep sessions in sqlite: export them to session files, then copy those like any other.
-    for z in "$HOME/.zcode/cli/db/db.sqlite=zcode" "$HOME/.local/share/mimocode/mimocode.db=mimo"; do
-      zdb="${z%=*}"; zname="${z##*=}"
-      if [ -f "$zdb" ]; then
-        python3 "$exporter" "$zdb" "$state_dir/$zname-export" >/dev/null 2>&1 || errors=$((errors + 1))
-      fi
-      maps+=("$state_dir/$zname-export=$zname/sessions")
-    done
+    # ZCode keeps sessions in sqlite: export them to session files, then copy those like any other.
+    zdb="$HOME/.zcode/cli/db/db.sqlite"
+    if [ -f "$zdb" ]; then
+      python3 "$exporter" "$zdb" "$state_dir/zcode-export" >/dev/null 2>&1 || errors=$((errors + 1))
+    fi
+    maps+=("$state_dir/zcode-export=zcode/sessions")
+    default_antigravity=1
   fi
 fi
 if ! { ((${#maps[@]} == 1)) && [ "${maps[0]}" = none ]; }; then
-  run_maps "$host" "${maps[@]}"; write_log "$host"; ((errors)) && status=1
+  run_maps "$host" "${maps[@]}"
+  [ "$default_antigravity" = 1 ] && upload_antigravity "$host" "$HOME/.gemini/antigravity/brain"
+  write_log "$host"; ((errors)) && status=1
 fi
 
 if [ -n "$pull" ]; then

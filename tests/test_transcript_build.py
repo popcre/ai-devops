@@ -168,6 +168,27 @@ class Incremental(Base):
         self.assertEqual(sd.calls, 3)
         self.assertEqual(self.count("SELECT count(*) FROM chunks WHERE status='ok'"), 3)
 
+    def test_antigravity_session_ingested_and_searchable(self):
+        cid = "ag-11112222-3333-4444-5555-666677778888"
+        self.session(f"edge-dev/antigravity/sessions/{cid}.jsonl", [
+            json.dumps({"type": "USER_INPUT", "source": "USER_EXPLICIT", "created_at": "2026-11-24T10:00:00Z",
+                        "content": "<USER_REQUEST>\nplease inspect the failing pipeline build now\n</USER_REQUEST>"}),
+            json.dumps({"type": "PLANNER_RESPONSE", "source": "MODEL", "created_at": "2026-11-24T10:00:10Z",
+                        "content": "I checked the pipeline and fixed the failing step.",
+                        "tool_calls": [{"name": "run_command", "args": {"Cwd": "D:\\repos\\demo"}}]}),
+        ])
+        sd = FakeSD()
+        st = self.run_build(sd)
+        self.assertEqual(sd.calls, 1)
+        self.assertEqual(st["chunks_ok"], 1)
+        row = self.conn.execute("SELECT session_id, repo, first_ts, last_ts, status FROM sessions").fetchone()
+        self.assertEqual(row, (cid, "demo", "2026-11-24T10:00:00Z", "2026-11-24T10:00:10Z", "ok"))
+        tools = json.loads(self.conn.execute("SELECT tool_seq_json FROM chunks").fetchone()[0])
+        self.assertEqual(tools, [[], ["run_command"]])
+        hits = query.search(self.conn, repo="demo", text="cleaned")
+        self.assertEqual(len(hits), 1)
+        self.assertIn("Pipeline work number 1", hits[0])
+
     def test_limit_calls_counts_reasks(self):
         class Bad(FakeSD):
             def __call__(self, system, user):
