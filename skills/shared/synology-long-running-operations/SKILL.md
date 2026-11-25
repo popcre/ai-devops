@@ -15,6 +15,8 @@ not CPU, memory, or disk-I/O cost.
    timeout, a whole-volume traversal, millions of paths, recursive hashing, or
    a 56 TB filesystem walk as long-running.
 2. Prefer an existing named Synology Monitor capability with tuned scope.
+   Outside the synology-monitor repository the connector is not loaded;
+   reach it on demand with `ai-nas tools` / `ai-nas call <tool> '<json>'`.
 3. Prefer a native NAS background job when one exists: start it, poll status,
    then fetch its compact result.
 4. If neither exists, obtain explicit approval for the broad read and use the
