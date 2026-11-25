@@ -235,7 +235,7 @@ calls:
 | `railway` | `popdam3` | owner ruling 2026-08-26 |
 | `ag-grid` | `designflow-frontend` | owner ruling 2026-08-26 |
 | `chrome-devtools` | `popdam3` | 30-day transcripts: one 7-call shared-db worktree doing DB Data Admin UI work, and that app moved to popdam3 2026-09-16 |
-| `devops-mcp`, `synology-monitor` | `synology-monitor` repo | owner ruling; never global since 2026-09-24 |
+| `devops-mcp` | `synology-monitor` repo | owner ruling; never global since 2026-09-24. `synology-monitor` itself is global in both Claude clients by owner request 2026-11-25 |
 
 `recall-ai` is retired from the machine catalog (owner ruling 2026-09-24); the
 Oracle project keeps its own entry (owner ruling 2026-11-03).
