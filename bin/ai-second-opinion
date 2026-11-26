@@ -307,6 +307,112 @@ def kill_process_tree(proc):
         pass
 
 
+def stop_windows_trees(roots, not_after=None, wait=10.0):
+    """Windows `abort`: stop each root and its descendants, and return True only
+    when every one of them is verified to have ended (#2892). Anything that
+    cannot be inspected counts as still running. A root created after
+    `not_after` is a reused process number, not ours, and is left alone."""
+    import ctypes
+    from ctypes import wintypes
+
+    class Entry(ctypes.Structure):  # PROCESSENTRY32W
+        _fields_ = [("dwSize", wintypes.DWORD), ("cntUsage", wintypes.DWORD),
+                    ("th32ProcessID", wintypes.DWORD), ("th32DefaultHeapID", ctypes.c_size_t),
+                    ("th32ModuleID", wintypes.DWORD), ("cntThreads", wintypes.DWORD),
+                    ("th32ParentProcessID", wintypes.DWORD), ("pcPriClassBase", wintypes.LONG),
+                    ("dwFlags", wintypes.DWORD), ("szExeFile", wintypes.WCHAR * 260)]
+
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    k32.CreateToolhelp32Snapshot.argtypes = [wintypes.DWORD, wintypes.DWORD]
+    k32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+    for fn in (k32.Process32FirstW, k32.Process32NextW):
+        fn.argtypes = [wintypes.HANDLE, ctypes.POINTER(Entry)]
+    k32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    k32.OpenProcess.restype = wintypes.HANDLE
+    k32.GetProcessTimes.argtypes = [wintypes.HANDLE] + [ctypes.POINTER(wintypes.FILETIME)] * 4
+    k32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+    k32.WaitForSingleObject.restype = wintypes.DWORD
+    k32.CloseHandle.argtypes = [wintypes.HANDLE]
+
+    held = {}  # pid -> open handle, which also stops Windows reusing the number
+    unknown = set()
+
+    def created(handle):
+        times = [wintypes.FILETIME() for _ in range(4)]
+        if not k32.GetProcessTimes(handle, *[ctypes.byref(t) for t in times]):
+            return None
+        ticks = (times[0].dwHighDateTime << 32) | times[0].dwLowDateTime
+        return ticks / 1e7 - 11644473600
+
+    def hold(pid):
+        if pid in held:
+            return held[pid]
+        # SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION
+        handle = k32.OpenProcess(0x00100000 | 0x1000, False, pid)
+        if handle:
+            held[pid] = handle
+        elif ctypes.get_last_error() != 87:  # 87: no such process
+            unknown.add(pid)
+        return handle
+
+    def alive(pid):
+        return k32.WaitForSingleObject(held[pid], 0) != 0
+
+    def walk(tree):
+        """Add every descendant of `tree`, including children of ended parents."""
+        snap = k32.CreateToolhelp32Snapshot(0x2, 0)  # TH32CS_SNAPPROCESS
+        if snap in (None, wintypes.HANDLE(-1).value):
+            return False
+        children = {}
+        entry = Entry()
+        entry.dwSize = ctypes.sizeof(Entry)
+        more = k32.Process32FirstW(snap, ctypes.byref(entry))
+        while more:
+            children.setdefault(entry.th32ParentProcessID, []).append(entry.th32ProcessID)
+            more = k32.Process32NextW(snap, ctypes.byref(entry))
+        k32.CloseHandle(snap)
+        queue = list(tree)
+        while queue:
+            parent = queue.pop()
+            for pid in children.get(parent, []):
+                if pid in tree or pid == os.getpid():
+                    continue
+                handle = hold(pid)
+                if handle and parent in held:
+                    born, parent_born = created(handle), created(held[parent])
+                    if born and parent_born and born < parent_born:
+                        continue  # older than its "parent": that number was reused
+                if handle or pid in unknown:
+                    tree.add(pid)
+                    queue.append(pid)
+        return True
+
+    try:
+        tree = set()
+        for pid in roots:
+            handle = hold(pid)
+            born = created(handle) if handle else None
+            if pid == os.getpid() or (born and not_after and born > not_after):
+                continue
+            tree.add(pid)
+        if not walk(tree):
+            return False
+        for pid in sorted(tree):
+            if pid in held and alive(pid):
+                subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True)
+        deadline = time.monotonic() + wait
+        for pid in tree:
+            if pid in held:
+                left = max(0, int((deadline - time.monotonic()) * 1000))
+                k32.WaitForSingleObject(held[pid], left)
+        if not walk(tree):  # anything started while we were stopping the rest
+            return False
+        return not (tree & unknown) and not any(alive(p) for p in tree if p in held)
+    finally:
+        for handle in held.values():
+            k32.CloseHandle(handle)
+
+
 def harness_session_id(stdout):
     for line in (stdout or "").splitlines():
         line = line.strip()
@@ -929,15 +1035,18 @@ def main(argv):
             sys.stdout.write(git(meta["work"], "diff", "--cached", "HEAD"))
         elif cmd == "abort":
             stopped = True
-            if meta.get("state") == "running":
+            if meta.get("state") == "running" and os.name == "nt":
+                # The tool's own tree holds the engine when no child_pid is recorded.
+                updated = meta.get("updated")
+                stopped = stop_windows_trees(
+                    [x for x in (meta.get("child_pid"), meta.get("pid")) if x],
+                    not_after=updated + 60 if updated else None)
+            elif meta.get("state") == "running":
                 child = meta.get("child_pid")
                 if child:
                     try:
                         if hasattr(os, "killpg"):
                             os.killpg(child, signal.SIGTERM)
-                        else:
-                            subprocess.run(["taskkill", "/PID", str(child), "/T", "/F"],
-                                           capture_output=True)
                     except OSError:
                         pass
                 pid = meta.get("pid")
