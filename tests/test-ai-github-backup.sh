@@ -86,6 +86,11 @@ check "alert comments on the open issue" 'grep -q "^issue comment 7" "$work/aler
 
 check "LFS fetch is called with options git-lfs accepts" '! grep -E "lfs fetch[^\n]*--quiet" "$tool"'
 
+# Files added with an old mtime (as cp -a does for LFS objects) still reach the NAS.
+mkdir -p "$work/root/lfs/acme/app"; echo x > "$work/root/lfs/acme/app/obj"; touch -d '2 years ago' "$work/root/lfs/acme/app/obj"
+bash "$tool" run >/dev/null 2>&1
+check "old-mtime files still reach the NAS" '[ -f "$work/nas/lfs/acme/app/obj" ]'
+
 check "install skips on another host" 'GITHUB_BACKUP_HOST=not-this-host bash "$tool" --install | grep -q "^SKIP"'
 
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"; [ "$FAIL" -eq 0 ]
