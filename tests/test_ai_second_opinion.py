@@ -42,6 +42,9 @@ FAKE = textwrap.dedent("""\
         if "glm-5.4" not in cat.get("zai-coding-plan", {}).get("models", {}):
             print(json.dumps({"type": "error", "error": {"message": "ProviderModelNotFoundError: Model not found: zai-coding-plan/glm-5.4"}}))
             sys.exit(1)
+    if mode == "unicode":
+        with open("NEW.txt", "w", encoding="utf-8") as fh:
+            fh.write("made \\u2192 by fake\\n")
     if mode == "write":
         with open("NEW.txt", "w") as fh:
             fh.write("made by fake\\n")
@@ -50,6 +53,8 @@ FAKE = textwrap.dedent("""\
     text = "ANSWER for: " + prompt.splitlines()[0]
     if mode == "verdict":
         text += "\\nVERDICT: APPROVE"
+    if mode == "unicode":
+        text = "ANSWER \\u2192 \\u2713 \\U0001F600\\nVERDICT: APPROVE"
     print(json.dumps({"type": "text", "sessionID": sid, "part": {"text": text}}))
 """)
 
@@ -181,6 +186,25 @@ class SecondOpinion(unittest.TestCase):
         self.assertIn("+made by fake", r.stdout)
         self.assertFalse(os.path.exists(os.path.join(self.repo, "NEW.txt")))
         self.assertIn("+made by fake", self.run_tool("stepfun", "diff", "i1").stdout)
+
+    def test_cp1252_stdout_prints_non_cp1252_answers(self):
+        """#2869: Windows defaults a redirected stdout to cp1252."""
+        with open(os.path.join(self.state, "mode"), "w") as fh:
+            fh.write("unicode")
+        self.env.update(PYTHONIOENCODING="cp1252", PYTHONUTF8="0")
+        answer = "ANSWER → ✓ \U0001F600".encode("utf-8")
+        diff = "+made → by fake".encode("utf-8")
+        for args, expected in (
+                (("muse", "new", "u1", "first"), answer),
+                (("muse", "ask", "u1", "second"), answer),
+                (("muse", "transcript", "u1"), answer),
+                (("stepfun", "review", "--base", "HEAD"), answer),
+                (("stepfun", "implement", "u2", "add a file"), diff),
+                (("stepfun", "diff", "u2"), diff)):
+            r = subprocess.run([sys.executable, TOOL, *args], cwd=self.repo, env=self.env,
+                               input=b"", capture_output=True)
+            self.assertEqual(r.returncode, 0, (args, r.stderr))
+            self.assertIn(expected, r.stdout, args)
 
     def test_unavailable_is_exit_3(self):
         with open(os.path.join(self.state, "mode"), "w") as fh:
