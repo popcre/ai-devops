@@ -32,7 +32,7 @@ None. Nothing in this workstream needs the owner.
 
 ## 4. What did not work
 
-- `ssh hetz` as the default user was refused. Working form: `ssh -i ~/.ssh/916-alien -o IdentitiesOnly=yes -o BatchMode=yes ai@hetz`; for edge-dev3, `ssh -o BatchMode=yes ahazan@edge-dev3`.
+- `ssh hetz` as the default user was refused. Working: sign in to hetz as user `ai` with the SSH key named `916-alien` (identities-only, batch mode); edge-dev3 accepts the default key.
 - Editing Python files through shell heredocs broke quoting; writing an edit script to a file and running it worked.
 - `bin/ai-pr-wait 2893 --timeout-minutes 30`, started in the background from the worktree, exited 3 with "cannot determine the repository; pass --repo". Adding `--repo popcre/ai-devops` worked. The cause was not investigated.
 
