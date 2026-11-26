@@ -13,13 +13,17 @@ cat > "$TMP/gh" <<'E'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$STUB/calls"
 case "$1 $2" in
+  "label create") mkdir "$STUB/$3" ;;
+  "label delete") rmdir "$STUB/$3" ;;
+  "api repos/"*"/labels/"*) test -d "$STUB/${2##*/}" ;;
   "api repos/"*)
+    [[ "$3" == --paginate ]] || exit 1
     r="${2#repos/popcre/designflow-}"; r="${r%%/*}"
     [ -f "$STUB/fail-queue" ] && exit 1
     if [ -f "$STUB/queue-$r.json" ]; then cat "$STUB/queue-$r.json"; else echo '{"workflow_runs":[]}'; fi ;;
   "api organizations/"*) [ -f "$STUB/fail-billing" ] && exit 1; cat "$STUB/billing.json" ;;
-  "workflow run") [ -f "$STUB/fail-dispatch" ] && exit 1; exit 0 ;;
-  "issue list") cat "$STUB/open-issue" 2>/dev/null ;;
+  "workflow run") [ -f "$STUB/fail-dispatch" ] && { echo "HTTP 422" >&2; exit 1; }; exit 0 ;;
+  "issue list") [ ! -f "$STUB/fail-list" ] || exit 1; if [ -f "$STUB/open-issue" ]; then cat "$STUB/open-issue"; fi ;;
   "issue create"|"issue edit"|"issue close") exit 0 ;;
   *) echo "stub: unexpected $*" >&2; exit 9 ;;
 esac
@@ -51,6 +55,7 @@ queue young frontend 10; run young
 queue stuck tracking 45; run stuck
 grep -q "workflow run designflow-checks.yml -R popcre/designflow-tracking --ref develop -f hosted=true" "$TMP/stuck/calls" && [ "$RC" -eq 1 ] && grep -q "issue create" "$TMP/stuck/calls" \
   && ok "a stuck run starts the hosted fallback and raises the alarm" || bad "stuck dispatch (rc=$RC): $OUT"
+mv "$TMP/stuck/home" "$TMP/stuck/previous-leader"
 run stuck
 [ "$(grep -c "workflow run" "$TMP/stuck/calls")" -eq 0 ] && [ "$RC" -eq 1 ] && ok "the same stuck run is never dispatched twice" || bad "re-dispatch guard (rc=$RC): $OUT"
 
@@ -75,6 +80,40 @@ queue dry bff 60; run dry --dry-run
 # 8. failed dispatch is reported and retried next time
 queue dfail item-master 40; touch "$TMP/dfail/fail-dispatch"; run dfail
 grep -q "FAILED" <<<"$OUT" && [ ! -s "$TMP/dfail/home/dispatched-runs" ] && ok "a failed fallback start is reported and left for retry" || bad "dispatch failure (rc=$RC): $OUT"
+
+for kind in queue billing; do
+  mkdir -p "$TMP/bad-$kind"
+  file=billing.json; [ "$kind" = queue ] && file=queue-backend.json
+  echo '{"broken":' > "$TMP/bad-$kind/$file"
+  run "bad-$kind"
+  [ "$RC" -eq 2 ] && ok "malformed $kind is reported" || bad "malformed $kind: $OUT"
+done
+
+for amount in 0 5; do
+  billing "list-$amount" "$amount"; touch "$TMP/list-$amount/fail-list"; run "list-$amount"
+  [ "$RC" -eq 2 ] && ! grep -Eq 'issue (edit|close|create)' "$STUB/calls" &&
+    ok "failed issue lookup prevents writes at spend $amount" || bad "issue lookup: $OUT"
+done
+
+queue timestamp backend 60
+sed -i 's/"created_at":"[^"]*"/"created_at":"invalid"/' "$TMP/timestamp/queue-backend.json"
+run timestamp
+[ "$RC" -eq 2 ] && ! grep -q 'workflow run' "$STUB/calls" && ok "invalid timestamp prevents dispatch" || bad "timestamp: $OUT"
+
+billing qualified 4
+sed -i 's/designflow-frontend/PopCre\/DesignFlow-Frontend/' "$TMP/qualified/billing.json"
+run qualified
+[ "$RC" -eq 1 ] && ok "qualified mixed-case repository spend counts" || bad "qualified spend: $OUT"
+billing missing null; run missing
+[ "$RC" -eq 2 ] && ok "missing charge is reported" || bad "missing charge: $OUT"
+
+queue pages backend 60
+sed -i '1i{"workflow_runs":[]}' "$TMP/pages/queue-backend.json"
+run pages
+[ "$RC" -eq 1 ] && grep -q "workflow run" "$STUB/calls" && ok "later queue pages are checked" || bad "pagination: $OUT"
+
+rm "$TMP/dfail/fail-dispatch"; run dfail
+grep -q 'started the hosted fallback' <<<"$OUT" && ok "rejected dispatch retries successfully" || bad "retry: $OUT"
 
 printf '%s passed, %s failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

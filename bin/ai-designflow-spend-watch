@@ -47,7 +47,7 @@ case "${1:-}" in
         [ "$claim_rc" -eq 0 ] || { note "claim failed; not acting without leadership"; exit 1; }
         rc=0
         "$SELF_PATH" >> "$LOG" 2>&1 || rc=$?
-        printf '%s %s (exit %s)\n' "$(stamp)" "$([ "$rc" -eq 0 ] && echo OK || echo ALARM)" "$rc" >> "$LOG"
+          printf '%s %s (exit %s)\n' "$(stamp)" "$([ "$rc" -eq 0 ] && echo OK || echo ALARM)" "$rc" >> "$LOG"
         exit "$rc"
         ;;
       schedule) register_timer 15 "$SELF_PATH" tick; exit 0 ;;
@@ -81,36 +81,75 @@ touch "$DISPATCHED"
 findings=()
 read_error=0
 
+if [ "$DRY" = false ] && ! open="$("$GH" issue list -R "$ISSUE_REPO" --state open --search "\"$TITLE\" in:title" --json number,title --jq "[.[]|select(.title==\"$TITLE\")][0].number // empty" 2>/dev/null)"; then
+  echo "ai-designflow-spend-watch: could not list standing issues" >&2; exit 2
+fi
+
+
 # --- 1. stuck checks: start the hosted fallback once per stuck run ----------
 for r in $REPOS; do
   repo="popcre/designflow-$r"
-  if ! runs="$("$GH" api "repos/$repo/actions/workflows/designflow-checks.yml/runs?status=queued&per_page=50" 2>/dev/null)"; then
+  if ! runs="$("$GH" api "repos/$repo/actions/workflows/designflow-checks.yml/runs?status=queued&per_page=100" --paginate 2>/dev/null)"; then
+    findings+=("could not read the queue of $repo"); read_error=1; continue
+  fi
+  if ! rows="$(jq -sr '
+    if length == 0 then error("missing queue") else .[] end
+    | .workflow_runs | arrays // error("invalid queue") | .[]
+    | if (.id | type) == "number" and (.head_branch | type) == "string"
+         and (.head_branch | length) > 0 and (.created_at | type) == "string"
+      then [.id, .head_branch, .created_at] | @tsv else error("invalid run") end
+  ' <<<"$runs")"; then
     findings+=("could not read the queue of $repo"); read_error=1; continue
   fi
   while IFS=$'\t' read -r id branch created; do
     [ -n "$id" ] || continue
-    age=$(( (NOW - $(date -u -d "$created" +%s)) / 60 ))
+    if [[ ! "$created" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T ]] || ! epoch="$(date -u -d "$created" +%s)"; then
+      findings+=("$repo: invalid creation time for run $id"); read_error=1; continue
+    fi
+    age=$(( (NOW - epoch) / 60 ))
     [ "$age" -ge "$QUEUE_MINUTES" ] || continue
-    if grep -qx "$repo $id" "$DISPATCHED"; then
+    if grep -qxF "$repo $id" "$DISPATCHED"; then
       findings+=("$repo: run $id on $branch still queued after ${age} min; hosted fallback already started")
       continue
     fi
     if [ "$DRY" = true ]; then
       findings+=("$repo: run $id on $branch queued ${age} min; would start the hosted fallback")
-    elif "$GH" workflow run designflow-checks.yml -R "$repo" --ref "$branch" -f hosted=true >/dev/null 2>&1; then
-      printf '%s %s\n' "$repo" "$id" >> "$DISPATCHED"
-      findings+=("$repo: run $id on $branch queued ${age} min (edge-dev3 down?); started the hosted fallback")
     else
-      findings+=("$repo: run $id on $branch queued ${age} min; starting the hosted fallback FAILED")
+      # Creating a uniquely named repository label claims the run atomically across hosts.
+      claim="spend-watch-$r-$id"
+      if ! "$GH" label create "$claim" -R "$ISSUE_REPO" >/dev/null 2>&1; then
+        if "$GH" api "repos/$ISSUE_REPO/labels/$claim" >/dev/null 2>&1; then
+          findings+=("$repo: run $id still queued; hosted fallback already claimed")
+        else
+          findings+=("$repo: could not claim run $id"); read_error=1
+        fi
+        continue
+      fi
+      if dispatch_error="$("$GH" workflow run designflow-checks.yml -R "$repo" --ref "$branch" -f hosted=true 2>&1)"; then
+        printf '%s %s\n' "$repo" "$id" >> "$DISPATCHED"
+        findings+=("$repo: run $id on $branch queued ${age} min (edge-dev3 down?); started the hosted fallback")
+      else
+        findings+=("$repo: run $id on $branch queued ${age} min; starting the hosted fallback FAILED")
+        # Release only on definite rejection. A lost response may hide a paid run.
+        if [[ "$dispatch_error" =~ HTTP[[:space:]]4(00|01|03|04|22) ]]; then
+          "$GH" label delete "$claim" -R "$ISSUE_REPO" --yes >/dev/null || read_error=1
+        fi
+      fi
     fi
-  done < <(jq -r '.workflow_runs[] | [.id, .head_branch, .created_at] | @tsv' <<<"$runs")
+  done <<<"$rows"
 done
 
 # --- 2. paid minutes: yesterday's net charge ---------------------------------
 day="$(date -u -d "@$((NOW - 86400))" +%Y-%m-%d)"
 y=${day%%-*}; m=$((10#$(cut -d- -f2 <<<"$day"))); d=$((10#${day##*-}))
-if usage="$("$GH" api "organizations/popcre/settings/billing/usage?year=$y&month=$m&day=$d" 2>/dev/null)"; then
-  net="$(jq -r '[.usageItems[]? | select((.product|ascii_downcase)=="actions") | select((.repositoryName // "")|startswith("designflow-")) | .netAmount] | add // 0 | . * 100 | round / 100' <<<"$usage")"
+if usage="$("$GH" api "organizations/popcre/settings/billing/usage?year=$y&month=$m&day=$d" 2>/dev/null)" &&
+   net="$(jq -ser '
+     if length == 1 then .[0].usageItems else error("invalid bill") end
+     | arrays // error("missing usage")
+     | [.[] | select((.product | ascii_downcase) == "actions")
+        | select((.repositoryName // "" | ascii_downcase | split("/") | last) | startswith("designflow-"))
+        | .netAmount | tonumber] | add // 0 | . * 100 | round / 100
+   ' <<<"$usage")"; then
   if awk -v n="$net" -v l="$LIMIT_USD" 'BEGIN{exit !(n>l)}'; then
     findings+=("paid GitHub minutes for DesignFlow on $day: \$$net (limit \$$LIMIT_USD); something is running on GitHub machines again")
   else
@@ -124,7 +163,6 @@ fi
 for f in "${findings[@]}"; do echo "ai-designflow-spend-watch: $f"; done
 [ "$DRY" = true ] && { [ "${#findings[@]}" -eq 0 ] && exit 0; [ "$read_error" -eq 1 ] && exit 2; exit 1; }
 
-open="$("$GH" issue list -R "$ISSUE_REPO" --state open --search "\"$TITLE\" in:title" --json number,title --jq "[.[]|select(.title==\"$TITLE\")][0].number // empty" 2>/dev/null)"
 if [ "${#findings[@]}" -gt 0 ]; then
   body="$(printf '%s\nKept by ai-designflow-spend-watch on the watchdog duty pool; replaced on every alarm. Last alarm: %s.\n\n' "$MARKER" "$(TZ=America/New_York date -d "@$NOW" '+%B %-d, %Y %-I:%M %p %Z')"; for f in "${findings[@]}"; do printf -- '- %s\n' "$f"; done; printf '\nWhat to do: if edge-dev3 is off, turn it back on (checks fall back to GitHub machines meanwhile). If paid minutes rose with edge-dev3 up, find the workflow that left the self-hosted runner. Background: popcre/designflow-backend#590. This issue closes itself after a clean check.\n')"
   if [ -n "$open" ]; then "$GH" issue edit "$open" -R "$ISSUE_REPO" --body "$body" >/dev/null 2>&1
