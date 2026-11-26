@@ -122,7 +122,7 @@ to click through them.
 | Plan + this runbook | Landed in `popcre/ai-devops` |
 | Shared harness | `tools/lib/local-watch.sh` (schedule / lock / log) |
 | Claim/lease + tick-all | `bin/ai-local-watch` + `config/local-watch.json` (`watch_hosts`, claim issue) |
-| Duty tools | `ai-windows-queue-watch`, `ai-runner-pool-watch`, `ai-reviewer-membership-drift tick`, `ai-merge-queue-drift tick` |
+| Duty tools | `ai-windows-queue-watch`, `ai-runner-pool-watch`, `ai-reviewer-membership-drift tick`, `ai-merge-queue-drift tick`, `ai-designflow-spend-watch tick` (DesignFlow stuck checks get a hosted fallback after 30 min; paid minutes over $1/day alarm; popcre/designflow-backend#590) |
 | Installers | `install-ai-devops-windows.ps1` and `install.sh` schedule `ai-local-watch` on pool members |
 | Free Actions backup | Watchdog/drift workflows are `ubuntu-24.04` weekly smoke + dispatch; no paid runners |
 | Live failover drill | **Proven on edge-dev ↔ edge-dev3** (2026-10-05): expired lease → edge-dev3 claim → edge-dev `skip: leader=edge-dev3` → release → edge-dev reclaim. Claim issue #1288. |
