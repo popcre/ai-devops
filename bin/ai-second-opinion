@@ -174,7 +174,7 @@ def meta_route(meta):
 
 def load_meta(sdir):
     try:
-        with open(os.path.join(sdir, "meta.json")) as fh:
+        with open(os.path.join(sdir, "meta.json"), encoding="utf-8") as fh:
             return json.load(fh)
     except (OSError, ValueError):
         return None
@@ -182,7 +182,7 @@ def load_meta(sdir):
 
 def save_meta(sdir, meta):
     tmp = os.path.join(sdir, "meta.json.tmp")
-    with open(tmp, "w") as fh:
+    with open(tmp, "w", encoding="utf-8") as fh:
         json.dump(meta, fh, indent=1)
     os.replace(tmp, os.path.join(sdir, "meta.json"))
 
@@ -232,9 +232,9 @@ def write_config(sdir, provider, agent_name, agent_text, spec=None, cache=None, 
         if (cache or affinity_id) and spec.get("route"):
             cfg["provider"] = RR.opencode_provider_block(RR.route(spec["route"]),
                                                          cache=cache, affinity_id=affinity_id)
-    with open(os.path.join(cfg_dir, "opencode.json"), "w") as fh:
+    with open(os.path.join(cfg_dir, "opencode.json"), "w", encoding="utf-8") as fh:
         json.dump(cfg, fh, indent=1)
-    with open(os.path.join(cfg_dir, "agent", agent_name + ".md"), "w") as fh:
+    with open(os.path.join(cfg_dir, "agent", agent_name + ".md"), "w", encoding="utf-8") as fh:
         fh.write(agent_text)
     os.makedirs(os.path.join(sdir, "home"), exist_ok=True)
 
@@ -274,7 +274,7 @@ class SessionLock:
                 time.sleep(0.5)
                 continue
             try:
-                with open(os.path.join(self.dir, "owner"), "w") as fh:
+                with open(os.path.join(self.dir, "owner"), "w", encoding="utf-8") as fh:
                     fh.write(f"{os.getpid()} {time.time()}\n")
             except OSError:
                 pass
@@ -732,6 +732,10 @@ def read_prompt(args):
             return fh.read()
     text = " ".join(args.text).strip()
     if not text and not sys.stdin.isatty():
+        # Piped prompts are UTF-8 whatever the console code page is (#2889).
+        reconfigure = getattr(sys.stdin, "reconfigure", None)
+        if reconfigure:
+            reconfigure(encoding="utf-8-sig", errors="replace")
         text = sys.stdin.read()
     return text
 
@@ -1034,7 +1038,7 @@ def main(argv):
             try:
                 with tempfile.TemporaryDirectory() as tmp:
                     subprocess.run(["git", "init", "-q", tmp], check=True)
-                    with open(os.path.join(tmp, "README"), "w") as fh:
+                    with open(os.path.join(tmp, "README"), "w", encoding="utf-8") as fh:
                         fh.write("probe\n")
                     subprocess.run(["git", "-C", tmp, "add", "README"], check=True)
                     subprocess.run(["git", "-C", tmp, "-c", "user.name=p", "-c", "user.email=p@l",

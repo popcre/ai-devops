@@ -19,7 +19,7 @@ FAKE = textwrap.dedent("""\
     #!/usr/bin/env python3
     import json, os, sys, time
     state = os.environ["AI_REVIEW_SIMPLE_FAKE_STATE"]
-    prompt = sys.stdin.read()
+    prompt = sys.stdin.buffer.read().decode("utf-8").replace("\\r\\n", "\\n")
     args = sys.argv[1:]
     with open(os.path.join(state, "calls.jsonl"), "a") as fh:
         fh.write(json.dumps({"args": args, "prompt": prompt, "cwd": os.getcwd(), "files": sorted(os.listdir("."))}) + "\\n")
@@ -205,6 +205,16 @@ class SecondOpinion(unittest.TestCase):
                                input=b"", capture_output=True)
             self.assertEqual(r.returncode, 0, (args, r.stderr))
             self.assertIn(expected, r.stdout, args)
+
+    def test_cp1252_piped_prompt_is_read_as_utf8(self):
+        """#2889: Windows defaults a piped stdin to cp1252."""
+        self.env.update(PYTHONIOENCODING="cp1252", PYTHONUTF8="0")
+        prompt = "check \u2192 \u0101 \u00e9 \U0001F600"
+        r = subprocess.run([sys.executable, TOOL, "muse", "ask"], cwd=self.repo, env=self.env,
+                           input=prompt.encode("utf-8-sig"), capture_output=True, timeout=120)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn(prompt, self.calls()[0]["prompt"])
+        self.assertNotIn("\ufeff", self.calls()[0]["prompt"])
 
     def test_unavailable_is_exit_3(self):
         with open(os.path.join(self.state, "mode"), "w") as fh:
@@ -465,6 +475,10 @@ class CodexSecondOpinion(AntigravitySecondOpinion):
         with open(fake, "w") as fh:
             fh.write(CODEX_FAKE)
         os.chmod(fake, 0o755)
+        if os.name == "nt":
+            with open(fake + ".cmd", "w") as fh:
+                fh.write('@"%s" "%s" %%*\r\n' % (sys.executable, fake))
+            fake += ".cmd"
         self.env["AI_REVIEW_SIMPLE_CODEX"] = fake
 
     def calls(self):
@@ -506,6 +520,7 @@ class CodexSecondOpinion(AntigravitySecondOpinion):
         r = self.run_tool("codex", "ask", "hello")
         self.assertEqual(r.returncode, 3)
 
+    @unittest.skipUnless(hasattr(os, "killpg"), "survivor detection uses POSIX process groups")
     def test_abort_keeps_running_state_when_engine_survives(self):
         import signal as _s
         self.assertEqual(self.run_tool("codex", "new", "ab", "q").returncode, 0)
