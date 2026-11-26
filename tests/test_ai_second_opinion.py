@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import time
 import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -519,6 +520,89 @@ class CodexSecondOpinion(AntigravitySecondOpinion):
             fh.write("fail")
         r = self.run_tool("codex", "ask", "hello")
         self.assertEqual(r.returncode, 3)
+
+    def running_session(self, **ids):
+        """A codex session recorded as running with the given process numbers."""
+        self.assertEqual(self.run_tool("codex", "new", "ab", "q").returncode, 0)
+        path = os.path.join(self.env["AI_SECOND_OPINION_HOME"], "codex", "ab", "meta.json")
+        with open(path, encoding="utf-8") as fh:
+            meta = json.load(fh)
+        meta.update(state="running", pid=None, updated=time.time())
+        meta.update(ids)
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(meta, fh)
+        return path
+
+    def state_of(self, path):
+        with open(path, encoding="utf-8") as fh:
+            return json.load(fh)["state"]
+
+    def engine_tree(self, parent_waits):
+        """A process that starts a long-lived engine, then waits or exits."""
+        code = ("import subprocess,sys,time\n"
+                "p=subprocess.Popen([sys.executable,'-c','import time;time.sleep(60)'],"
+                "stdin=-3,stdout=-3,stderr=-3)\n"
+                "print(p.pid,flush=True)\n") + ("time.sleep(60)\n" if parent_waits else "")
+        parent = subprocess.Popen([sys.executable, "-c", code], stdout=subprocess.PIPE, text=True)
+        engine = int(parent.stdout.readline())
+
+        def cleanup():
+            for pid in (engine, parent.pid):
+                subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True)
+            parent.wait(timeout=30)
+            parent.stdout.close()
+
+        self.addCleanup(cleanup)
+        if not parent_waits:
+            parent.wait(timeout=30)
+        return parent, engine
+
+    def process_runs(self, pid):
+        out = subprocess.run(["tasklist", "/NH", "/FO", "CSV", "/FI", "PID eq %d" % pid],
+                             capture_output=True, text=True).stdout
+        return '"%d"' % pid in out
+
+    @unittest.skipUnless(os.name == "nt", "Windows process trees")
+    def test_windows_abort_stops_engine_left_by_ended_parent(self):
+        """#2892: taskkill on an ended parent misses the engine it left behind."""
+        parent, engine = self.engine_tree(parent_waits=False)
+        path = self.running_session(child_pid=parent.pid)
+        r = self.run_tool("codex", "abort", "ab")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertFalse(self.process_runs(engine))
+        self.assertEqual(self.state_of(path), "aborted")
+
+    @unittest.skipUnless(os.name == "nt", "Windows process trees")
+    def test_windows_abort_stops_engine_under_the_tool_process(self):
+        """#2892: engines without a child_pid sit under the recorded tool process."""
+        parent, engine = self.engine_tree(parent_waits=True)
+        path = self.running_session(pid=parent.pid)
+        r = self.run_tool("codex", "abort", "ab")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertFalse(self.process_runs(engine))
+        self.assertEqual(self.state_of(path), "aborted")
+
+    @unittest.skipUnless(os.name == "nt", "Windows process trees")
+    def test_windows_abort_keeps_running_state_when_engine_survives(self):
+        parent, engine = self.engine_tree(parent_waits=True)
+        path = self.running_session(child_pid=parent.pid)
+        # Run the command in-process with a taskkill that stops nothing.
+        driver = textwrap.dedent("""\
+            import runpy, subprocess, sys
+            real = subprocess.run
+            def run(cmd, *a, **k):
+                if cmd[0] == "taskkill":
+                    return subprocess.CompletedProcess(cmd, 1, b"", b"")
+                return real(cmd, *a, **k)
+            subprocess.run = run
+            sys.argv = sys.argv[1:]
+            runpy.run_path(sys.argv[0], run_name="__main__")
+            """)
+        r = subprocess.run([sys.executable, "-c", driver, TOOL, "codex", "abort", "ab"],
+                           cwd=self.repo, env=self.env, capture_output=True, text=True, timeout=120)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertTrue(self.process_runs(engine))
+        self.assertEqual(self.state_of(path), "running")
 
     @unittest.skipUnless(hasattr(os, "killpg"), "survivor detection uses POSIX process groups")
     def test_abort_keeps_running_state_when_engine_survives(self):
