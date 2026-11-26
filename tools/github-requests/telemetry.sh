@@ -88,7 +88,7 @@ gh_measure_local_clock(){
 
 gh_measure_local_observation(){
   local id="${1:-}" outcome="${2:-}" start="${3:-}" end="${4:-}" basis="${5:-unknown}" output_failed="${6:-1}" utc record reason=clock_unknown acceptance=unknown lower=null upper=null error=null start_json=null end_json=null
-  case "$outcome" in merged|closed|checks_failed|ejected|deadline) ;; *) return 2 ;; esac
+  case "$outcome" in merged|closed|checks_failed|ejected|deadline|not_queued) ;; *) return 2 ;; esac
   [[ "$id" =~ ^[0-9a-f]{32}$ ]] || return 2
   if [ "$output_failed" = 1 ]; then
     reason=delivery_unknown
@@ -217,7 +217,7 @@ gh_measure_workflow_outcome(){
   case "$caller:$workflow:$outcome" in
     ai-pr-wait:pr_wait:merged|ai-pr-wait:pr_wait:closed|\
     ai-pr-wait:pr_wait:checks_failed|ai-pr-wait:pr_wait:ejected|\
-    ai-pr-wait:pr_wait:deadline|ai-blocker-watch:blocker_watch_tick:completed) ;;
+    ai-pr-wait:pr_wait:deadline|ai-pr-wait:pr_wait:not_queued|ai-blocker-watch:blocker_watch_tick:completed) ;;
     ai-blocker-watch:blocker_watch_alarm:completed|ai-blocker-watch:blocker_watch_alarm:partial|ai-blocker-watch:blocker_watch_alarm:failed|ai-blocker-watch:blocker_watch_alarm:skipped|\
     ai-blocker-watch:blocker_watch_links:completed|ai-blocker-watch:blocker_watch_links:partial|ai-blocker-watch:blocker_watch_links:failed|ai-blocker-watch:blocker_watch_links:skipped|\
     ai-blocker-watch:blocker_watch_wake:process_succeeded|ai-blocker-watch:blocker_watch_wake:process_failed|ai-blocker-watch:blocker_watch_wake:refused|ai-blocker-watch:blocker_watch_wake:skipped) extended=1 ;;

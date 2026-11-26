@@ -597,7 +597,7 @@ COST_LABELS = {
 }
 RECEIPT_LABELS = {
     ("ai-pr-wait", "pr_wait", outcome)
-    for outcome in ("merged", "closed", "checks_failed", "ejected", "deadline")
+    for outcome in ("merged", "closed", "checks_failed", "ejected", "deadline", "not_queued")
 } | {("ai-blocker-watch", "blocker_watch_tick", "completed")}
 RECEIPT_LABELS |= {
     ("ai-blocker-watch", workflow, outcome)
@@ -632,7 +632,7 @@ WRITE_OBSERVATION_KEYS = {"schema", "utc", "measurement", "caller", "workflow", 
 # gh_measure_write_observation; a wider emitter must never crash the report.
 OBSERVATION_WORKFLOWS = {"pr_wait", "blocker_watch_tick", "blocker_watch_alarm",
                          "blocker_watch_links", "blocker_watch_wake", "merge_group_evidence"}
-LOCAL_OUTCOMES = {"merged", "closed", "checks_failed", "ejected", "deadline"}
+LOCAL_OUTCOMES = {"merged", "closed", "checks_failed", "ejected", "deadline", "not_queued"}
 LOCAL_CLOCK_BASES = {"linux_boottime_centiseconds", "unknown"}
 LOCAL_REASONS = {"source_unknown", "clock_unknown", "clock_negative", "delivery_unknown"}
 LOCAL_ACCEPTANCES = {"unknown", "qualified"}

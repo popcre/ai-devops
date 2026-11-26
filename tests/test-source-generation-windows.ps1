@@ -226,6 +226,7 @@ exit 0
     Assert ($laterControl.IsClosed -and $laterFileControl.IsClosed -and $recording.Count -eq 7) 'Later controls, custody, receipt and ACK still close'
     Assert (-not (Test-Path -LiteralPath $faultRoot) -and -not (Test-Path -LiteralPath $cleanupBootstrap)) 'Later native unseal permits actual owned directory cleanup'
     Assert-ReadArguments 'bin/ai-pr-wait' @('658','--repo','popcre/ai-devops','--timeout-minutes','1')
+    Assert-ReadArguments 'bin/ai-pr-wait' @('658','--repo','popcre/ai-devops','--allow-unqueued','--timeout-minutes','1')
     Assert-ReadArguments 'bin/ai-gh' @('issue','view','658','--repo','popcre/ai-devops','--json','number,state,title')
     Assert $true 'Finite public read arguments accepted'
     Refuses {Assert-ReadArguments 'bin/ai-gh' @('issue','close','658','--repo','popcre/ai-devops','--json','number')} 'Write command denied by explicit read profile'

@@ -15,8 +15,15 @@
 # wait continues (#2094). Silence from this command means the pull request is
 # genuinely still moving.
 #
+# QUEUE FIRST, THEN WAIT. An open, ready pull request that is not in the merge
+# queue and has no auto-merge request will never merge on its own. On
+# 2026-11-23 five pull requests sat 9-70 minutes that way (#2869). The wait
+# confirms this with one extra read 60 seconds later and exits 4. Pass
+# --allow-unqueued to wait on purpose (a review comes first, only check results
+# are wanted, or the repository has no merge queue). Drafts never trigger it.
+#
 # Usage:
-#   ai-pr-wait <pr-number> [--timeout-minutes N] [--fit-tool-call] [--repo OWNER/NAME] [--interval SECONDS] [--api-timeout-seconds N] [--reviewer-approval REPORT]
+#   ai-pr-wait <pr-number> [--timeout-minutes N] [--fit-tool-call] [--allow-unqueued] [--repo OWNER/NAME] [--interval SECONDS] [--api-timeout-seconds N] [--reviewer-approval REPORT]
 #
 # --fit-tool-call caps the deadline at 9 minutes so one run fits a 10-minute
 # agent tool call, and on timeout prints one line an agent can act on:
@@ -34,6 +41,7 @@
 #   1  stopped and will not merge on its own (closed, required-check failure, ejected)
 #   2  deadline reached while still in progress
 #   3  usage or environment error
+#   4  not queued: queue it, then wait again (see QUEUE FIRST above)
 set -uo pipefail
 
 PR=''
@@ -43,6 +51,7 @@ INTERVAL=300
 API_TIMEOUT_SECONDS=30
 REVIEWER_APPROVAL=''
 FIT_TOOL_CALL=0
+ALLOW_UNQUEUED=0
 RERUN_COMMAND="ai-pr-wait$(printf ' %q' "$@")"
 
 while [ $# -gt 0 ]; do
@@ -60,7 +69,8 @@ while [ $# -gt 0 ]; do
       shift 2
       ;;
     --fit-tool-call) FIT_TOOL_CALL=1; shift ;;
-    -h|--help) sed -n '2,33p' "$0"; exit 0 ;;
+    --allow-unqueued) ALLOW_UNQUEUED=1; shift ;;
+    -h|--help) sed -n '2,44p' "$0"; exit 0 ;;
     -*) printf 'ai-pr-wait: unknown option %s\n' "$1" >&2; exit 3 ;;
     *) PR="$1"; shift ;;
   esac
@@ -200,6 +210,8 @@ bounded_gh() {
     # A waiter that has seen queue membership must validate a possible
     # ejection freshly; its own history cannot be delegated to another waiter.
     [ "$WAS_QUEUED" -eq 0 ] || force=(--force-refresh)
+    # The not-queued confirmation must be a new read, never the cached first one.
+    [ -z "${UNQUEUED_SINCE:-}" ] || force=(--force-refresh)
     AI_GH_CALLER=ai-pr-wait AI_GH_COST_CONTEXT="${SNAP_CONTEXT:-}" "$PYTHON_RUNNER" "$SNAP_HELPER_ARG" \
       --state-dir "$SNAP_STATE_ARG" --key "v3 $SNAP_CONTEXT $REPO $PR $cache_target" \
       --expected-head "$expected_head" --ttl 10 --wait-seconds "$limit" --cap-supervisor-timeout --defer-source-mark \
@@ -284,6 +296,11 @@ say() {
 
 WAS_QUEUED=0
 QUEUED_HEAD=''
+# Not-queued stop: confirm once, a short grace later, so the moment just after
+# queueing is never mistaken for a pull request nobody queued.
+UNQUEUED_GRACE_SECONDS=60
+UNQUEUED_SINCE=''
+UNQUEUED_HEAD=''
 # Step 5.1: name the queue-stall reasons while polling, not only at exit.
 # Warn once after the PR has sat in the merge queue this long (env-overridable
 # for tests). One hour: the queue normally lands a merge group in minutes.
@@ -438,6 +455,12 @@ wait_for_next_poll() {
   age="$(cat "$SNAP_AGE_FILE" 2>/dev/null || printf 0)"
   case "$age" in ''|*[!0-9]*) age=0 ;; esac
   [ "$age" -lt "$delay" ] && delay=$(( delay - age ))
+  # A pending not-queued confirmation comes after the grace, not the interval.
+  # Once the grace has passed (a failed read), the normal interval applies.
+  if [ -n "$UNQUEUED_SINCE" ]; then
+    age=$(( UNQUEUED_SINCE + UNQUEUED_GRACE_SECONDS - now ))
+    if [ "$age" -gt 0 ] && [ "$age" -lt "$delay" ]; then delay="$age"; fi
+  fi
   [ "$delay" -le "$remaining" ] || delay="$remaining"
   sleep "$delay"
 }
@@ -642,6 +665,30 @@ while :; do
   if [ "$NOW" != "$LAST" ]; then
     say "PR #$PR $NOW"
     LAST="$NOW"
+  fi
+
+  # Open, ready, never seen queued, no auto-merge: nothing will merge it.
+  # Missing fields count as unknown and never stop the wait.
+  if [ "$ALLOW_UNQUEUED" -eq 0 ] && [ "$WAS_QUEUED" -eq 0 ] &&
+     printf '%s' "$Q" | jq -e '.data.repository.pullRequest | .state == "OPEN" and .isDraft == false and .isInMergeQueue == false and has("autoMergeRequest") and .autoMergeRequest == null' >/dev/null 2>&1; then
+    if [ -z "$UNQUEUED_SINCE" ] || [ "$UNQUEUED_HEAD" != "$LAST_HEAD" ]; then
+      UNQUEUED_SINCE="$(date +%s)"
+      UNQUEUED_HEAD="$LAST_HEAD"
+    elif [ "$(( $(date +%s) - UNQUEUED_SINCE ))" -ge "$UNQUEUED_GRACE_SECONDS" ]; then
+      PR_WAIT_OUTCOME=not_queued
+      say "PR #$PR is NOT QUEUED: not in the merge queue and no auto-merge - it will not merge on its own."
+      say "  To merge it (repository with a merge queue), then wait again:"
+      say "    ai-gh pr merge $PR --repo $REPO --auto"
+      say "  Waiting on purpose (review first, check results only, no merge queue):"
+      say "  do not queue it; rerun this wait with --allow-unqueued."
+      capture_local_end
+      PR_WAIT_DELIVERED_UTC_MS="$(utc_ms)"
+      emit_workflow_evidence
+      exit 4
+    fi
+  else
+    UNQUEUED_SINCE=''
+    UNQUEUED_HEAD=''
   fi
 
   if deadline_reached; then

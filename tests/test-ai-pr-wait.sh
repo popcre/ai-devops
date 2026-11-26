@@ -487,6 +487,76 @@ OUT="$(AI_PR_WAIT_TEST_MARKER="$TMP/ejected-count" PATH="$TMP/bin:$PATH" bash "$
 check "a genuine same-head merge-queue ejection is terminal" \
   "test '$RC' -eq 1 && test \"\$(cat '$TMP/ejected-count')\" -eq 2 && printf '%s' \"$OUT\" | grep -q EJECTED"
 
+# Not queued (#2869): an open, ready pull request with no queue entry and no
+# auto-merge never merges. Confirmed once, 60 seconds later, then exit 4.
+# The fake clock moves only when the waiter sleeps.
+cat > "$TMP/bin/gh" <<'EOF2'
+#!/usr/bin/env bash
+count="$(cat "${AI_PR_WAIT_TEST_MARKER:?}" 2>/dev/null || printf 0)"
+count=$(( count + 1 )); printf '%s\n' "$count" > "$AI_PR_WAIT_TEST_MARKER"
+read -r -a script <<< "${NQ_SCRIPT:?}"
+step="${script[$(( count - 1 ))]:-${script[${#script[@]}-1]}}"
+state=OPEN draft=false queued=false auto=null head=h1
+case "$step" in
+  merged) state=MERGED ;;
+  queued) queued=true ;;
+  draft) draft=true ;;
+  auto) auto='{"enabledAt":"2026-01-01T00:00:00Z"}' ;;
+  newhead) head=h2 ;;
+esac
+printf '{"data":{"repository":{"pullRequest":{"state":"%s","headRefOid":"%s","isDraft":%s,"isInMergeQueue":%s,"autoMergeRequest":%s,"mergeCommit":{"oid":"done"},"commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"PENDING","contexts":{"totalCount":0,"pageInfo":{"hasPreviousPage":false},"nodes":[]}}}}]}}}}}\n' "$state" "$head" "$draft" "$queued" "$auto"
+EOF2
+cat > "$TMP/bin/date" <<'EOF2'
+#!/usr/bin/env bash
+cat "${NQ_CLOCK:?}"
+EOF2
+cat > "$TMP/bin/sleep" <<'EOF2'
+#!/usr/bin/env bash
+case "$1" in *[!0-9]*) exit 0 ;; esac
+printf '%s\n' "$1" >> "${NQ_SLEEPS:?}"
+printf '%s\n' "$(( $(cat "${NQ_CLOCK:?}") + $1 ))" > "$NQ_CLOCK"
+EOF2
+chmod +x "$TMP/bin/gh" "$TMP/bin/date" "$TMP/bin/sleep"
+nq_run() {
+  local name="$1" script="$2"; shift 2
+  printf '1000\n' > "$TMP/nq-$name.clock"; : > "$TMP/nq-$name.sleeps"
+  OUT="$(NQ_SCRIPT="$script" NQ_CLOCK="$TMP/nq-$name.clock" NQ_SLEEPS="$TMP/nq-$name.sleeps" \
+    AI_GH_STATE_DIR="$TMP/nq-$name-state" AI_PR_WAIT_TEST_MARKER="$TMP/nq-$name.calls" PATH="$TMP/bin:$PATH" \
+    bash "$CMD" 1 --repo popcre/ai-devops --timeout-minutes 30 --interval 300 "$@" 2>&1)"; RC=$?
+  CALLS="$(cat "$TMP/nq-$name.calls" 2>/dev/null || printf 0)"
+}
+nq_run stays 'open open'
+check "a pull request nobody queued stops with exit 4 after exactly two reads" \
+  "test '$RC' -eq 4 && test '$CALLS' -eq 2 && test \"\$(printf '%s\n' \"$OUT\" | grep -c 'NOT QUEUED')\" -eq 1"
+check "the not-queued confirmation waits 60 seconds, not the poll interval" \
+  "test \"\$(head -n1 '$TMP/nq-stays.sleeps')\" -eq 60"
+check "the not-queued report names both ways out" \
+  "printf '%s' \"$OUT\" | grep -q 'ai-gh pr merge 1 --repo popcre/ai-devops --auto' && printf '%s' \"$OUT\" | grep -q -- '--allow-unqueued'"
+nq_run late 'open queued merged'
+check "queueing inside the grace period keeps the wait going to the merge" \
+  "test '$RC' -eq 0 && test '$CALLS' -eq 3 && ! printf '%s' \"$OUT\" | grep -q 'NOT QUEUED'"
+nq_run merged 'open merged'
+check "a merge inside the grace period is reported as merged" "test '$RC' -eq 0 && test '$CALLS' -eq 2"
+nq_run push 'open newhead newhead'
+check "a new head restarts the not-queued confirmation" "test '$RC' -eq 4 && test '$CALLS' -eq 3"
+for kind in draft auto; do
+  nq_run "$kind" "$kind $kind merged"
+  check "a $kind pull request is waited on, not stopped" "test '$RC' -eq 0 && test '$CALLS' -eq 3"
+done
+nq_run allowed 'open open merged' --allow-unqueued
+check "--allow-unqueued waits on purpose" \
+  "test '$RC' -eq 0 && test '$CALLS' -eq 3 && test \"\$(head -n1 '$TMP/nq-allowed.sleeps')\" -gt 60"
+nq_run eject 'queued open open'
+check "an ejection after queue membership stays exit 1" \
+  "test '$RC' -eq 1 && printf '%s' \"$OUT\" | grep -q EJECTED && ! printf '%s' \"$OUT\" | grep -q 'NOT QUEUED'"
+check "the one status query asks for draft and auto-merge state" \
+  "grep -q 'isDraft isInMergeQueue autoMergeRequest{enabledAt}' '$ROOT/tools/github-requests/pr-status-complete.sh'"
+rm -f "$TMP/bin/sleep"
+cat > "$TMP/bin/date" <<'EOF2'
+#!/usr/bin/env bash
+printf '1000\n'
+EOF2
+
 # An explicit --repo skips the preliminary repo lookup. A cold ai-gh state
 # therefore has no principal when the waiter starts; a successful first call
 # can warm it, and later waiters must use that verified local identity.

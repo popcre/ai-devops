@@ -21,7 +21,8 @@ startup context.
 
 ## BlockerWatch (waiting on anything machine-checkable)
 
-**Registration is no longer required.** Use bounded `ai-pr-wait` while you
+**Registration is no longer required.** Queue a pull request, then use bounded
+`ai-pr-wait` (exit 4 means it was never queued) while you
 remain in the turn; otherwise leave the existing issue or pull request as the
 card and return later — GitHub notifications are the reminder. A turn may end
 with an unchecked checklist on the issue.

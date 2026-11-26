@@ -1055,6 +1055,11 @@ AI_GH_STATE_DIR="$qualified_state" gh_measure_workflow_outcome ai-pr-wait pr_wai
 AI_GH_STATE_DIR="$qualified_state" gh_measure_local_observation "$local_id" merged 500 1600 linux_boottime_centiseconds 0
 check 'qualified observation emits acceptance qualified with real bounds' \
   "jq -se '[.[]|select(.schema==5)] | .[0].acceptance == \"qualified\" and .[0].unknown_reason == \"source_unknown\" and .[0].duration_lower_ms == 1080 and .[0].duration_upper_ms == 1120 and .[0].start_monotonic_ms == 500' '$qualified_state/measurements/'*.jsonl"
+nq_state="$TMP/local-not-queued-state"; mkdir -p "$nq_state/measurements"; chmod 700 "$nq_state/measurements"
+AI_GH_STATE_DIR="$nq_state" gh_measure_workflow_outcome ai-pr-wait pr_wait "$local_id" not_queued 100
+AI_GH_STATE_DIR="$nq_state" gh_measure_local_observation "$local_id" not_queued 500 1600 linux_boottime_centiseconds 0
+"$PYTHON_RUNNER" "$ROOT/tools/github-requests/report.py" "$nq_state/measurements" > "$TMP/nq-report"; rc=$?
+check 'a not_queued stop is recorded and reported'   "[ '$rc' -eq 0 ] && jq -e '.local_workflow_observations.count == 1' '$TMP/nq-report' && jq -se '[.[]|select(.outcome==\"not_queued\")] | length == 2' '$nq_state/measurements/'*.jsonl"
 admission_bash="$(command -v bash)"
 case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) admission_bash="$(cygpath -w "$admission_bash")";; esac
 AI_TEST_BASH="$admission_bash" "$PYTHON_RUNNER" "$ROOT/tests/test-ai-gh-admission.py"

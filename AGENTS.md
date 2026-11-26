@@ -152,11 +152,16 @@ with [`docs/ghost-run-escape.md`](docs/ghost-run-escape.md) (drain, bump `LANE_E
 - Wait on CI through **bounded, event-aware** tools.
   Use `bin/ai-pr-wait <pr> --timeout-minutes N` for a pull request, surface a failing check or queue
   ejection immediately, and do independent useful work while long checks run.
+  Queue the pull request before waiting (`bin/ai-gh pr merge <pr> --auto`; prose
+  runs `bin/ai-doc-safety` first; only in a repository with a merge queue). Exit 4
+  means nothing queued it: queue and wait again, or pass `--allow-unqueued` when
+  it must not merge yet (Albert reviews it first, or you only want check results).
   Make every GitHub call through `bin/ai-gh` (machine-wide lock, spacing, hourly
   budget, and rate-limit back-off) — this is a rule for callers, not something the
   shell enforces, and a few older scripts still call `gh` directly and are being
   migrated; other waits use `bin/ai-gh-wait`. At most one
-  GitHub call every 5 minutes per waiter; never `gh run watch`, and never an
+  GitHub call every 5 minutes per waiter (one exception: `ai-pr-wait`
+  confirms a not-queued pull request once, 60 seconds after seeing it); never `gh run watch`, and never an
   open-ended `until`/`while` loop around `gh` — every wait needs a deadline or
   iteration cap (#401). Use bounded in-session `ai-pr-wait` /
   `ai-gh-wait`; `ai-pr-wait` defaults to a 60-minute deadline and runs in the

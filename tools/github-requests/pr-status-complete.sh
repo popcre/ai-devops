@@ -41,7 +41,7 @@ page() {
   return "$rc"
 }
 
-Q="$(page "{repository(owner:\"$OWNER\",name:\"$NAME\"){pullRequest(number:$PR){state mergedAt closedAt headRefOid isInMergeQueue mergeCommit{oid} commits(last:1){nodes{commit{oid statusCheckRollup{state contexts(last:100){totalCount pageInfo{hasPreviousPage startCursor} nodes{... on CheckRun{name title conclusion status detailsUrl completedAt isRequired(pullRequestNumber:$PR)} ... on StatusContext{context description state isRequired(pullRequestNumber:$PR)}}}}}}}}}rateLimit{cost remaining resetAt}}")" || exit $?
+Q="$(page "{repository(owner:\"$OWNER\",name:\"$NAME\"){pullRequest(number:$PR){state mergedAt closedAt headRefOid isDraft isInMergeQueue autoMergeRequest{enabledAt} mergeCommit{oid} commits(last:1){nodes{commit{oid statusCheckRollup{state contexts(last:100){totalCount pageInfo{hasPreviousPage startCursor} nodes{... on CheckRun{name title conclusion status detailsUrl completedAt isRequired(pullRequestNumber:$PR)} ... on StatusContext{context description state isRequired(pullRequestNumber:$PR)}}}}}}}}}rateLimit{cost remaining resetAt}}")" || exit $?
 first_head="$(printf '%s' "$Q" | jq -r '.data.repository.pullRequest.headRefOid // empty')" || exit 4
 pages=0
 while printf '%s' "$Q" | jq -e '.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup.contexts.pageInfo.hasPreviousPage == true' >/dev/null 2>&1; do
