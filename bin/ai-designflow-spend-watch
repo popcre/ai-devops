@@ -1,0 +1,136 @@
+#!/usr/bin/env bash
+# ai-designflow-spend-watch — keep the six private DesignFlow repositories off
+# paid GitHub machines and keep their checks moving when edge-dev3 is down
+# (popcre/designflow-backend#590).
+#
+# Since 2026-11-25 their checks run only on the edge-dev3 self-hosted runner.
+# Two things can go wrong, and this tool watches both:
+#   1. edge-dev3 is off, so a "DesignFlow checks" run sits queued. After
+#      QUEUE_MINUTES the tool starts the same workflow on the same branch with
+#      hosted=true (a paid GitHub machine) once per stuck run, so nothing waits
+#      on the desktop. The central release check has its own timer and needs no
+#      help.
+#   2. Paid minutes creep back. Yesterday's (UTC) net Actions charge for the
+#      DesignFlow repositories above LIMIT_USD raises the alarm.
+# Problems open or refresh one standing issue; a clean run closes it.
+#
+# Usage:
+#   ai-designflow-spend-watch            one check (prints findings, exit 1 on alarm)
+#   ai-designflow-spend-watch --dry-run  report only: no dispatch, no issue writes
+#   ai-designflow-spend-watch tick       duty-pool tick (claim, then check)
+#   ai-designflow-spend-watch schedule|unschedule   register the local timer
+#
+# Settings (environment): AI_DESIGNFLOW_WATCH_GH (gh binary), ..._QUEUE_MINUTES
+# (default 30), ..._LIMIT_USD (default 1.00), ..._ISSUE_REPO (default
+# popcre/designflow-backend), ..._HOME (state and log), ..._NOW (epoch, tests).
+# Exit codes: 0 clean; 1 alarm; 2 usage or read error.
+set -uo pipefail
+
+SELF_PATH="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")"
+ROOT="$(cd "$(dirname "$SELF_PATH")/.." && pwd)"
+HOME_DIR="${AI_DESIGNFLOW_WATCH_HOME:-$HOME/.ai-devops/designflow-spend-watch}"
+LOG="$HOME_DIR/tick.log"
+
+case "${1:-}" in
+  tick|schedule|unschedule)
+    # shellcheck source=tools/lib/local-watch.sh
+    . "$ROOT/tools/lib/local-watch.sh"
+    TOOL_NAME='ai-designflow-spend-watch'
+    LW_CONFIG="${AI_LOCAL_WATCH_CONFIG:-$ROOT/config/local-watch.json}"
+    case "$1" in
+      tick)
+        mkdir -p "$HOME_DIR"
+        rotate_log "$LOG" "$(jq -er '.log_max_bytes // 5000000' "$LW_CONFIG" 2>/dev/null || echo 5000000)"
+        claim_rc=0
+        "${AI_LOCAL_WATCH_BIN:-$ROOT/bin/ai-local-watch}" claim || claim_rc=$?
+        [ "$claim_rc" -eq 3 ] && { note "skip: another host holds the claim"; exit 3; }
+        [ "$claim_rc" -eq 0 ] || { note "claim failed; not acting without leadership"; exit 1; }
+        rc=0
+        "$SELF_PATH" >> "$LOG" 2>&1 || rc=$?
+        printf '%s %s (exit %s)\n' "$(stamp)" "$([ "$rc" -eq 0 ] && echo OK || echo ALARM)" "$rc" >> "$LOG"
+        exit "$rc"
+        ;;
+      schedule) register_timer 15 "$SELF_PATH" tick; exit 0 ;;
+      unschedule) unregister_timer; exit 0 ;;
+    esac
+    ;;
+esac
+
+DRY=false
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --dry-run) DRY=true; shift ;;
+    -h|--help) sed -n '2,27p' "$SELF_PATH"; exit 0 ;;
+    *) printf 'ai-designflow-spend-watch: unknown argument: %s\n' "$1" >&2; exit 2 ;;
+  esac
+done
+
+GH="${AI_DESIGNFLOW_WATCH_GH:-gh}"
+QUEUE_MINUTES="${AI_DESIGNFLOW_WATCH_QUEUE_MINUTES:-30}"
+LIMIT_USD="${AI_DESIGNFLOW_WATCH_LIMIT_USD:-1.00}"
+ISSUE_REPO="${AI_DESIGNFLOW_WATCH_ISSUE_REPO:-popcre/designflow-backend}"
+NOW="${AI_DESIGNFLOW_WATCH_NOW:-$(date -u +%s)}"
+REPOS="backend frontend tracking item-master data-syncing bff"
+TITLE='DesignFlow spend watch'
+MARKER='<!-- designflow-spend-watch -->'
+command -v jq >/dev/null 2>&1 || { echo 'ai-designflow-spend-watch: jq is required' >&2; exit 2; }
+mkdir -p "$HOME_DIR"
+DISPATCHED="$HOME_DIR/dispatched-runs"
+touch "$DISPATCHED"
+
+findings=()
+read_error=0
+
+# --- 1. stuck checks: start the hosted fallback once per stuck run ----------
+for r in $REPOS; do
+  repo="popcre/designflow-$r"
+  if ! runs="$("$GH" api "repos/$repo/actions/workflows/designflow-checks.yml/runs?status=queued&per_page=50" 2>/dev/null)"; then
+    findings+=("could not read the queue of $repo"); read_error=1; continue
+  fi
+  while IFS=$'\t' read -r id branch created; do
+    [ -n "$id" ] || continue
+    age=$(( (NOW - $(date -u -d "$created" +%s)) / 60 ))
+    [ "$age" -ge "$QUEUE_MINUTES" ] || continue
+    if grep -qx "$repo $id" "$DISPATCHED"; then
+      findings+=("$repo: run $id on $branch still queued after ${age} min; hosted fallback already started")
+      continue
+    fi
+    if [ "$DRY" = true ]; then
+      findings+=("$repo: run $id on $branch queued ${age} min; would start the hosted fallback")
+    elif "$GH" workflow run designflow-checks.yml -R "$repo" --ref "$branch" -f hosted=true >/dev/null 2>&1; then
+      printf '%s %s\n' "$repo" "$id" >> "$DISPATCHED"
+      findings+=("$repo: run $id on $branch queued ${age} min (edge-dev3 down?); started the hosted fallback")
+    else
+      findings+=("$repo: run $id on $branch queued ${age} min; starting the hosted fallback FAILED")
+    fi
+  done < <(jq -r '.workflow_runs[] | [.id, .head_branch, .created_at] | @tsv' <<<"$runs")
+done
+
+# --- 2. paid minutes: yesterday's net charge ---------------------------------
+day="$(date -u -d "@$((NOW - 86400))" +%Y-%m-%d)"
+y=${day%%-*}; m=$((10#$(cut -d- -f2 <<<"$day"))); d=$((10#${day##*-}))
+if usage="$("$GH" api "organizations/popcre/settings/billing/usage?year=$y&month=$m&day=$d" 2>/dev/null)"; then
+  net="$(jq -r '[.usageItems[]? | select((.product|ascii_downcase)=="actions") | select((.repositoryName // "")|startswith("designflow-")) | .netAmount] | add // 0 | . * 100 | round / 100' <<<"$usage")"
+  if awk -v n="$net" -v l="$LIMIT_USD" 'BEGIN{exit !(n>l)}'; then
+    findings+=("paid GitHub minutes for DesignFlow on $day: \$$net (limit \$$LIMIT_USD); something is running on GitHub machines again")
+  else
+    echo "ai-designflow-spend-watch: $day DesignFlow net \$$net (limit \$$LIMIT_USD)"
+  fi
+else
+  findings+=("could not read the billing usage for $day"); read_error=1
+fi
+
+# --- report ------------------------------------------------------------------
+for f in "${findings[@]}"; do echo "ai-designflow-spend-watch: $f"; done
+[ "$DRY" = true ] && { [ "${#findings[@]}" -eq 0 ] && exit 0; [ "$read_error" -eq 1 ] && exit 2; exit 1; }
+
+open="$("$GH" issue list -R "$ISSUE_REPO" --state open --search "\"$TITLE\" in:title" --json number,title --jq "[.[]|select(.title==\"$TITLE\")][0].number // empty" 2>/dev/null)"
+if [ "${#findings[@]}" -gt 0 ]; then
+  body="$(printf '%s\nKept by ai-designflow-spend-watch on the watchdog duty pool; replaced on every alarm. Last alarm: %s.\n\n' "$MARKER" "$(TZ=America/New_York date -d "@$NOW" '+%B %-d, %Y %-I:%M %p %Z')"; for f in "${findings[@]}"; do printf -- '- %s\n' "$f"; done; printf '\nWhat to do: if edge-dev3 is off, turn it back on (checks fall back to GitHub machines meanwhile). If paid minutes rose with edge-dev3 up, find the workflow that left the self-hosted runner. Background: popcre/designflow-backend#590. This issue closes itself after a clean check.\n')"
+  if [ -n "$open" ]; then "$GH" issue edit "$open" -R "$ISSUE_REPO" --body "$body" >/dev/null 2>&1
+  else "$GH" issue create -R "$ISSUE_REPO" --title "$TITLE" --body "$body" >/dev/null 2>&1; fi
+  [ "$read_error" -eq 1 ] && exit 2
+  exit 1
+fi
+[ -n "$open" ] && "$GH" issue close "$open" -R "$ISSUE_REPO" --comment "Clean check at $(TZ=America/New_York date -d "@$NOW" '+%-I:%M %p %Z'): no stuck DesignFlow checks, yesterday's paid minutes under \$$LIMIT_USD." >/dev/null 2>&1
+exit 0

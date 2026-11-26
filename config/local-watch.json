@@ -10,6 +10,7 @@
   "tools": {
     "windows-queue-watch": { "tick_minutes": 2, "command": "ai-windows-queue-watch" },
     "runner-pool-watch": { "tick_minutes": 60, "command": "ai-runner-pool-watch" },
-    "merge-queue-drift": { "tick_minutes": 1440, "command": "ai-merge-queue-drift" }
+    "merge-queue-drift": { "tick_minutes": 1440, "command": "ai-merge-queue-drift" },
+    "designflow-spend-watch": { "tick_minutes": 15, "command": "ai-designflow-spend-watch" }
   }
 }
