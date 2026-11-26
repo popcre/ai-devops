@@ -23,6 +23,11 @@ from reviewer_usage import append_reviewer_attempt, reviewer_attempt  # noqa: E4
 
 
 def main():
+    # The answer must survive a cp1252 console or pipe on Windows (#2869).
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure:
+            reconfigure(encoding="utf-8", errors="backslashreplace")
     ap = argparse.ArgumentParser(prog="deepseek-harness-chat")
     ap.add_argument("--route", required=True)
     ap.add_argument("--secrets-dir", required=True)

@@ -820,6 +820,29 @@ done
 """
 
 
+class HarnessChatOutputTests(Base):
+    def test_cp1252_stdout_prints_non_cp1252_answer(self):
+        """#2869: the DeepSeek harness answer must not depend on the console code page."""
+        # The helper passes only a short allow-list to dsh, so this fake needs no state.
+        fake = write_fake(self.tmp.name, "dsh-unicode", textwrap.dedent("""\
+            #!/usr/bin/env python3
+            import json, sys
+            sys.stdin.read()
+            print(json.dumps({"type": "final", "reason": {"kind": "completed"},
+                              "text": "ANSWER \\u2192 \\u2713"}))
+            """))
+        env = dict(self.env, AI_REVIEW_SIMPLE_DSH=fake, PYTHONIOENCODING="cp1252",
+                   PYTHONUTF8="0")
+        proc = subprocess.run(
+            [sys.executable, os.path.join(ROOT, "tools", "deepseek_harness_chat.py"),
+             "--route", "deepseek-openrouter", "--secrets-dir", self.secrets,
+             "--dsh-home", os.path.join(self.tmp.name, "dsh-home"),
+             "--home", os.path.join(self.tmp.name, "home"), "--timeout", "60"],
+            env=env, input=b"question", capture_output=True, timeout=120)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("ANSWER → ✓".encode("utf-8"), proc.stdout)
+
+
 class DeepseekAgentHarnessTests(Base):
     """The opt-in DeepSeek Harness engine in bin/ai-deepseek-agent (#2549).
 
