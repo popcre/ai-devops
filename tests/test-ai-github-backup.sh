@@ -84,6 +84,8 @@ check "alert creates an issue when none is open" 'grep -q "^issue create" "$work
 GH_ISSUES='[{"number":7}]' bash "$tool" --alert >/dev/null 2>&1
 check "alert comments on the open issue" 'grep -q "^issue comment 7" "$work/alert.log"'
 
+check "LFS fetch is called with options git-lfs accepts" '! grep -E "lfs fetch[^\n]*--quiet" "$tool"'
+
 check "install skips on another host" 'GITHUB_BACKUP_HOST=not-this-host bash "$tool" --install | grep -q "^SKIP"'
 
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"; [ "$FAIL" -eq 0 ]

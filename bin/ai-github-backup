@@ -87,9 +87,11 @@ backup_repo() { # owner/name has_wiki
     local refs=(); mapfile -t refs < <(git -C "$mirror" for-each-ref --format='%(objectname)' refs/heads refs/tags | sort -u)
     if [ -d "$mirror/lfs/objects" ] || { [ "${#refs[@]}" -gt 0 ] &&
        git -C "$mirror" grep -q 'filter=lfs' "${refs[@]}" -- .gitattributes '**/.gitattributes' 2>/dev/null; }; then
-      if git -C "$mirror" lfs fetch --all --quiet "$url" >/dev/null 2>&1; then
+      # git-lfs has no --quiet option; passing one makes every fetch fail.
+      local lerr
+      if lerr="$(git -C "$mirror" lfs fetch --all "$url" 2>&1)"; then
         mkdir -p "$ROOT/lfs/$full" && cp -a -u "$mirror/lfs/objects" "$ROOT/lfs/$full/" || rc=1
-      else log "WARN $full: Git LFS fetch failed"; rc=1; fi
+      else log "WARN $full: Git LFS fetch failed: $(printf '%s' "$lerr" | tail -1)"; rc=1; fi
     fi
   fi
   if [ "$wiki" = true ]; then
