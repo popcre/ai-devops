@@ -15,7 +15,7 @@ import re
 import stat
 
 LABELS = {
-    'pr_wait': {'merged', 'closed', 'checks_failed', 'ejected', 'deadline'},
+    'pr_wait': {'merged', 'closed', 'checks_failed', 'ejected', 'deadline', 'not_queued'},
     'blocker_watch_tick': {'completed'},
     'blocker_watch_wake': {'completed', 'failed'},
     'blocker_watch_alarm': {'completed', 'failed'},
@@ -121,7 +121,7 @@ def compare(baseline, candidate):
     result['paired_outcomes'] = len(before)
     groups = collections.defaultdict(lambda: ([], []))
     for key, row in before.items():
-        if row['outcome'] in {'deadline', 'failed', 'refused', 'duplicate_refused', 'skipped'}:
+        if row['outcome'] in {'deadline', 'not_queued', 'failed', 'refused', 'duplicate_refused', 'skipped'}:
             continue
         groups[row['operation']][0].append(row)
         groups[row['operation']][1].append(after[key])

@@ -532,7 +532,7 @@ function Assert-ReadArguments([string]$Entry,[object[]]$Values) {
         if ($Values.Count -lt 3 -or $Values[0] -notmatch '^[1-9][0-9]*$') { throw 'Restricted read profile requires one public PR wait' }
         $repo = $false
         for ($i=1;$i -lt $Values.Count;$i++) {
-            if ($Values[$i] -eq '--fit-tool-call') { continue }
+            if ($Values[$i] -in @('--fit-tool-call','--allow-unqueued')) { continue }
             if ($Values[$i] -eq '--repo') { $i++;if ($i -ge $Values.Count -or $Values[$i] -ne 'popcre/ai-devops') { throw 'Restricted read repository refused' };$repo=$true;continue }
             if ($Values[$i] -notin @('--timeout-minutes','--interval','--api-timeout-seconds')) { throw 'Restricted read option refused' }
             $i++;if ($i -ge $Values.Count -or $Values[$i] -notmatch '^[1-9][0-9]{0,3}$') { throw 'Restricted read deadline refused' }

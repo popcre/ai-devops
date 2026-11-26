@@ -55,11 +55,16 @@ ai-muse list | show <name> | transcript <name> | reconcile <name> | delete <name
 ## ai-pr-wait (`bin/ai-pr-wait`)
 
 ```text
-ai-pr-wait <pr-number> --timeout-minutes N [--fit-tool-call] [--repo OWNER/NAME] [--reviewer-approval REPORT]
+ai-pr-wait <pr-number> --timeout-minutes N [--fit-tool-call] [--allow-unqueued] [--repo OWNER/NAME] [--reviewer-approval REPORT]
 ```
 
 `--timeout-minutes` defaults to 60 (owner ruling 2026-10-21, #1962); run the wait
 in the background rather than a `sleep` loop.
+Queue the pull request first: `bin/ai-gh pr merge <pr> --auto` (merge-queue
+repositories only; prose runs `bin/ai-doc-safety` first). Exit 4 (`NOT QUEUED`)
+means it is open, ready, unqueued and has no auto-merge, confirmed 60 seconds
+apart: queue it and wait again, or pass `--allow-unqueued` to wait on purpose
+(Albert reviews it first, check results only, or no merge queue).
 On `STILL-WAITING` rerun the printed command. Prose-only PRs do not wait for
 checks unless `--reviewer-approval` is given.
 

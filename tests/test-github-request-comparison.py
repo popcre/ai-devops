@@ -98,9 +98,10 @@ class Comparison(unittest.TestCase):
         self.assertEqual(self.metric()['duplicate_read_reduction_50_percent']['state'], 'unknown')
 
     def test_deadlines_are_not_successful_work(self):
-        for data in (self.before, self.after):
-            data['observations'][0]['outcome'] = 'deadline'
-        self.assertEqual(self.metric()['sample_floor'], 'unknown')
+        for outcome in ('deadline', 'not_queued'):
+            for data in (self.before, self.after):
+                data['observations'][0]['outcome'] = outcome
+            self.assertEqual(self.metric()['sample_floor'], 'unknown')
 
     def test_duplicate_ids_unknown_fields_and_boolean_counts_refused(self):
         for change in ('duplicate', 'unknown', 'boolean', 'backward_interval'):

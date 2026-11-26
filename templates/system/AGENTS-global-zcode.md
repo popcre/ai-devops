@@ -187,6 +187,9 @@ rulings, verbatim: `docs/owner-rulings.md`.
 - **Wait on CI with the bounded, event-aware waiter.** Surface a
   failing check or queue ejection immediately, and do independent useful work
   while long checks run; never burn turns in long hand-written polling loops.
+  Queue first (`bin/ai-gh pr merge <pr> --auto`; merge-queue repos only, prose
+  after `ai-doc-safety`, never a PR Albert reviews first). Exit 4 = not queued:
+  queue it, or pass `--allow-unqueued` to wait on purpose.
   Run `bin/ai-pr-wait <pr>` in the background (60-minute default deadline) and
   do other work until it finishes; rerun it on exit 2. One probe per state
   change. A wait that outlives the turn leaves the issue or PR as the card.
