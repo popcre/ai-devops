@@ -15,7 +15,7 @@ Fixture and replay results are labelled as such. Live proof is limited to the tw
 
 | Experiment | Verdict | Deciding evidence | Next action |
 |---|---|---|---|
-| 1. Work through an outage | **Fail** on the five-second gate; recovery and safety **pass** | Slow GitHub: workspace status 93.7 s, collision check 48.6 s, memory sync hung until the 120 s watchdog. Refused and 503: every tool answered safely in 0.2–6.9 s. Local edit, test and commit: 0.05 s in every mode. | Adopt the journalled, serialized, deferred submission pattern. Separate repair: bound network waits in workspace status, memory sync and the collision check. |
+| 1. Work through an outage | **Fail** on the five-second gate; recovery and safety **pass** | Slow GitHub: workspace status 93.7 s, collision check 48.6 s, memory sync hung until the 120 s watchdog. Refused and 503: every tool answered safely in 0.2–6.9 s. Local edit, test and commit: 0.05 s in every mode. | Adopt the journalled, serialized, deferred submission pattern. Separate repair: bound network waits in workspace status, memory sync and the collision check (done; see "After the repair"). |
 | 2. Shared status notifications | **Inconclusive** for REST core; **ruled out** for GraphQL. Listener not built. | Peak core hour: 4,165 of 5,000 used; 0 verified status reads; 4,165 unattributed. GraphQL peak: 416 points, all verified other spend. | Do not build a listener now. First attribute the unaccounted core spend (at least 94.6% of the peak hour came from outside both machines' recorded calls). |
 | 3. Check and merge delay | **Diagnosis only** (no matched pairs) | Required check done about 15 s after the run starts; queue entry to merge median 0.9 min; 0 ejections. 4 of 11 PRs waited 9–60 min before entering the queue. | Leave checks and runners alone. Investigate the wait before a PR enters the queue. |
 
@@ -43,6 +43,18 @@ Entry points, two workspaces, seconds (target: a clear deferred or blocked answe
 † The healthy memory-sync control reached the test hub (clone and fetch succeeded) and then stopped on a check that the private test home is toolkit-managed. That stop is unrelated to the network, so its healthy time is not a comparable baseline.
 
 No mode pushed anything, overrode a collision or skipped a visibility check. The failures are responsiveness only: workspace status exceeds 5 s even when healthy, and three tools wait without limit on a slow GitHub, which the plan counts as a failed continuity trial.
+
+### After the repair (same drill, edge-dev3, November 25, 2026, about 9:40 PM EST)
+
+The three tools now give GitHub a short limit (3 s by default, `AI_GH_TOOL_DEADLINE_SECONDS`) and say plainly when it did not answer. Same fixture, same isolation; audit again only loopback and local sockets, 0 writes outside scratch storage.
+
+| Tool | Healthy | Refused | 503 | Slow (30 s per answer) |
+|---|---|---|---|---|
+| Workspace status | 7.05 | 6.98, warning | 6.98, warning | 3.19, "fetch deferred" and "open PR status deferred" |
+| Memory sync | 7.06 † | 3.58, refused, no push | 3.6, same | 3.39, deferred (exit 75): privacy unverified, no push |
+| Runner collision check | 3.55, clear | 3.63, unknown (exit 4) | 3.65, unknown (exit 4) | 3.38, deferred, unknown (exit 4) |
+
+Healthy, refused and 503 answers are unchanged. A slow GitHub now yields a deferred or unknown answer within 5 s in both workspaces; no mode pushed, and an unknown collision still exits 4. The shared gate's request spacing, back-off and credentials are unchanged; a call cut short records no probe result as a GitHub answer. The clone, fetch and push inside memory sync run only after privacy is proven and are still unlimited, because cutting them short could leave a broken local copy.
 
 Local work and recovery, both workspaces:
 
@@ -96,6 +108,7 @@ No change to required checks, advisory checks or runners would shorten these mer
 - Issue #2881 (opened by CI for draft #2879): closed with a signed note.
 - edge-dev3: the toolkit copy, drill output, test scratch and one leftover fixture server from a debug run were removed and verified absent. No host networking, DNS, credentials, backoff settings, subscriptions or installs were changed.
 - The ordinary waiter still works: this findings PR was followed to merge with the normal wait helper.
+- After-repair drill (November 25, 2026, about 9:40 PM EST): the toolkit copy and drill output on edge-dev3 were removed and verified absent.
 
 ## Limitations
 

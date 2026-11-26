@@ -209,14 +209,22 @@ refuse_if_local_runner_busy() {
     return 0
   fi
 
-  local repository registered_repo n busy_remote busy="" unavailable=0
+  local repository registered_repo n busy_remote busy="" unavailable=0 deferred=0 rc
+  # A slow GitHub must yield "unknown" quickly, never a long silent wait. The
+  # limit covers waiting on GitHub for each repository; the shared gate's own
+  # request spacing is not counted.
+  local limit="${AI_GH_TOOL_DEADLINE_SECONDS:-3}"
   while IFS= read -r repository; do
     [ -n "$repository" ] || continue
-    busy_remote="$(AI_GH_CALLER=ai-test-local "$GH" api "repos/$repository/actions/runners" --paginate \
-                     --jq '.runners[] | select(.busy) | .name' 2>/dev/null | normalise_names)" || {
+    busy_remote="$(AI_GH_CALLER=ai-test-local AI_GH_DEADLINE_SECONDS="$limit" "$GH" api "repos/$repository/actions/runners" --paginate \
+                     --jq '.runners[] | select(.busy) | .name' 2>/dev/null)"
+    rc=$?
+    if [ "$rc" -ne 0 ]; then
       unavailable=1
+      [ "$rc" -ne 124 ] || deferred=1
       continue
-    }
+    fi
+    busy_remote="$(printf '%s\n' "$busy_remote" | normalise_names)"
     while IFS=$'\t' read -r registered_repo n; do
       [ "$registered_repo" = "$repository" ] || continue
       printf '%s\n' "$busy_remote" | grep -qxF -- "$n" && busy="$busy $n"
@@ -225,6 +233,8 @@ refuse_if_local_runner_busy() {
 
   if [ -z "$busy" ] && [ "$unavailable" -eq 1 ]; then
     if [ "$CHECK_COLLISION" -eq 1 ]; then
+      [ "$deferred" -eq 0 ] ||
+        echo "ai-test-local: GitHub did not answer the runner status check within ${limit}s; check deferred." >&2
       echo 'ai-test-local: unknown -- runner status is unavailable; no safe scheduling decision was made.' >&2
       exit 4
     fi
