@@ -30,7 +30,8 @@ FAKE = textwrap.dedent("""\
     state = os.environ["AI_REVIEW_SIMPLE_FAKE_STATE"]
     calls = int(open(state).read() or 0) if os.path.exists(state) else 0
     open(state, "w").write(str(calls + 1))
-    sys.stdin.read()
+    prompt = sys.stdin.buffer.read()
+    open(state + ".prompt", "wb").write(prompt)
     mode = open(state + ".mode").read().strip()
     def text(t):
         print(json.dumps({"type": "text", "part": {"text": t}}))
@@ -60,6 +61,10 @@ FAKE = textwrap.dedent("""\
         print("boom API_KEY=" + os.environ["MODEL_API_KEY"], file=sys.stderr); sys.exit(1)
     elif mode == "sleep":
         time.sleep(30)
+    elif mode == "unicode":
+        line = json.dumps({"type": "text", "part": {"text": "caf\\u00e9 \\u2192 \\u0101 \\U0001F600\\nVERDICT: REVISE"}},
+                          ensure_ascii=False)
+        sys.stdout.buffer.write(line.encode("utf-8") + b"\\n")
     """)
 
 
@@ -186,6 +191,29 @@ class ReviewTests(unittest.TestCase):
         rc, res, calls = self.run_review("truncated")
         self.assertEqual((rc, res["verdict"], res["findings"], calls), (3, None, "", 2))
         self.assertIn("incomplete reviewer output: length", res["error"])
+
+    def test_cp1252_locale_keeps_utf8(self):
+        """#2889: prompt, answer, result file and comment never follow the code page."""
+        # Windows then defaults to cp1252; the C locale does the same job on Linux (ASCII).
+        self.env.update(PYTHONUTF8="0", PYTHONIOENCODING="cp1252", PYTHONCOERCECLOCALE="0",
+                        LC_ALL="C", LANG="C")
+        added = "na\u00efve \u2192 \u0101 \U0001F600"
+        with open(os.path.join(self.repo, "a.txt"), "a", encoding="utf-8") as fh:
+            fh.write(added + "\n")
+        subprocess.run(["git", "-C", self.repo, "commit", "-qam", "unicode"], check=True)
+        head = subprocess.check_output(["git", "-C", self.repo, "rev-parse", "HEAD"], text=True).strip()
+        rc, res, _ = self.run_review("unicode", head=head)
+        self.assertEqual((rc, res["verdict"]), (0, "REVISE"), res["error"])
+        answer = "caf\u00e9 \u2192 \u0101 \U0001F600"
+        self.assertIn(answer, res["findings"])
+        with open(self.state + ".prompt", "rb") as fh:
+            self.assertIn(added.encode("utf-8"), fh.read())
+        comment = os.path.join(self.tmp.name, "comment.md")
+        r = subprocess.run([sys.executable, SCRIPT, "--combine", self.out, "--head", head,
+                            "--comment-out", comment], env=self.env, capture_output=True, timeout=120)
+        self.assertTrue(os.path.exists(comment), r.stderr)
+        with open(comment, "rb") as fh:
+            self.assertIn(answer.encode("utf-8"), fh.read())
 
     def test_head_mismatch_is_refused(self):
         rc, res, calls = self.run_review("approve", head=self.base)

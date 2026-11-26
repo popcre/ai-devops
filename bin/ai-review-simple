@@ -325,7 +325,7 @@ def resolve_opencode():
     if override:
         return override
     try:
-        with open(os.path.join(ROOT, "config", "opencode", "version")) as fh:
+        with open(os.path.join(ROOT, "config", "opencode", "version"), encoding="utf-8") as fh:
             ver = fh.read().strip()
         pinned = os.path.expanduser(
             f"~/.local/lib/ai-devops/opencode/{ver}/node_modules/opencode-ai/bin/opencode.exe")
@@ -462,7 +462,7 @@ CONCISE_REVIEW = (
 
 
 def build_prompt(repo, base, head, variant=None):
-    with open(TEMPLATE) as fh:
+    with open(TEMPLATE, encoding="utf-8") as fh:
         tpl = fh.read()
     diff = git(repo, "diff", f"{base}...{head}")
     if variant == "lean":
@@ -517,7 +517,7 @@ def make_workspace(repo, head, provider, tmp, spec=None, cache=None, affinity_id
         # A fresh private harness profile: only this route's adapter and model.
         profiles = os.path.join(tmp, "dsh", "profiles", "headless")
         os.makedirs(profiles)
-        with open(os.path.join(profiles, "cordis.patch.yml"), "w") as fh:
+        with open(os.path.join(profiles, "cordis.patch.yml"), "w", encoding="utf-8") as fh:
             fh.write(RR.harness_patch_yaml(spec, affinity_id))
         return work, home
     cfg_dir = os.path.join(tmp, "xdg", "config", "opencode")
@@ -529,9 +529,9 @@ def make_workspace(repo, head, provider, tmp, spec=None, cache=None, affinity_id
         if (cache or affinity_id) and spec.get("route"):
             cfg["provider"] = RR.opencode_provider_block(RR.route(spec["route"]),
                                                          cache=cache, affinity_id=affinity_id)
-    with open(os.path.join(cfg_dir, "opencode.json"), "w") as fh:
+    with open(os.path.join(cfg_dir, "opencode.json"), "w", encoding="utf-8") as fh:
         json.dump(cfg, fh, indent=1)
-    with open(os.path.join(cfg_dir, "agent", "simple-review.md"), "w") as fh:
+    with open(os.path.join(cfg_dir, "agent", "simple-review.md"), "w", encoding="utf-8") as fh:
         fh.write(AGENT)
     return work, home
 
@@ -570,7 +570,8 @@ def run_once(provider, prompt, work, home, tmp, key, timeout, spec=None, observe
         cmd += ["--variant", spec["variant"]]
     proc = subprocess.Popen(cmd, cwd=work, env=env, stdin=subprocess.PIPE,
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                            text=True, start_new_session=True)
+                            text=True, encoding="utf-8", errors="replace",
+                            start_new_session=True)
     try:
         out, err = proc.communicate(prompt, timeout=timeout)
     except subprocess.TimeoutExpired:
@@ -799,7 +800,7 @@ def review(args):
 
     def finish(code):
         result["elapsed"] = round(time.monotonic() - start, 1)
-        with open(args.out, "w") as fh:
+        with open(args.out, "w", encoding="utf-8") as fh:
             json.dump(result, fh, indent=1)
         print(json.dumps({k: result[k] for k in ("provider", "verdict", "elapsed", "error")}))
         return code
@@ -891,16 +892,16 @@ def run_plan(args):
     openrouter_routes = {rid for rid, spec in known.items()
                          if spec.get("base_url") == RR.OPENROUTER_URL}
     order_path = os.path.join(args.results_dir, "order")
-    with open(order_path, "w") as fh:
+    with open(order_path, "w", encoding="utf-8") as fh:
         pass
     shared_outage = False
     for entry in (args.run_plan or "").split():
         rid = entry if entry in known else None
-        with open(order_path, "a") as fh:
+        with open(order_path, "a", encoding="utf-8") as fh:
             fh.write(entry + "\n")
         out = os.path.join(args.results_dir, f"{entry}.json")
         if shared_outage and rid in openrouter_routes:
-            with open(out, "w") as fh:
+            with open(out, "w", encoding="utf-8") as fh:
                 json.dump({"provider": entry, "head": args.head, "verdict": None, "findings": "",
                            "elapsed": 0, "error": "skipped: shared OpenRouter outage"}, fh)
             print(f"{entry}: skipped (shared OpenRouter outage)")
@@ -912,7 +913,7 @@ def run_plan(args):
             code = review(one)
         except RR.RouteError as exc:
             code = 2
-            with open(out, "w") as fh:
+            with open(out, "w", encoding="utf-8") as fh:
                 json.dump({"provider": entry, "head": args.head, "verdict": None, "findings": "",
                            "elapsed": 0, "error": f"refused: {exc}"}, fh, indent=1)
         print(f"{entry}: exit {code} (0 verdict, 3 unavailable, 2 refused)")
@@ -920,7 +921,7 @@ def run_plan(args):
             break
         if rid in openrouter_routes:
             try:
-                with open(out) as fh:
+                with open(out, encoding="utf-8") as fh:
                     error = (json.load(fh) or {}).get("error") or ""
             except (OSError, ValueError):
                 error = ""
@@ -1053,7 +1054,7 @@ def main(argv=None):
         results = []
         for path in args.combine:
             try:
-                with open(path) as fh:
+                with open(path, encoding="utf-8") as fh:
                     results.append(json.load(fh))
             except (OSError, ValueError):
                 results.append({"provider": os.path.basename(path).split(".")[0],
@@ -1062,7 +1063,7 @@ def main(argv=None):
         summary = combine(results, args.head,
                           routes=set(RR.routes()) if candidate_routes else None)
         if args.comment_out:
-            with open(args.comment_out, "w") as fh:
+            with open(args.comment_out, "w", encoding="utf-8") as fh:
                 fh.write(render_comment(summary, args.head))
         print(json.dumps({k: v for k, v in summary.items() if k != "rows"}))
         return 0
