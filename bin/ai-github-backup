@@ -159,10 +159,11 @@ do_run() {
   local copies_ok=1
   # NAS: Synology refuses rsync for non-privileged accounts, so changed bundle
   # and metadata files are streamed with tar over ssh. A stamp marks the last
-  # successful copy; only files newer than it are sent.
+  # successful copy; only files changed since (ctime, so copies that keep an
+  # old mtime, such as LFS objects, still count) are sent.
   local nas_err="$ROOT/.nas.err" stamp="$ROOT/.nas-stamp" started="$ROOT/.nas-stamp.new" files="$ROOT/.nas-files"
   : > "$started"
-  ( cd "$ROOT" && if [ -f "$stamp" ]; then find bundles meta lfs repos.tsv -type f -newer "$stamp" 2>/dev/null; else find bundles meta lfs repos.tsv -type f 2>/dev/null; fi ) > "$files"
+  ( cd "$ROOT" && if [ -f "$stamp" ]; then find bundles meta lfs repos.tsv -type f -cnewer "$stamp" 2>/dev/null; else find bundles meta lfs repos.tsv -type f 2>/dev/null; fi ) > "$files"
   local dest="${NAS#*:}" sink=(sh -c)
   case "$NAS" in *:*) sink=(ssh -o BatchMode=yes -o ConnectTimeout=20 "${NAS%%:*}") ;; esac
   if { [ ! -s "$files" ] || tar -C "$ROOT" -cf - -T "$files" | "${sink[@]}" "mkdir -p '$dest' && tar -xf - -C '$dest'"; } 2>"$nas_err"; then
