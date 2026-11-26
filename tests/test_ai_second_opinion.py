@@ -336,6 +336,53 @@ sys.exit(ns['main'](['glm', 'doctor', '--live']))
         self.assertNotIn("k-123456789", text)
         self.assertEqual(len(self.calls()), 3)
 
+    @unittest.skipUnless(hasattr(os, "killpg"), "POSIX process groups")
+    def test_abort_stops_opencode_engine_in_its_own_session(self):
+        """OpenCode runs in its own session; abort must reach it, not only the tool."""
+        fake = os.path.join(self.tmp, "slow-opencode")
+        with open(fake, "w") as fh:
+            fh.write("#!/usr/bin/env python3\nimport os,sys,time\n"
+                     "sys.stdin.read()\n"
+                     "state=os.environ['AI_REVIEW_SIMPLE_FAKE_STATE']\n"
+                     "tmp=os.path.join(state,'pid.tmp')\n"
+                     "with open(tmp,'w') as f: f.write(str(os.getpid()))\n"
+                     "os.replace(tmp,os.path.join(state,'pid'))\n"
+                     "time.sleep(60)\n")
+        os.chmod(fake, 0o755)
+        env = dict(self.env, AI_REVIEW_SIMPLE_OPENCODE=fake)
+        tool = subprocess.Popen([sys.executable, TOOL, "glm", "new", "ab", "q"], cwd=self.repo,
+                                env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        import threading
+        threading.Thread(target=tool.wait, daemon=True).start()  # reap like a shell would
+        engine = None
+        try:
+            pidfile = os.path.join(self.state, "pid")
+            for _ in range(100):
+                if os.path.exists(pidfile) and os.path.getsize(pidfile):
+                    break
+                time.sleep(0.1)
+            self.assertTrue(os.path.exists(pidfile) and os.path.getsize(pidfile),
+                            "slow-opencode did not write pidfile")
+            with open(pidfile) as fh:
+                engine = int(fh.read())
+            r = self.run_tool("glm", "abort", "ab")
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            tool.wait(timeout=30)
+            time.sleep(0.5)
+            with self.assertRaises(OSError):
+                os.kill(engine, 0)
+        finally:
+            if engine is not None:
+                try:
+                    os.kill(engine, 9)
+                except OSError:
+                    pass
+            tool.kill()
+            tool.wait()
+        meta = os.path.join(self.env["AI_SECOND_OPINION_HOME"], "glm", "ab", "meta.json")
+        with open(meta) as fh:
+            self.assertEqual(json.load(fh)["state"], "aborted")
+
 
 FAKE_AGY = textwrap.dedent("""\
     #!/usr/bin/env python3
@@ -622,43 +669,6 @@ class CodexSecondOpinion(AntigravitySecondOpinion):
             child.kill()
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
         self.assertEqual(json.load(open(os.path.join(sdir, "meta.json")))["state"], "running")
-
-    @unittest.skipUnless(hasattr(os, "killpg"), "POSIX process groups")
-    def test_abort_stops_opencode_engine_in_its_own_session(self):
-        """OpenCode runs in its own session; abort must reach it, not only the tool."""
-        fake = os.path.join(self.tmp, "slow-opencode")
-        with open(fake, "w") as fh:
-            fh.write("#!/usr/bin/env python3\nimport os,sys,time\n"
-                     "open(os.path.join(os.environ['AI_REVIEW_SIMPLE_FAKE_STATE'],'pid'),'w')"
-                     ".write(str(os.getpid()))\nsys.stdin.read()\ntime.sleep(60)\n")
-        os.chmod(fake, 0o755)
-        env = dict(self.env, AI_REVIEW_SIMPLE_OPENCODE=fake)
-        tool = subprocess.Popen([sys.executable, TOOL, "glm", "new", "ab", "q"], cwd=self.repo,
-                                env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        pidfile = os.path.join(self.state, "pid")
-        for _ in range(100):
-            if os.path.exists(pidfile) and os.path.getsize(pidfile):
-                break
-            time.sleep(0.1)
-        engine = int(open(pidfile).read())
-        import threading
-        threading.Thread(target=tool.wait, daemon=True).start()  # reap like a shell would
-        try:
-            r = self.run_tool("glm", "abort", "ab")
-            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-            tool.wait(timeout=30)
-            time.sleep(0.5)
-            with self.assertRaises(OSError):
-                os.kill(engine, 0)
-        finally:
-            try:
-                os.kill(engine, 9)
-            except OSError:
-                pass
-            tool.kill()
-            tool.wait()
-        meta = os.path.join(self.env["AI_SECOND_OPINION_HOME"], "glm", "ab", "meta.json")
-        self.assertEqual(json.load(open(meta))["state"], "aborted")
 
     def test_doctor_and_store_key_and_auth_error(self):
         """Codex has no key file; the auth-error path is test_failed_turn_is_unavailable."""
