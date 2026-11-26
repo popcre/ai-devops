@@ -141,12 +141,23 @@ command -v git >/dev/null 2>&1 || fail "git is unavailable"
 # reach the hub, and the configured remote must. That works over SSH, where gh
 # OAuth is session-isolated or stale and GCM/wincredman cannot persist.
 # Tests keep the shared ai-gh transport path (with a fake visibility read).
+# A slow GitHub must give a quick, clear answer: the sync is deferred (exit 75)
+# with nothing changed and nothing pushed. Never push on an unproven answer.
+VISIBILITY_LIMIT="${AI_GH_TOOL_DEADLINE_SECONDS:-3}"
+[[ "$VISIBILITY_LIMIT" =~ ^[1-9][0-9]*$ ]] || fail "AI_GH_TOOL_DEADLINE_SECONDS must be positive whole seconds"
+defer_unverified() {
+  log "DEFERRED: GitHub did not answer the private-visibility check within ${VISIBILITY_LIMIT}s; could not verify privacy; nothing changed and no push was made" >&2
+  exit 75
+}
 if [[ "${AI_MEMORY_TEST_MODE:-}" == "1" && "${AI_MEMORY_TEST_PRIVATE:-}" == "1" ]]; then
   :
 elif [[ "${AI_MEMORY_TEST_MODE:-}" == "1" ]]; then
   [[ -x "$TOOL_ROOT/bin/ai-gh" ]] || fail "shared GitHub transport is required to verify private visibility"
-  private="$(AI_GH_CALLER=ai-memory-sync "$TOOL_ROOT/bin/ai-gh" api repos/u2giants/ai-devops-memory --jq '.private' 2>/dev/null)" ||
-    fail "could not verify private hub visibility"
+  private="$(AI_GH_CALLER=ai-memory-sync AI_GH_DEADLINE_SECONDS="$VISIBILITY_LIMIT" \
+    "$TOOL_ROOT/bin/ai-gh" api repos/u2giants/ai-devops-memory --jq '.private' 2>/dev/null)"
+  rc=$?
+  [[ "$rc" -ne 124 ]] || defer_unverified
+  [[ "$rc" -eq 0 ]] || fail "could not verify private hub visibility"
   [[ "$private" == "true" ]] || fail "memory hub is not private"
 else
   # The probe must see the repository exactly as an anonymous outsider would.
@@ -155,15 +166,20 @@ else
   # and false-positive "publicly readable" on every run (#1646). An empty
   # `-c url...insteadOf=` does NOT override a multivar rewrite; dropping the
   # global/system config for this one call does.
-  if GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_NOSYSTEM=1 \
-      GIT_TERMINAL_PROMPT=0 GCM_INTERACTIVE=never \
-      git -c credential.helper= -c core.askPass= \
-      ls-remote https://github.com/u2giants/ai-devops-memory.git HEAD >/dev/null 2>&1; then
-    fail "memory hub is publicly readable; refusing to sync"
-  fi
+  # Each probe is time-limited: a timed-out anonymous probe proves nothing, so
+  # it defers the sync instead of counting as "not public".
+  GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_NOSYSTEM=1 \
+    GIT_TERMINAL_PROMPT=0 GCM_INTERACTIVE=never \
+    timeout -k 2 "$VISIBILITY_LIMIT" git -c credential.helper= -c core.askPass= \
+    ls-remote https://github.com/u2giants/ai-devops-memory.git HEAD >/dev/null 2>&1
+  rc=$?
+  [[ "$rc" -ne 124 && "$rc" -ne 137 ]] || defer_unverified
+  [[ "$rc" -ne 0 ]] || fail "memory hub is publicly readable; refusing to sync"
   GIT_TERMINAL_PROMPT=0 GCM_INTERACTIVE=never \
-    git ls-remote "$REMOTE" HEAD >/dev/null 2>&1 ||
-    fail "could not verify private hub visibility"
+    timeout -k 2 "$VISIBILITY_LIMIT" git ls-remote "$REMOTE" HEAD >/dev/null 2>&1
+  rc=$?
+  [[ "$rc" -ne 124 && "$rc" -ne 137 ]] || defer_unverified
+  [[ "$rc" -eq 0 ]] || fail "could not verify private hub visibility"
 fi
 
 lock="$HUB.lock"

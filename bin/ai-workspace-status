@@ -57,12 +57,33 @@ c_head "Untracked files"
 UNTRACKED="$(git ls-files --others --exclude-standard | sed 's/^/  /')"
 if [ -n "$UNTRACKED" ]; then echo "$UNTRACKED"; else echo "  (none)"; fi
 
+# A slow GitHub must give a quick, clear answer, never a long silent wait:
+# the origin fetch and the PR lookup each get LIMIT seconds and run side by side.
+LIMIT="${AI_GH_TOOL_DEADLINE_SECONDS:-3}"
+[[ "$LIMIT" =~ ^[1-9][0-9]*$ ]] || { echo "AI_GH_TOOL_DEADLINE_SECONDS must be positive whole seconds" >&2; exit 2; }
+PR_DIR="$(mktemp -d)" || exit 1
+PR_PID=''
+cleanup() { [ -z "$PR_PID" ] || kill "$PR_PID" 2>/dev/null; rm -rf "$PR_DIR"; }
+trap cleanup EXIT
+if [ -x "$ROOT/bin/ai-gh" ]; then
+  (
+    AI_GH_CALLER=ai-workspace-status AI_GH_DEADLINE_SECONDS="$LIMIT" \
+      "$ROOT/bin/ai-gh" pr view --json url --jq .url >"$PR_DIR/url" 2>/dev/null
+    echo "$?" >"$PR_DIR/rc"
+  ) &
+  PR_PID=$!
+fi
+
 # Ahead / behind origin
 echo
 c_head "Sync with origin"
 FETCHED=0
 if git remote get-url origin >/dev/null 2>&1; then
-  if git fetch --quiet origin "$DEFAULT_MAIN_BRANCH"; then FETCHED=1
+  timeout -k 2 "$LIMIT" git fetch --quiet origin "$DEFAULT_MAIN_BRANCH"
+  FETCH_RC=$?
+  if [ "$FETCH_RC" -eq 0 ]; then FETCHED=1
+  elif [ "$FETCH_RC" -eq 124 ] || [ "$FETCH_RC" -eq 137 ]; then
+    c_warn "Origin did not answer within ${LIMIT}s; fetch deferred, so remote counts below are not current."
   else c_warn "Origin fetch failed; remote counts below are not current."; fi
 fi
 UPSTREAM=""
@@ -90,10 +111,14 @@ fi
 # Open PR (best-effort via gh)
 echo
 c_head "Open PR"
-if [ -x "$ROOT/bin/ai-gh" ]; then
-  PR_URL="$(AI_GH_CALLER=ai-workspace-status "$ROOT/bin/ai-gh" pr view --json url --jq .url 2>/dev/null || true)"
+if [ -n "$PR_PID" ]; then
+  wait "$PR_PID" 2>/dev/null; PR_PID=''
+  PR_URL="$(cat "$PR_DIR/url" 2>/dev/null)"
+  PR_RC="$(cat "$PR_DIR/rc" 2>/dev/null)"
   if [ -n "$PR_URL" ]; then
     echo "  $PR_URL"
+  elif [ "$PR_RC" = 124 ]; then
+    echo "  (open PR status deferred: GitHub did not answer within ${LIMIT}s)"
   else
     echo "  (open PR status unavailable or no open PR)"
   fi

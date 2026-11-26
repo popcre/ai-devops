@@ -121,6 +121,28 @@ for _ in $(seq 1 600); do grep -q '^held slow$' "$FAKE_LOG" && break; sleep 0.2;
 timeout 120 "$GH" quick >/dev/null; qrc=$?; rm -f "$TMP/hold"; wait "$sp"
 check 'a slow call does not block the next caller' "[ $qrc -eq 0 ] && awk '/^held slow$/{if(!s)s=NR} /^start .* quick$/{q=NR} /^end/{if(!e)e=NR} END{exit !(s && q && e && s<q && q<e)}' '$FAKE_LOG'"
 
+# Caller deadline: a slow GitHub yields a quick "deferred" (124), never a long
+# wait, while the gate's own spacing does not count against it.
+AI_GH_DEADLINE_SECONDS=0 "$GH" api x >/dev/null 2>&1; rc=$?
+check 'a zero deadline is refused before any call' "[ $rc -eq 2 ]"
+: > "$FAKE_LOG"
+s=$SECONDS; AI_GH_DEADLINE_SECONDS=2 FAKE_SLEEP=30 "$GH" api slow-deadline > "$TMP/dl-out" 2> "$TMP/dl-err"; rc=$?; took=$(( SECONDS - s ))
+check 'a call past its deadline exits 124 quickly with a deferred message' "[ $rc -eq 124 ] && [ $took -lt 10 ] && grep -q 'deferred' '$TMP/dl-err'"
+check 'a deadlined call leaves no lock behind' "[ ! -d '$TMP/state/lock.d' ]"
+AI_GH_MIN_SPACING_SECONDS=6 "$GH" api first >/dev/null 2>&1
+AI_GH_MIN_SPACING_SECONDS=6 AI_GH_DEADLINE_SECONDS=3 "$GH" api second > "$TMP/dl-out" 2>/dev/null; rc=$?
+check 'request spacing does not count against the deadline' "[ $rc -eq 0 ] && grep -q 'out:api second' '$TMP/dl-out'"
+: > "$FAKE_LOG"
+s=$SECONDS
+AI_GH_STATE_DIR="$TMP/dl-state" FAKE_MODE=probe-timeout FAKE_TOKEN=deadline-token AI_GH_PROBE_TIMEOUT_SECONDS=15 \
+  AI_GH_QUOTA_PROBE_SECONDS=300 AI_GH_DEADLINE_SECONDS=1 "$GH" api repos/o/dl > /dev/null 2> "$TMP/dl-err"; rc=$?; took=$(( SECONDS - s ))
+check 'a quota probe cut short by the deadline defers and makes no call' "[ $rc -eq 124 ] && [ $took -lt 10 ] && ! grep -q 'repos/o/dl' '$FAKE_LOG' && grep -q 'deferred' '$TMP/dl-err'"
+check 'a probe cut short by the deadline records no quota rows' "[ ! -e '$TMP/dl-state/quota' ] && [ ! -e '$TMP/dl-state/quota-resources' ]"
+mkdir -p "$TMP/dl-backoff"; echo $(( $(date +%s) + 600 )) > "$TMP/dl-backoff/backoff_until"
+: > "$FAKE_LOG"
+AI_GH_STATE_DIR="$TMP/dl-backoff" AI_GH_DEADLINE_SECONDS=2 "$GH" api during-backoff >/dev/null 2>&1; rc=$?
+check 'back-off with a deadline exits 75 without calling GitHub' "[ $rc -eq 75 ] && ! grep -q 'during-backoff' '$FAKE_LOG'"
+
 # Secondary rate limit: back-off uses Retry-After, no retry, and blocks later calls.
 : > "$FAKE_LOG"
 before=$(date +%s)
