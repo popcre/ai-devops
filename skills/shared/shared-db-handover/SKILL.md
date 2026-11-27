@@ -223,7 +223,7 @@ responsible for its claim, safety decisions, and verified closeout.
 > `HANDOFF.d/<UTC>-<machine>-<agent>-<slug>.md`, never a rewrite of the shared
 > root `HANDOFF.md`, never another session's file), its 9 required sections
 > including the mandatory "what we tried that did NOT work", and its
-> fresh-developer self-audit gate. This skill adds what shared-db needs on top.
+> fresh-developer checklist. This skill adds what shared-db needs on top.
 
 ## The handoff has TWO halves — and a REQUIRED outstanding-work note
 

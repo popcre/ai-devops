@@ -7,20 +7,14 @@ description: Write or audit a fresh-developer-grade, write-once HANDOFF.d file. 
 
 For the selective fresh-reader pilot, read
 [`plan_selective-fresh-reader.md`](../../../plan_selective-fresh-reader.md) STATUS
-first. It is opt-in and does not replace the self-audit below.
+first. It is opt-in and does not replace the checklist below.
 
 The user works across many short sessions with clean context windows; the handoff
 IS the memory carried forward. A thin handoff forces them to babysit long
 sessions — the exact thing this skill prevents. It applies to two situations:
 **writing** a handoff, and **judging** one the user is challenging.
 
-The recurring failure this skill exists to kill: the user asks *"is the handoff
-comprehensive enough for a fresh developer to pick up and not skip a beat?"* and
-the answer comes back *"No, I'll fix it now."* — **every single time**, whether
-or not the handoff is actually deficient. That reflex is the bug. The cure is two
-parts: (1) make the handoff genuinely complete at write time so "Yes" is
-truthful, and (2) when asked, verify against the concrete checklist and answer
-**Yes** when it passes — instead of reflexively hedging to "No."
+Make the handoff complete at write time. When asked whether it is complete, verify it against the checklist below and answer Yes only when every item passes.
 
 ## When to use
 
@@ -35,13 +29,7 @@ truthful, and (2) when asked, verify against the concrete checklist and answer
 
 ## FIRST: where the handoff goes — one write-once file per session
 
-Many AI agents (Claude, Codex, Grok, GLM, Kimi, Qwen) work the same repos
-concurrently — sometimes in the SAME working copy, sometimes in different clones
-of the same GitHub repo. A shared root `HANDOFF.md` that each session rewrites
-loses data by default: in one working copy the second writer silently overwrites
-the first (git never sees two versions, so it cannot help); across clones both
-push and either conflict — which the owner, who is not a programmer, will never
-resolve — or lose one side in the resolution. This has already happened.
+Many agents work the same repos concurrently. A shared root `HANDOFF.md` that each session rewrites loses data: a second writer silently overwrites the first, or clones conflict.
 
 So: **create ONE new file, and only that file:**
 
@@ -76,11 +64,7 @@ owner: codex/wb-scrape-schema-925     # the branch or session that owns this fil
 ---
 ```
 
-**Why it is worth four lines.** Without it, "is this workstream finished?" can only
-be answered by reading the whole nine-section essay against live GitHub. Nobody
-does that, so nothing is ever retired. In `popcre/shared-db` that produced **30
-files, 27 of them finished** (issue #658, cleaned 2026-08-13). With the block, the
-question is one `gh issue view`.
+The block lets anyone check whether a workstream is finished with one `gh issue view`.
 
 **A finished file is DELETED, never marked done.** There is no `status: DONE`. A
 file that stays behind announcing it is complete is the same archaeology problem as
@@ -171,25 +155,12 @@ migration is still pending.
   If any of the three fails, keep it and say which one failed.
 - **Presence = OPEN.** Session start reads only the files that are there.
 - ⛔ **There is NO limit on how many files `HANDOFF.d/` may hold, and never add
-  one.** Owner ruling, Albert Hazan, 2026-08-13, on a proposal to fail a pull
-  request above five files:
-
-  > "when the 6th file gets there legitimately, if there are five files already
-  > there and some are stale, the legitimate file will get rejected. The sessions
-  > that do the work must take care of their own housekeeping. they are better
-  > informed than anyone as to whether something is finished or not."
-
-  Twenty concurrent workstreams legitimately means twenty files. A count cap bills
-  whoever shows up next for a mess somebody else left. **Do not count files. Count
+  one.** Owner ruling 2026-08-13. **Do not count files. Count
   SUCCESSOR REVIEW candidates — those whose `issue:` is already closed — and report
   those by name with their `owner:`. A closed issue is a review trigger, not proof
   that the handoff is finished; apply the successor rule before deletion. There is
-  no limit on the total.** (Owner ruling 2026-08-13.) Any earlier "more than 5 is a
-  warning" wording in this or any other skill is **superseded**.
-- **Lesson (step 2):** deleting a handoff without updating the router (e.g.
-  `AGENTS.md`) that pointed at it regenerates staleness one level up. When you
-  delete a handoff, grep for references to it and fix or remove them in the
-  same commit.
+  no limit on the total.**
+- When you delete a handoff, grep for references to it (e.g. `AGENTS.md`) and fix them in the same commit.
 
 ## Two modes
 
@@ -258,23 +229,6 @@ Only business-meaning questions belong here. Any technical approval, access,
 sign-in, key, or manual step is done by the AI, checked by the AI itself,
 or listed as `Blocked —`; it is never an ask for Albert.
 
-**Why this exists.** A handoff is written for the *worker*, so owner decisions
-land wherever they matter operationally: a blocker in §3, a gate in §6, a question
-in §9, a finding in part (b). That is correct filing and a **broken outcome** — a
-fresh session then meets them one at a time, days apart, and makes the owner
-re-load the same context five times. Worse, anything discovered *in passing* gets
-filed as a **finding** rather than an **ask**, and is never raised at all.
-
-**Measured, 2026-08-07 (`popcre/shared-db`).** A handoff that passed the full
-checklist was audited against this exact question. Of eight items needing the
-owner: three would have been raised (they physically blocked the work), two would
-have been silently decided by the session itself (both were phrased "decide during
-step 1"), and **three would never have been raised** — they came from a sub-agent
-audit of a *different* question and sat in part (b) as findings. Those three had
-been waiting longest; one alert had been open and untouched for three days across
-three separate handoffs. **The owner had to notice and ask. That is the failure
-this section prevents.**
-
 ### What goes in it
 
 **Every business-meaning decision or judgement the owner must supply — consolidated.**
@@ -286,8 +240,7 @@ operationally, AND is listed here. **The duplication is the point.** Include:
 - **Anything you learned that needs a business-meaning judgement from the owner,
   even if it is OUTSIDE this workstream** (a technical item such as a bug, stale
   ticket, open marker, or security exposure instead gets a tracked issue, the
-  AI's own fix, or a `Blocked —` line — never an ask to Albert). **This is the category that goes missing.** "Not my scope"
-  is exactly why it has been ignored by five sessions already.
+  AI's own fix, or a `Blocked —` line — never an ask to Albert).
 - Anything a sub-agent surfaced that needs a business ruling. That is an **ask**,
   not a finding — promote it. A technical ruling is handled by the AI itself.
 
@@ -355,43 +308,11 @@ always be more detailed" is NOT a checklist item — do not treat it as one.
       bar above. (You are not responsible for re-auditing other sessions'
       sections, but do not claim the whole file passes if yours is thin.)
 
-## Mandatory self-audit gate (Mode A — BEFORE showing the handoff)
+## Checklist gate (Mode A — BEFORE showing the handoff)
 
-For an eligible complex handoff, the optional [fresh-reader procedure](../../../docs/fresh-reader-check.md)
-may follow this self-audit. Record skip, unsupported or incomplete honestly;
-none makes the mandatory self-audit fail or introduces approval.
+Grade the handoff against the checklist above. If any item is "no," expand it and re-grade. Show the handoff only when every item passes. An eligible complex handoff may also follow the optional [fresh-reader procedure](../../../docs/fresh-reader-check.md).
 
-After drafting, grade the handoff against the checklist above. If ANY item is
-"no," expand and re-grade — loop until all pass. The FIRST version you present to
-the user MUST already pass; do not show a draft you know is thin and plan to
-improve after they push back. In your closing message, state that the self-audit
-passed and name what makes it comprehensive (which section covers each dimension).
-
-Write and answer the following **four** questions, citing the handoff sections
-that support each answer:
-
-1. Is my `HANDOFF.d/` file comprehensive enough that a brand-new developer with no
-   project knowledge and no session context could pick up where I left off and
-   not skip a beat?
-2. Is it detailed enough that they could continue as well as I could right now,
-   with all my session knowledge and the relevant background and purpose?
-3. Is every single relevant detail needed for flawless execution included:
-   background, goals, intended outcome, current state, failures, decisions,
-   constraints, risks, exact next actions, and verification evidence?
-4. **If the owner read ONLY section 0, would he see every business decision I need
-   from him — including the ones outside this workstream — and no technical
-   approval at all?** Answer it the hard way:
-   walk §1–§9 and part (b) line by line, list every sentence that needs his
-   judgement, and check each one appears in §0. **Do not answer this from memory
-   or from intent** — the failure this question exists to catch is a decision you
-   correctly wrote down somewhere else and never promoted.
-
-Do not accept a bare "yes." For each answer, name the supporting sections and
-any gap discovered. Fix every gap in the handoff, then reread and repeat the
-whole audit until all four answers are evidence-backed yeses. Preserve the
-final answers in the closing report or at the end of the handoff.
-
-## Answering the verification question (Mode B — the reflex this skill fixes)
+## Answering the verification question (Mode B)
 
 When the user asks whether the handoff is comprehensive/detailed/thorough enough:
 
@@ -413,7 +334,7 @@ When the user asks whether the handoff is comprehensive/detailed/thorough enough
 The bar for "Yes": a stranger could continue **as effectively as you can right
 now**. If that is true, the answer is Yes — say it.
 
-## Anti-patterns (why past handoffs were too thin)
+## Anti-patterns
 
 - Assuming the reader knows what the app does or what "the X issue" refers to.
 - Listing the final plan but omitting the failed attempts.

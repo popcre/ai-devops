@@ -135,7 +135,7 @@ confirms that execution is still needed; no unattended timer renews an idle chat
    no half-done merges. If work is unfinished, write **ONE NEW file of your own**:
    `HANDOFF.d/<UTC>-<machine>-<agent>-<slug>.md` (e.g.
    `HANDOFF.d/2026-07-29T2140Z-t16-claude-supabase-mcp-scoping.md`) to the full
-   `handoff-standard.md` — all 9 sections — and RUN ITS SELF-AUDIT GATE. A
+   `handoff-standard.md` — all 9 sections — and CHECK IT AGAINST ITS CHECKLIST. A
    stranger who walked in off the street must be able to continue with no
    questions, as effectively as you can right now, including knowing what was
    tried and failed. A three-sentence handoff is a failure; expand until the
