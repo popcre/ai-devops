@@ -89,7 +89,7 @@ $projectRoots = @{}
 if (-not $SkipProjectScope -and $scope.Count -gt 0) {
   . (Join-Path $PSScriptRoot "repo-identity.ps1")
   foreach ($key in $scope.Keys) {
-    $roots = @(Get-AiDevOpsCloneRoots -Key $key)
+    $roots = @(Get-AiDevOpsProjectDeliveryRoots -Key $key)
     if ($roots.Count -gt 0) {
       $projectRoots[$key] = $roots
     } else {
@@ -133,8 +133,11 @@ if (-not $SkipProjectScope -and $scope.Count -gt 0) {
       $mcpJson = Join-Path $rootPath ".mcp.json"
       $fileNames = @()
       if (Test-Path -LiteralPath $mcpJson) { $fileNames = @(Get-InstalledNames $mcpJson) }
-      git -C $rootPath ls-files --error-unmatch .mcp.json 2>$null | Out-Null
-      $tracked = ($LASTEXITCODE -eq 0)
+      $tracked = $false
+      if (Test-Path -LiteralPath (Join-Path $rootPath ".git")) {
+        git -C $rootPath ls-files --error-unmatch .mcp.json 2>$null | Out-Null
+        $tracked = ($LASTEXITCODE -eq 0)
+      }
       $label = "project $key root $rootPath"
       if (-not $tracked) {
         # Our file: its managed names must be exactly the scoped set; foreign

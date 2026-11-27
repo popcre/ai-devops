@@ -159,6 +159,85 @@ try {
   & $writer -Scope ([ordered]@{ "epsilon" = @("vercel") }) -Roots (@{ "epsilon" = @($rootE) }) `
     -Catalog $catalogE -ClaudeCodeConfig $claudeJson -CodexServers $codex
   Assert-True ((Get-Content -Raw -LiteralPath (Join-Path $rootE ".codex\config.toml")).Trim() -eq "hand = 1") "E: a hand-written Codex file is never overwritten"
+
+  # ---- All-harness delivery: Codex TOML arrays/tables, Antigravity, ZCode, MiMoCode, and non-git parent folder
+  $rootF = Join-Path $testRoot "dflow_plm\designflow-frontend"
+  $parentF = Split-Path -Parent $rootF
+  New-Item -ItemType Directory -Force -Path $rootF | Out-Null
+  git -C $rootF init -q 2>$null
+  # Seed a sibling file inside .mimocode to prove it survives untouched.
+  New-Item -ItemType Directory -Force -Path (Join-Path $parentF ".mimocode") | Out-Null
+  Set-Content -LiteralPath (Join-Path $parentF ".mimocode\.cron-lock") -Value '{"pid":1}'
+
+  $catalogF = [ordered]@{
+    "ag-grid" = [ordered]@{
+      command = "C:\Program Files\nodejs\node.exe"
+      args    = @("C:\guard.mjs", "C:\ag-mcp.cmd")
+      env     = [ordered]@{ "B_VAR" = "two"; "A_VAR" = "one" }
+    }
+    "vercel" = [ordered]@{
+      type = "http"
+      url  = "https://mcp.vercel.com"
+    }
+  }
+  $codexF = [ordered]@{
+    "ag-grid" = [ordered]@{
+      command = "C:\Program Files\nodejs\node.exe"
+      args    = @("C:\guard.mjs", "C:\ag-mcp.cmd")
+      env     = [ordered]@{ "A_VAR" = "one" }
+    }
+  }
+  & $writer -Scope ([ordered]@{ "designflow-frontend" = @("ag-grid", "vercel") }) `
+    -Roots (@{ "designflow-frontend" = @($rootF, $parentF) }) `
+    -Catalog $catalogF -ClaudeCodeConfig $claudeJson -CodexServers $codexF
+  Assert-True ($?) "F: multi-harness writer completes"
+
+  foreach ($target in @($rootF, $parentF)) {
+    $tomlPath = Join-Path $target ".codex\config.toml"
+    $pyOut = python3 -c "import json,sys,tomllib; d=tomllib.load(open(sys.argv[1],'rb')); s=d['mcp_servers']['ag-grid']; print(json.dumps(s))" $tomlPath 2>&1
+    Assert-True ($LASTEXITCODE -eq 0) "F ($target): Codex TOML parses cleanly with tomllib"
+    $parsedToml = $pyOut | ConvertFrom-Json -AsHashtable
+    Assert-True ($parsedToml["args"] -is [System.Collections.IList] -and $parsedToml["args"].Count -eq 2 -and $parsedToml["args"][1] -eq "C:\ag-mcp.cmd") "F ($target): Codex args serialized as TOML array"
+    Assert-True ($parsedToml["env"]["A_VAR"] -eq "one") "F ($target): Codex env serialized as TOML inline table"
+
+    $agyPlugin = Read-Json (Join-Path $target ".agents\plugins\ai-devops-project-mcp\plugin.json")
+    $agyMcp = Read-Json (Join-Path $target ".agents\plugins\ai-devops-project-mcp\mcp_config.json")
+    Assert-True ($agyPlugin["name"] -eq "ai-devops-project-mcp" -and $agyPlugin["version"] -eq "1.0.0") "F ($target): Antigravity plugin.json includes name and version"
+    Assert-True ($agyMcp["mcpServers"]["ag-grid"]["command"] -eq "C:\Program Files\nodejs\node.exe" -and $agyMcp["mcpServers"]["ag-grid"]["args"].Count -eq 2) "F ($target): Antigravity mcp_config.json carries ag-grid stdio"
+    Assert-True ($agyMcp["mcpServers"]["vercel"]["url"] -eq "https://mcp.vercel.com" -and -not $agyMcp["mcpServers"]["vercel"].ContainsKey("type")) "F ($target): Antigravity strips type on HTTP server"
+
+    $zcodeCfg = Read-Json (Join-Path $target ".zcode\config.json")
+    Assert-True ($zcodeCfg["mcp"]["servers"]["ag-grid"]["timeoutMs"] -eq 120000 -and -not $zcodeCfg["mcp"]["servers"].ContainsKey("vercel")) "F ($target): ZCode strict stdio config keeps ag-grid and skips HTTP-only vercel"
+    Assert-True (Test-Path -LiteralPath (Join-Path $target ".zcode\.ai-devops-mcp-managed")) "F ($target): ZCode sibling marker created"
+
+    $mimoCfg = Read-Json (Join-Path $target ".mimocode\mimocode.json")
+    Assert-True ($mimoCfg["mcp"]["ag-grid"]["type"] -eq "local" -and $mimoCfg["mcp"]["ag-grid"]["command"].Count -eq 3 -and $mimoCfg["mcp"]["ag-grid"]["timeout"] -eq 120000 -and -not $mimoCfg["mcp"].ContainsKey("vercel")) "F ($target): MiMoCode local stdio config flattens command array and skips HTTP-only vercel"
+  }
+  Assert-True ((Get-Content -Raw -LiteralPath (Join-Path $parentF ".mimocode\.cron-lock")).Trim() -eq '{"pid":1}') "F: existing .mimocode/.cron-lock in parent preserved"
+  $parentMcp = Read-Json (Join-Path $parentF ".mcp.json")
+  Assert-True ($parentMcp["mcpServers"]["ag-grid"]["command"] -eq "C:\Program Files\nodejs\node.exe") "F: non-git parent gets untracked .mcp.json"
+  git -C $rootF check-ignore -q .agents/plugins/ai-devops-project-mcp/ 2>$null
+  Assert-True ($LASTEXITCODE -eq 0) "F: Antigravity plugin excluded in git repo"
+  git -C $rootF check-ignore -q .zcode/config.json 2>$null
+  Assert-True ($LASTEXITCODE -eq 0) "F: ZCode config excluded in git repo"
+  git -C $rootF check-ignore -q .mimocode/mimocode.json 2>$null
+  Assert-True ($LASTEXITCODE -eq 0) "F: MiMoCode config excluded in git repo"
+
+  # Idempotence + DryRun for the new harness files
+  $beforeAgy = Get-FileHash -LiteralPath (Join-Path $parentF ".agents\plugins\ai-devops-project-mcp\mcp_config.json")
+  & $writer -Scope ([ordered]@{ "designflow-frontend" = @("ag-grid", "vercel") }) `
+    -Roots (@{ "designflow-frontend" = @($rootF, $parentF) }) `
+    -Catalog $catalogF -ClaudeCodeConfig $claudeJson -CodexServers $codexF
+  $afterAgy = Get-FileHash -LiteralPath (Join-Path $parentF ".agents\plugins\ai-devops-project-mcp\mcp_config.json")
+  Assert-True ($beforeAgy.Hash -eq $afterAgy.Hash) "F: multi-harness rerun is idempotent"
+
+  # Hand-written files in Antigravity/ZCode/MiMoCode (no marker) are never overwritten
+  $rootG = Join-Path $testRoot "gamma-hand"
+  New-Item -ItemType Directory -Force -Path (Join-Path $rootG ".zcode") | Out-Null
+  Set-Content -LiteralPath (Join-Path $rootG ".zcode\config.json") -Value '{"hand":true}'
+  & $writer -Scope ([ordered]@{ "gamma-hand" = @("ag-grid") }) -Roots (@{ "gamma-hand" = @($rootG) }) `
+    -Catalog $catalogF -ClaudeCodeConfig $claudeJson -CodexServers $codexF
+  Assert-True ((Get-Content -Raw -LiteralPath (Join-Path $rootG ".zcode\config.json")).Trim() -eq '{"hand":true}') "G: hand-written .zcode/config.json without marker is never overwritten"
 } finally {
   Remove-Item -LiteralPath $testRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
