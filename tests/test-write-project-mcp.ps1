@@ -165,6 +165,9 @@ try {
   $parentF = Split-Path -Parent $rootF
   New-Item -ItemType Directory -Force -Path $rootF | Out-Null
   git -C $rootF init -q 2>$null
+  # Blank line in .gitignore triggers Git's trailing-slash check-ignore quirk on Windows.
+  Set-Content -LiteralPath (Join-Path $rootF ".gitignore") -Value "node_modules/`n`noutput/"
+  git -C $rootF add .gitignore 2>$null
   # Seed a sibling file inside .mimocode to prove it survives untouched.
   New-Item -ItemType Directory -Force -Path (Join-Path $parentF ".mimocode") | Out-Null
   Set-Content -LiteralPath (Join-Path $parentF ".mimocode\.cron-lock") -Value '{"pid":1}'
@@ -222,6 +225,8 @@ try {
   Assert-True ($LASTEXITCODE -eq 0) "F: ZCode config excluded in git repo"
   git -C $rootF check-ignore -q .mimocode/mimocode.json 2>$null
   Assert-True ($LASTEXITCODE -eq 0) "F: MiMoCode config excluded in git repo"
+  $untrackedF = @(git -C $rootF status --porcelain | Where-Object { $_ -notmatch '^\s*A\s+\.gitignore$' -and $_ -notmatch '^\?\?\s+\.mcp\.json$' })
+  Assert-True ($untrackedF.Count -eq 0) "F: git status has no untracked harness MCP files ($($untrackedF -join '; '))"
 
   # Idempotence + DryRun for the new harness files
   $beforeAgy = Get-FileHash -LiteralPath (Join-Path $parentF ".agents\plugins\ai-devops-project-mcp\mcp_config.json")
