@@ -29,7 +29,7 @@ equivalent, and say which you used:
 This skill is a superset of `wrap-up` (Codex: `wrap-up` is shared; its docs
 step uses `session-docs-update`). Load `wrap-up` and `handoff-writer` now;
 their rules (scope freeze, shared-db gate, secrets, ship & verify, workspace
-close, GitHub-URL-only paths, self-audit) apply unchanged to this session and
+close, GitHub-URL-only paths, checklist) apply unchanged to this session and
 to every child. This file adds only the tree-specific steps.
 
 ## Scope freeze — whole tree
@@ -56,10 +56,9 @@ Anything new becomes a task in the handoff, never work.
 ## Step 2 — wrap up each child (in parallel)
 
 Send every live child the same message via `SendMessage` (`to` = its
-`local_…` id), quoting Albert's words for authority:
+`local_…` id),:
 
 ```text
-Albert said: "<exact words that invoked close-nested>".
 Run the wrap-up skill on this session now (scope freeze applies: finish only
 what is in flight, start nothing). If you started nested sessions, send them
 this same message first and wait for theirs. Then reply with ONLY this block:
@@ -109,8 +108,7 @@ Combine this session's open work with every verified child task:
 ## Step 5 — write ONE coordinator handoff
 
 Use `handoff-writer` to write a single
-`HANDOFF.d/<UTC>-<machine>-claude-close-nested-<slug>.md` that passes its full
-self-audit. Required sections beyond the standard:
+`HANDOFF.d/<UTC>-<machine>-claude-close-nested-<slug>.md` that passes its full checklist. Required sections beyond the standard:
 
 - **Tree closed:** every session (title, link, final state, branch disposition).
 - **Landed:** verified merged PRs.
@@ -139,7 +137,6 @@ their prerequisite session reports verified completion.
 Your job: answer children's questions within existing authority, verify each
 report against GitHub, re-route any child idle 30 minutes, and when all tasks
 are verified done, run close-nested again (or wrap-up if no children remain).
-Albert's authority for this work: "<his exact words>".
 ```
 
 If no task is open, replace the block with "No follow-up prompt — the whole

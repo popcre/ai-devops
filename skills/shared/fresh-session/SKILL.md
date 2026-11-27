@@ -60,14 +60,14 @@ here you verify it survived into the spec being handed over.)
 
 ## Step 4 — Delegate the document to the handoff standard
 
-Do NOT re-implement the handoff structure, checklist, or self-audit gate here —
+Do NOT re-implement the handoff structure or checklist here —
 delegate to the canonical standard and pass it the widened scope from Steps 2–3
 (whole-plan, plus the reciprocal-instruction requirement):
 
 - **In Claude or Codex:** invoke the `handoff-writer` skill.
 - **If `handoff-writer` isn't installed:** apply the canonical cross-tool
   standard at `templates/system/handoff-standard.md` in the `ai-devops` repo —
-  the same 9 sections + self-audit gate the skill wraps.
+  the same 9 sections + checklist the skill wraps.
 
 Either way, the answer to "is it comprehensive?" must be a truthful **Yes**
 before cutover.
@@ -76,7 +76,7 @@ before cutover.
 
 State the decision (fresh session / continue) with the one-line reason. If fresh:
 confirm the whole-plan scope passed, the reciprocal instruction is present, and
-`handoff-writer`'s self-audit passed — then give Albert the exact next-session
+`handoff-writer`'s checklist passes — then give Albert the exact next-session
 starting prompt.
 
 ## Related

@@ -2,7 +2,7 @@
 
 For the selective fresh-reader pilot, read
 [`plan_selective-fresh-reader.md`](../../plan_selective-fresh-reader.md) STATUS
-first. It is opt-in and does not replace the self-audit below.
+first. It is opt-in and does not replace the checklist below.
 
 This is a hard standard, not a suggestion. Albert starts new sessions with clean
 context windows and relies on the handoff as the ONLY memory carried forward.
@@ -21,7 +21,7 @@ sometimes in different clones of the same GitHub repo. A single shared
 working copy the second writer silently overwrites the first (git never sees two
 versions, so it cannot help), and across clones both sides rewrite and push,
 producing either a merge conflict a non-programmer will never resolve or a
-resolution that quietly drops one session's work. This has already happened.
+resolution that quietly drops one session's work.
 
 ### The rule
 
@@ -134,21 +134,12 @@ file and note in it that migration is still pending.
 - **A file's presence means OPEN.** Session start reads only the files that are
   present; it does not need any status field, index, or archive folder.
 - ⛔ **There is NO limit on how many files `HANDOFF.d/` may hold, and never add
-  one.** Owner ruling, Albert Hazan, 2026-08-13, on a proposal to fail a pull
-  request above five files:
-
-  > "when the 6th file gets there legitimately, if there are five files already
-  > there and some are stale, the legitimate file will get rejected. The sessions
-  > that do the work must take care of their own housekeeping. they are better
-  > informed than anyone as to whether something is finished or not."
-
-  Twenty concurrent workstreams legitimately means twenty files. A count cap bills
+  one.** Twenty concurrent workstreams legitimately means twenty files. A count cap bills
   whoever shows up next for a mess somebody else left. **Do not count files. Count
   SUCCESSOR REVIEW candidates — those whose `issue:` is already closed — and report
   those by name with their `owner:`. A closed issue is a review trigger, not proof
   that the handoff is finished; apply the successor rule before deletion. There is
-  no limit on the total.** (Owner ruling 2026-08-13.) Any earlier "more than 5 is a
-  warning" wording in this or any other skill is **superseded**.
+  no limit on the total.** Owner ruling 2026-08-13.
 
 ### The contract block (REQUIRED where the repo enforces it; good practice everywhere)
 
@@ -165,11 +156,7 @@ owner: codex/wb-scrape-schema-925     # the branch or session that owns this fil
 ---
 ```
 
-**Why it is worth four lines.** Without it, "is this workstream finished?" can only
-be answered by reading the whole nine-section essay against live GitHub. Nobody
-does that, so nothing is ever retired. In `popcre/shared-db` that produced **30
-files, 27 of them finished** (issue #658, cleaned 2026-08-13). With the block, the
-question is one `gh issue view`.
+The block lets anyone check whether a workstream is finished with one `gh issue view`.
 
 **A finished file is DELETED, never marked done.** There is no `status: DONE`. A
 file that stays behind announcing it is complete is the same archaeology problem as
@@ -251,9 +238,7 @@ Group by consequence, not topic:
 - BLOCKING — the work cannot finish without an answer. Say what each one blocks.
 - RECOVERABLE — a wrong guess is fixable but wastes rework.
 - NOT PART OF THIS WORK, AND NOBODY IS ON IT — anything you learned that needs
-  a business ruling even though it is out of scope. THIS IS THE CATEGORY THAT
-  GOES MISSING, because "not my scope" is exactly why five sessions already
-  skipped it. A technical finding is handled by the AI itself or a tracked
+  a business ruling even though it is out of scope. A technical finding is handled by the AI itself or a tracked
   issue, never to Albert.
 
 Also list "Already settled — do NOT re-ask", with dates.
@@ -313,66 +298,9 @@ What's uncertain, what could go wrong, decisions made and why (with dates, so a
 later session doesn't contradict them).
 ```
 
-## Mandatory self-audit gate (do this BEFORE showing the handoff)
+## Checklist gate (do this BEFORE showing the handoff)
 
-For an eligible complex handoff, the optional [fresh-reader procedure](../../docs/fresh-reader-check.md)
-may follow this self-audit. Record skip, unsupported or incomplete honestly;
-none makes the mandatory self-audit fail or introduces approval.
-
-After drafting, grade your OWN handoff against these questions. **Write an
-answer to every question and cite the handoff section(s) that prove the answer.**
-Do not merely acknowledge that the questions were asked. If an answer exposes
-any missing or weak detail, add it to **your own `HANDOFF.d/` file**, reread the affected sections,
-and answer all questions again. Do NOT present the handoff to Albert until every
-answer is an evidence-backed "yes" and every identified gap has been closed:
-
-1. Could a developer who walked in off the street — with zero knowledge of this
-   app, this session, and this chat — pick up and continue **without asking me a
-   single question**?
-2. Could they continue **as effectively as I can right now**, with everything I
-   currently know?
-3. Did I include what we tried that FAILED, and why — not just the final plan?
-4. Is every next step concrete enough to execute without guessing, each with a
-   way to verify it worked?
-5. Did I explain every term, identifier, path, and URL a newcomer wouldn't know?
-6. **Is every file and commit reference a GitHub URL** (not a machine-local
-   path), so a session on another machine can open it?
-7. Did I run the section-0 sweep — walking §1–§9 and part (b) line by line — so
-   that every business decision needing Albert appears in §0 (and no technical
-   approval does), including the ones outside
-   this workstream?
-
-Then ask and answer these **four** final synthesis questions exactly:
-
-1. **Is my `HANDOFF.d/` file comprehensive enough that a brand-new developer with
-   no knowledge of this project and no context about what we did or what remains
-   could pick up where I left off and not skip a beat?**
-2. **Is it detailed enough that they could continue as well as I could right
-   now, with all my knowledge from this session and all relevant background
-   about what we are trying to accomplish?**
-3. **Is every single relevant detail—background, goals, intended outcome,
-   current state, failed attempts, decisions, constraints, risks, exact next
-   actions, and verification evidence—present for the implementing agent to
-   execute flawlessly?**
-4. **If Albert read ONLY section 0, would he see every business decision I need
-   from him, including the ones outside this workstream, and no technical
-   approval?** Answer it the hard way — walk
-   §1–§9 and part (b) line by line, list every sentence needing his judgement,
-   and confirm each appears in §0. **Do not answer from memory or from intent.**
-   The failure this catches is a decision correctly written down somewhere else
-   and never promoted, so it reaches him days late or never. Measured on
-   2026-08-07 in `popcre/shared-db`: of eight items needing Albert, three
-   would have been raised, two silently self-decided, and **three never raised
-   at all** — and those three had been waiting the longest.
-
-For each answer, name the supporting sections and any gap found. A found gap
-must be fixed before re-running the entire audit. Preserve the final answers in
-the closing report or at the end of your own `HANDOFF.d/` file so the audit is
-inspectable.
-
-State in your closing message that the self-audit passed. Albert should never
-again have to ask "is this comprehensive enough for a fresh developer?" — you
-must have already answered it yourself.
+Grade your handoff against the checklist below. If any item is "no," expand it and re-grade. Show the handoff only when every item passes. An eligible complex handoff may also follow the optional [fresh-reader procedure](../../docs/fresh-reader-check.md).
 
 ## Comprehensiveness checklist (objective — every item must be YES)
 
