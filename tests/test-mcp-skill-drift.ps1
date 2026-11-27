@@ -61,6 +61,7 @@ $ClaudeDesktopMcpNames = @("1password", "trigger")
 fixtureproj	github.com/example/fixtureproj
 trackedproj	github.com/example/trackedproj
 absentproj	github.com/example/absentproj
+designflow-frontend	github.com/popcre/designflow-frontend
 '@ | Set-Content -LiteralPath $identityFile -Encoding utf8
 
   foreach ($name in @("fixtureproj", "trackedproj")) {
@@ -131,6 +132,25 @@ $McpServerCatalog["trigger"] = @{ command = "x" }
       mcpServers = @{ "hand-added" = @{ command = "x" }; "trigger" = @{ command = "x" } } }
     $out = & $shell -NoProfile -File $drift -SetupScript $setupScoped -DesktopConfigPaths $desktop -ClaudeCodeConfigPath $codeProjects
     Assert-True ($LASTEXITCODE -eq 1) "still failing while the tracked repo entry is absent"
+
+    # Nested multi-repo parent (dflow_plm/designflow-frontend) + worktrees exclusion
+    . (Join-Path $repoRoot "bin\repo-identity.ps1")
+    $nestedParent = Join-Path $scanRoot "dflow_plm"
+    $nestedClone = Join-Path $nestedParent "designflow-frontend"
+    $wtContainer = Join-Path $scanRoot "dflow_plm-worktrees"
+    $wtDir = Join-Path $wtContainer "fe-wt"
+    New-Item -ItemType Directory -Force -Path $nestedClone,$wtContainer | Out-Null
+    git -C $nestedClone init -q 2>$null
+    git -C $nestedClone remote add origin https://github.com/popcre/designflow-frontend.git 2>$null
+    git -C $nestedClone commit --allow-empty -m "init" -q 2>$null
+    git -C $nestedClone worktree add -q -b fe-wt $wtDir 2>$null
+    $deliveryRoots = @(Get-AiDevOpsProjectDeliveryRoots -Key "designflow-frontend")
+    $normDelivery = @($deliveryRoots | ForEach-Object { [IO.Path]::GetFullPath($_).TrimEnd('\', '/') })
+    Assert-True ($normDelivery -contains ([IO.Path]::GetFullPath($nestedClone))) "delivery roots include nested clone"
+    Assert-True ($normDelivery -contains ([IO.Path]::GetFullPath($nestedParent))) "delivery roots include non-git multi-repo parent dflow_plm"
+    Assert-True ($normDelivery -contains ([IO.Path]::GetFullPath($wtDir))) "delivery roots include linked worktree"
+    Assert-True ($normDelivery -notcontains ([IO.Path]::GetFullPath($wtContainer))) "delivery roots exclude worktrees container"
+    Assert-True ($normDelivery -notcontains ([IO.Path]::GetFullPath($scanRoot))) "delivery roots exclude scan root"
   } finally {
     if ($null -ne $oldIdFile) { $env:AI_REPO_IDENTITY_FILE = $oldIdFile } else { Remove-Item Env:\AI_REPO_IDENTITY_FILE -ErrorAction SilentlyContinue }
     if ($null -ne $oldCloneRoots) { $env:AI_REPO_CLONE_ROOTS = $oldCloneRoots } else { Remove-Item Env:\AI_REPO_CLONE_ROOTS -ErrorAction SilentlyContinue }

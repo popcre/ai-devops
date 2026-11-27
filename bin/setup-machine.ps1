@@ -694,7 +694,7 @@ $McpProjectScope = [ordered]@{
 . (Join-Path $PSScriptRoot "repo-identity.ps1")
 $McpProjectRoots = @{}
 foreach ($key in $McpProjectScope.Keys) {
-  $roots = @(Get-AiDevOpsCloneRoots -Key $key)
+  $roots = @(Get-AiDevOpsProjectDeliveryRoots -Key $key)
   if ($roots.Count -gt 0) {
     $McpProjectRoots[$key] = $roots
     Note "project '$key' cloned here ($($roots.Count) root(s)): scope $($McpProjectScope[$key] -join ', ')"

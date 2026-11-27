@@ -89,14 +89,28 @@ function Get-AiDevOpsCloneScanRoots {
     if ($env:AI_REPO_CLONE_ROOTS) {
         return @($env:AI_REPO_CLONE_ROOTS -split ';' | Where-Object { $_ -and (Test-Path -LiteralPath $_) })
     }
-    $roots = @()
-    foreach ($base in @(
-        (Join-Path $env:SystemDrive 'repos'),
-        (Join-Path $env:SystemDrive 'worksp'),
-        (Join-Path $HOME 'repos'))) {
-        if ($base -and (Test-Path -LiteralPath $base)) { $roots += $base }
+    $candidates = New-Object 'System.Collections.Generic.List[string]'
+    if ($env:SystemDrive) {
+        [void]$candidates.Add((Join-Path $env:SystemDrive 'repos'))
+        [void]$candidates.Add((Join-Path $env:SystemDrive 'worksp'))
     }
-    return $roots
+    foreach ($drive in ([IO.DriveInfo]::GetDrives() | Where-Object { $_.DriveType -eq 'Fixed' -and $_.IsReady })) {
+        $driveRoot = $drive.RootDirectory.FullName
+        [void]$candidates.Add((Join-Path $driveRoot 'repos'))
+        [void]$candidates.Add((Join-Path $driveRoot 'worksp'))
+    }
+    if ($HOME) {
+        [void]$candidates.Add((Join-Path $HOME 'repos'))
+    }
+    $roots = New-Object 'System.Collections.Generic.List[string]'
+    $seen = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($base in $candidates) {
+        if ($base -and (Test-Path -LiteralPath $base)) {
+            $full = ([IO.Path]::GetFullPath($base)).TrimEnd('\', '/')
+            if ($seen.Add($full)) { [void]$roots.Add($full) }
+        }
+    }
+    return $roots.ToArray()
 }
 
 function Get-AiDevOpsCloneRoots {
@@ -135,4 +149,37 @@ function Get-AiDevOpsCloneRoots {
         }
     }
     return $found
+}
+
+function Get-AiDevOpsProjectDeliveryRoots {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Key,
+        [string]$Path
+    )
+    $result = New-Object 'System.Collections.Generic.List[string]'
+    $clones = @(Get-AiDevOpsCloneRoots -Key $Key -Path $Path | Where-Object { $_ })
+    if ($clones.Count -eq 0) { return $result }
+    $scanSet = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($sr in (Get-AiDevOpsCloneScanRoots)) {
+        [void]$scanSet.Add(([IO.Path]::GetFullPath($sr)).TrimEnd('\', '/'))
+    }
+    $seen = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($root in $clones) {
+        if (-not $root) { continue }
+        $norm = ([IO.Path]::GetFullPath($root)).TrimEnd('\', '/')
+        if ($seen.Add($norm)) { [void]$result.Add($norm) }
+        # Only primary clones (where .git is a directory) propagate to a
+        # multi-repo non-git parent folder (e.g. D:\repos\dflow_plm).
+        if (-not (Test-Path -LiteralPath (Join-Path $norm '.git') -PathType Container)) { continue }
+        $parent = Split-Path -Parent $norm
+        if (-not $parent) { continue }
+        $parentNorm = ([IO.Path]::GetFullPath($parent)).TrimEnd('\', '/')
+        if ($scanSet.Contains($parentNorm)) { continue }
+        if (Test-Path -LiteralPath (Join-Path $parentNorm '.git')) { continue }
+        $leaf = Split-Path -Leaf $parentNorm
+        if ($leaf -match '(^|[.-])worktrees$') { continue }
+        if ($seen.Add($parentNorm)) { [void]$result.Add($parentNorm) }
+    }
+    return $result
 }

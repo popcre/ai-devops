@@ -139,6 +139,33 @@ AI_REPO_CLONE_ROOTS="$clone_roots" "$PY3" -c 'import os, sys; sys.path.insert(0,
 r = m.clone_roots("popdam3"); assert [os.path.basename(x) for x in r] == ["popdam"], r' "$ROOT/bin" \
   && ok "clone found by origin under a different folder name" || bad "clone not found by origin"
 
+# #2916: nested multi-repo parent (dflow_plm/designflow-frontend) receives all-harness MCP configs
+mkdir -p "$clones/dflow_plm/designflow-frontend"
+git -C "$clones/dflow_plm/designflow-frontend" init -q
+git -C "$clones/dflow_plm/designflow-frontend" remote add origin https://github.com/popcre/designflow-frontend.git
+cat > "$T/cfg/state/mcp-catalog.json" <<'EOF'
+{"1password":{"command":"/l/mcp-launch.sh","args":["npx","-y","@u2giants/1password-mcp"]},
+ "ag-grid":{"command":"/usr/bin/node","args":["/l/guard.mjs","npx","-y","ag-mcp"]},
+ "trigger":{"command":"/l/mcp-launch.sh","args":["npx","-y","trigger.dev","mcp"]}}
+EOF
+AI_REPO_CLONE_ROOTS="$clone_roots" "$PY3" "$ROOT/bin/mcp_policy.py" deliver --catalog "$T/cfg/state/mcp-catalog.json" --claude-json "$T/claude.json" >/dev/null
+"$PY3" - "$clone_roots/dflow_plm" "$clone_roots/dflow_plm/designflow-frontend" <<'PY' && ok "nested dflow_plm parent + child receive Claude, Codex, Antigravity, ZCode, MiMoCode MCPs" || bad "nested multi-harness delivery wrong"
+import json, os, sys, tomllib
+parent, child = sys.argv[1], sys.argv[2]
+assert json.load(open(os.path.join(parent, ".mcp.json")))["mcpServers"]["ag-grid"]["command"] == "/usr/bin/node"
+assert not os.path.exists(os.path.join(child, ".mcp.json"))
+for d in (parent, child):
+    t = tomllib.load(open(os.path.join(d, ".codex", "config.toml"), "rb"))
+    assert t["mcp_servers"]["ag-grid"]["args"] == ["/l/guard.mjs", "npx", "-y", "ag-mcp"], t
+    p = json.load(open(os.path.join(d, ".agents", "plugins", "ai-devops-project-mcp", "plugin.json")))
+    m = json.load(open(os.path.join(d, ".agents", "plugins", "ai-devops-project-mcp", "mcp_config.json")))
+    assert p["version"] == "1.0.0" and m["mcpServers"]["ag-grid"]["command"] == "/usr/bin/node"
+    z = json.load(open(os.path.join(d, ".zcode", "config.json")))
+    assert z["mcp"]["servers"]["ag-grid"]["timeoutMs"] == 120000
+    mm = json.load(open(os.path.join(d, ".mimocode", "mimocode.json")))
+    assert mm["mcp"]["ag-grid"]["type"] == "local" and mm["mcp"]["ag-grid"]["command"] == ["/usr/bin/node", "/l/guard.mjs", "npx", "-y", "ag-mcp"]
+PY
+
 rm "$T/cfg/state/mcp-catalog.json"
 "$ROOT/bin/setup-desktop-apps.sh" | grep -q "run bin/setup-secrets.sh first" && ok "missing catalog is a no-op" || bad "missing catalog not reported"
 

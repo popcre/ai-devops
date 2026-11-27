@@ -629,7 +629,7 @@ skill_clone_roots() {
     printf '%s\n' "${AI_SKILL_CLONE_ROOTS//:/$'\n'}"
     return 0
   fi
-  local roots=("/c/repos" "/c/worksp" "/worksp" "$BASE_HOME/repos")
+  local roots=("/c/repos" "/c/worksp" "/d/repos" "/d/worksp" "/worksp" "$BASE_HOME/repos")
   local r
   for r in "${roots[@]}"; do
     [[ -d "$r" ]] && printf '%s\n' "$r"
