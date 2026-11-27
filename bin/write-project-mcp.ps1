@@ -87,7 +87,7 @@ function Add-GitLocalExclude([string]$Root, [string[]]$Patterns) {
   New-Item -ItemType Directory -Force -Path (Split-Path -Parent $exclude) | Out-Null
   $existing = if (Test-Path -LiteralPath $exclude) { @(Get-Content -LiteralPath $exclude) } else { @() }
   foreach ($pat in $Patterns) {
-    $rel = $pat.TrimStart('/')
+    $rel = $pat.Trim('/')
     git -C $Root check-ignore -q $rel 2>$null
     if ($LASTEXITCODE -eq 0) { continue }
     if ($existing -notcontains $pat) {
